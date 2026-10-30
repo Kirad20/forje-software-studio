@@ -204,10 +204,10 @@ studioApi.delete("/tokens/:id", async (c) => {
 
 const projectView = async (p: projects.Project) => ({
   ...p,
-  previewUrl: previewUrl(p.id),
+  previewUrl: previewUrl(p),
   previewOrigin: previewOrigin(p.id),
   // A private app's link carries the share token, like the preview's.
-  appUrl: p.slug ? (p.visibility === "private" ? `${appUrl(p.slug)}/?share=${shareToken(p.id)}` : appUrl(p.slug)) : null,
+  appUrl: p.slug ? (p.visibility === "private" ? `${appUrl(p.slug)}/?share=${shareToken(p, 365)}` : appUrl(p.slug)) : null,
   suggestedSlug: p.slug ?? suggestSlug(p.name),
   building: isBuilding(p.id),
   hasUnpublishedChanges: p.slug ? await projects.hasUnpublishedChanges(p.id) : false,
@@ -322,6 +322,19 @@ studioApi.get("/projects/:id/services", async (c) => {
 });
 
 studioApi.get("/projects/:id/analytics", async (c) => c.json(await analyticsSummary(pid(c), Number(c.req.query("days") ?? 7))));
+
+// Share links: Floot-style 7-day development links, and revoking every link at once.
+studioApi.post("/projects/:id/share-link", async (c) => {
+  const { days } = await c.req.json<{ days?: number }>().catch(() => ({ days: 7 }));
+  const d = Math.min(Math.max(Number(days) || 7, 1), 30);
+  return c.json({ url: previewUrl(c.get("project"), d), expiresAt: new Date(Date.now() + d * 86_400_000).toISOString() });
+});
+studioApi.post("/projects/:id/share-links/revoke", async (c) => {
+  const denied = ownerOnly(c);
+  if (denied) return denied;
+  await projects.revokeShareLinks(pid(c));
+  return c.json({ project: await projectView((await projects.getProject(pid(c)))!) });
+});
 
 // Collaborators
 studioApi.get("/projects/:id/members", async (c) => {

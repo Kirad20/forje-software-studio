@@ -35,6 +35,8 @@ export interface Project {
   systemPrompt: string;
   designPrompt: string;
   seo: SeoSettings;
+  /** Bumped to revoke every preview and private-app link handed out so far. */
+  shareEpoch: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -43,7 +45,7 @@ const PROJECT_COLS = `id, owner_id as "ownerId", name, description, slug, visibi
   email_domain as "emailDomain", email_domain_verified as "emailDomainVerified",
   published_version_id as "publishedVersionId", published_at as "publishedAt",
   favorite, archived, folder_id as "folderId", last_opened_at as "lastOpenedAt",
-  system_prompt as "systemPrompt", design_prompt as "designPrompt", seo,
+  system_prompt as "systemPrompt", design_prompt as "designPrompt", seo, share_epoch as "shareEpoch",
   created_at as "createdAt", updated_at as "updatedAt"`;
 
 /** The only places a project file may live; mirrors the conventions the builder is taught. */
@@ -112,6 +114,10 @@ export async function updateProject(id: string, patch: ProjectPatch) {
     sets.push(`${PATCHABLE[k]} = $${params.length}`);
   }
   if (sets.length) await q(`update projects set ${sets.join(", ")} where id = $1`, params);
+}
+
+export async function revokeShareLinks(id: string) {
+  await q(`update projects set share_epoch = share_epoch + 1 where id = $1`, [id]);
 }
 
 export async function markOpened(id: string) {

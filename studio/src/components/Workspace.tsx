@@ -538,16 +538,32 @@ export function ProjectSettings({ project, onChange }: { project: Project; onCha
           <div className="row-setting">
             <div>
               <strong>Compartir</strong>
-              <div className="small muted">Un enlace a la vista previa en vivo, sin iniciar sesión.</div>
+              <div className="small muted">Un enlace de 7 días a la vista previa en vivo, sin iniciar sesión. Quien lo abra ve los datos reales de la app.</div>
             </div>
-            <button
-              onClick={async () => {
-                setCopied(await copyText(project.previewUrl));
-                setTimeout(() => setCopied(false), 1500);
-              }}
-            >
-              {copied ? "✓ Copiado" : "⧉ Copiar enlace de vista previa"}
-            </button>
+            <div className="row">
+              <button
+                onClick={async () => {
+                  const r = await api<{ url: string }>(`/projects/${project.id}/share-link`, { body: { days: 7 } });
+                  setCopied(await copyText(r.url));
+                  setTimeout(() => setCopied(false), 1500);
+                }}
+              >
+                {copied ? "✓ Copiado" : "⧉ Copiar enlace (7 días)"}
+              </button>
+              {project.access !== "editor" && (
+                <button
+                  className="danger"
+                  title="Invalida todos los enlaces de vista previa y de app privada compartidos hasta ahora"
+                  onClick={async () => {
+                    if (!confirm("¿Revocar todos los enlaces compartidos? Quien los tenga perderá el acceso; tú seguirás viendo la vista previa.")) return;
+                    await api(`/projects/${project.id}/share-links/revoke`, { body: {} });
+                    onChange();
+                  }}
+                >
+                  Revocar enlaces
+                </button>
+              )}
+            </div>
           </div>
           <div className="row-setting">
             <div>

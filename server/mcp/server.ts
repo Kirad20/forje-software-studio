@@ -77,7 +77,7 @@ function buildServer(account: Account) {
         }
         case "create_project": {
           const p = await createProject(account.id, String(args.name), String(args.description ?? ""));
-          return text(`Proyecto creado: ${p.id}\nVista previa en vivo: ${previewUrl(p.id)}`);
+          return text(`Proyecto creado: ${p.id}\nVista previa en vivo (7 días): ${previewUrl(p, 7)}`);
         }
         case "get_guide":
           return text(BUILDER_SYSTEM_PROMPT);

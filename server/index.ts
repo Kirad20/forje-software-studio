@@ -37,8 +37,8 @@ async function resolveApp(host: string | undefined, url: URL, cookieHeader: stri
   if (!project || (env === "published" && !project.publishedVersionId)) return { project: undefined, env, allowed: false, fromQuery: false };
   // Previews and private apps need the share token, once from the link, then from a cookie.
   const needsToken = env === "preview" || project.visibility === "private";
-  const fromQuery = checkShareToken(project.id, url.searchParams.get("share"));
-  const allowed = !needsToken || fromQuery || checkShareToken(project.id, parseCookies(cookieHeader)[SHARE_COOKIE]);
+  const fromQuery = checkShareToken(project, url.searchParams.get("share"));
+  const allowed = !needsToken || fromQuery || checkShareToken(project, parseCookies(cookieHeader)[SHARE_COOKIE]);
   return { project, env, allowed, fromQuery };
 }
 

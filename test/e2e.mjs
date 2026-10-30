@@ -349,6 +349,21 @@ jar.localhost = ownerCookie;
 let limited = 0;
 for (let i = 0; i < 7; i++) if ((await req("POST", "/api/auth/request", { body: { email: "spam@example.com" } })).status === 429) limited++;
 ok(limited >= 2, "login code requests are rate limited");
+// Share links expire and can be revoked all at once.
+const link = await req("POST", `/api/projects/${project.id}/share-link`, { body: { days: 7 } });
+const linkToken = new URL(link.json.url).searchParams.get("share");
+ok((await req("GET", `/?share=${linkToken}`, { host: pv })).status === 302, "7-day share link opens the preview");
+const savedPv = jar[pv];
+jar[pv] = "";
+const tampered = linkToken.replace(/^(\d+)\.(\w+)\./, (_, e) => `${e}.zzzzzz.`);
+ok((await req("GET", `/?share=${tampered}`, { host: pv })).status === 403, "share link with a forged expiry is refused");
+jar[pv] = savedPv;
+await req("POST", `/api/projects/${project.id}/share-links/revoke`, { body: {} });
+ok((await req("GET", "/", { host: pv })).status === 403, "revoking links kills cookies already handed out");
+ok((await req("GET", `/?share=${linkToken}`, { host: pv })).status === 403, "revoked link no longer works");
+const fresh = new URL((await req("GET", `/api/projects/${project.id}`)).json.project.previewUrl).searchParams.get("share");
+ok((await req("GET", `/?share=${fresh}`, { host: pv })).status === 302, "new links work after revoking");
+
 console.log(process.exitCode ? "\nSOME CHECKS FAILED" : "\nALL CHECKS PASSED");
 if (process.exitCode) console.log("\n--- server log ---\n" + serverLog.slice(-4000));
 finish();

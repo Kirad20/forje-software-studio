@@ -317,7 +317,7 @@ export const builderTools: BuilderTool[] = [
     description: "Devuelve el enlace de la vista previa en vivo.",
     input_schema: obj({}),
     async run(_i, ctx) {
-      return previewUrl(ctx.projectId);
+      return previewUrl((await projects.getProject(ctx.projectId))!, 7);
     },
   },
 ];

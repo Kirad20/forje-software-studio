@@ -3,26 +3,46 @@ import { config } from "../config.js";
 
 /**
  * Every app runs on its own origin so its code can never reach the studio's session:
- *   preview   → pv-<projectId>.localhost:<port>  (needs the share token)
+ *   preview   → pv-<projectId>.localhost:<port>  (needs a share token)
  *   published → <slug>.localhost:<port>
  * Browsers resolve any *.localhost name to the loopback address.
  */
 const PREVIEW_PREFIX = "pv-";
+const DAY = 24 * 3600_000;
 
 const withHost = (sub: string) => config.publicUrl.replace("://", `://${sub}.`);
 
-export const shareToken = (projectId: string) =>
-  createHmac("sha256", config.secretsKey).update(`preview:${projectId}`).digest("base64url").slice(0, 24);
+/** What a share token needs to know about its project. */
+export interface ShareScope {
+  id: string;
+  shareEpoch: number;
+}
 
-export function checkShareToken(projectId: string, token: string | undefined | null) {
+const sign = (projectId: string, epoch: number, exp: string) =>
+  createHmac("sha256", config.secretsKey).update(`share:${projectId}:${epoch}:${exp}`).digest("base64url").slice(0, 22);
+
+/**
+ * `<epoch>.<expiry>.<signature>`. Tokens expire, and bumping the project's share epoch
+ * ("revoke links") invalidates every token handed out before, including ones already
+ * traded for a cookie.
+ */
+export function shareToken(p: ShareScope, days = 30) {
+  const exp = Math.floor((Date.now() + days * DAY) / 1000).toString(36);
+  return `${p.shareEpoch}.${exp}.${sign(p.id, p.shareEpoch, exp)}`;
+}
+
+export function checkShareToken(p: ShareScope, token: string | undefined | null) {
   if (!token) return false;
-  const a = Buffer.from(token);
-  const b = Buffer.from(shareToken(projectId));
+  const [epoch, exp, sig] = token.split(".");
+  if (!epoch || !exp || !sig || Number(epoch) !== p.shareEpoch) return false;
+  if (parseInt(exp, 36) * 1000 < Date.now()) return false;
+  const a = Buffer.from(sig);
+  const b = Buffer.from(sign(p.id, p.shareEpoch, exp));
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
 export const previewOrigin = (projectId: string) => withHost(`${PREVIEW_PREFIX}${projectId}`);
-export const previewUrl = (projectId: string, path = "/") => `${previewOrigin(projectId)}${path}?share=${shareToken(projectId)}`;
+export const previewUrl = (p: ShareScope, days = 30, path = "/") => `${previewOrigin(p.id)}${path}?share=${shareToken(p, days)}`;
 export const appUrl = (slug: string) => withHost(slug);
 
 /** Reads the subdomain of `*.localhost` (or of PUBLIC_URL's host) from a Host header. */

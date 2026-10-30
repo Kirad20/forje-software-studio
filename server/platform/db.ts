@@ -141,6 +141,7 @@ alter table projects add column if not exists last_opened_at timestamptz not nul
 alter table projects add column if not exists system_prompt text not null default '';
 alter table projects add column if not exists design_prompt text not null default '';
 alter table projects add column if not exists seo jsonb not null default '{}';
+alter table projects add column if not exists share_epoch integer not null default 0;
 -- One row per write, holding what each touched file looked like before, so any point can be restored.
 create table if not exists project_changes (
   id serial primary key,
