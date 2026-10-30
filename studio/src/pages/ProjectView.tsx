@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, type Project } from "../api";
 import { UserMenu, type Me } from "../App";
+import { TurnDetails, type TurnDetail } from "../components/Changes";
 import { Chat, type SelectedElement } from "../components/Chat";
 import type { Problem } from "../components/Problems";
 import { External, Refresh } from "../components/Icons";
@@ -9,7 +10,7 @@ import { AnalyticsPanel, DataPanel, DocsPanel, IntegrationsPanel, PaymentsPanel,
 import { Avatar, copyText, Menu, MenuItem, useDismiss } from "../components/ui";
 import { CheckpointPanel, Collaborators, DEVICES, PagePalette, PreviewCanvas, ProjectSettings, PublishPanel, type Device, type PreviewHandle } from "../components/Workspace";
 
-type View = "preview" | "services" | "settings";
+type View = "preview" | "services" | "settings" | "details";
 type ServiceKey = "data" | "users" | "ai" | "integrations" | "analytics" | "seo" | "docs" | "jobs" | "storage" | "email" | "payments" | "logs" | "code";
 type LogLine = { at: string; env: string; level: string; source: string; message: string };
 
@@ -59,8 +60,11 @@ export function ProjectView({ id, me, onCredits }: { id: string; me: Me; onCredi
   const [problems, setProblems] = useState<Problem[]>([]);
   const [fixNonce, setFixNonce] = useState(0);
   const [chatKey, setChatKey] = useState(0);
+  const [detail, setDetail] = useState<TurnDetail | null>(null);
+  const [insert, setInsert] = useState<{ text: string; nonce: number } | null>(null);
   const preview = useRef<PreviewHandle>(null);
   const closePanel = useCallback(() => setPanel(null), []);
+  const closeDetails = useCallback(() => setView("preview"), []);
   const checkpointRef = useDismiss<HTMLDivElement>(panel === "checkpoints", closePanel);
   const publishRef = useDismiss<HTMLDivElement>(panel === "publish", closePanel);
 
@@ -183,6 +187,8 @@ export function ProjectView({ id, me, onCredits }: { id: string; me: Me; onCredi
                   ×
                 </button>
               </span>
+            ) : view === "details" ? (
+              <span className="page-chip">✎ Detalles del cambio</span>
             ) : (
               <span className="page-chip">⚙ Ajustes del proyecto</span>
             )}
@@ -286,8 +292,15 @@ export function ProjectView({ id, me, onCredits }: { id: string; me: Me; onCredi
         {drawer ? (
           <aside className="drawer">
             <div className="drawer-head">
-              <strong className="grow">✦ Constructor</strong>
-              <span className="small muted">{me.credits.toLocaleString()} créditos</span>
+              <strong className="grow">
+                <span className="drawer-mark" aria-hidden>
+                  ✦
+                </span>{" "}
+                Constructor
+              </strong>
+              <span className="credits-pill" title="Créditos de la cuenta dueña">
+                ◎ {me.credits.toLocaleString()}
+              </span>
               <button className="sm icon-btn ghost" aria-label="Cerrar chat" onClick={toggleDrawer}>
                 ×
               </button>
@@ -297,6 +310,16 @@ export function ProjectView({ id, me, onCredits }: { id: string; me: Me; onCredi
               onBuildingChange={setBuilding}
               selection={selection}
               onClearSelection={() => setSelection(null)}
+              onSelectElement={() => {
+                setView("preview");
+                if (!selecting) toggleSelect();
+              }}
+              onOpenDetails={(d) => {
+                setDetail(d);
+                setView("details");
+              }}
+              onRestored={() => preview.current?.reload()}
+              insert={insert}
               problems={problems}
               fixNonce={fixNonce}
               reloadKey={chatKey}
@@ -351,6 +374,22 @@ export function ProjectView({ id, me, onCredits }: { id: string; me: Me; onCredi
             </div>
           )}
           {view === "settings" && <ProjectSettings project={project} onChange={load} />}
+          {view === "details" && detail && (
+            <TurnDetails
+              projectId={id}
+              detail={detail}
+              reloadKey={filesKey}
+              onBack={closeDetails}
+              onOpenFile={(file) => {
+                setCodeFile(file);
+                openService("code");
+              }}
+              onMention={(file) => {
+                if (!drawer) toggleDrawer();
+                setInsert({ text: `@${file} `, nonce: Date.now() });
+              }}
+            />
+          )}
         </section>
       </div>
       {palette && (

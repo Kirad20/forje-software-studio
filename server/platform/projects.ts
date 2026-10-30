@@ -256,6 +256,66 @@ export async function listChanges(projectId: string, limit = 300): Promise<Chang
   );
 }
 
+export interface TurnFileChange {
+  path: string;
+  kind: "create" | "edit" | "delete";
+  before: string | null;
+  after: string | null;
+  /** Binary or very large files are listed without their content. */
+  omitted?: boolean;
+}
+
+const DIFFABLE_MAX = 200_000;
+const diffable = (s: string | null) => s === null || (!s.startsWith("base64:") && s.length <= DIFFABLE_MAX);
+
+/**
+ * What one chat turn did to the code: every file the builder touched between the turn's
+ * first message and the next turn, as it was before and as it was when the turn ended.
+ * `restoreTo` is the last change before the turn, for "restore to before this turn".
+ */
+export async function turnChanges(projectId: string, turnId: string) {
+  const span = await one<{ start: string; last: number }>(
+    `select min(created_at) as start, max(id) as last from chat_messages where project_id = $1 and turn_id = $2`,
+    [projectId, turnId],
+  );
+  if (!span?.start) return null;
+  const next = await one<{ at: string }>(
+    `select created_at as at from chat_messages where project_id = $1 and id > $2 and coalesce(turn_id, '') <> $3 order by id limit 1`,
+    [projectId, span.last, turnId],
+  );
+  const rows = await q<{ id: number; kind: string; paths: string[]; before: Record<string, string | null> }>(
+    `select id, kind, paths, before from project_changes
+     where project_id = $1 and author = 'builder' and created_at >= $2 and ($3::timestamptz is null or created_at < $3)
+     order by id`,
+    [projectId, span.start, next?.at ?? null],
+  );
+  if (!rows.length) return { files: [] as TurnFileChange[], restoreTo: null as number | null, firstChange: null as number | null };
+
+  const first = new Map<string, string | null>();
+  const lastId = new Map<string, number>();
+  for (const r of rows)
+    for (const [path, content] of Object.entries(r.before)) {
+      if (!first.has(path)) first.set(path, content);
+      lastId.set(path, r.id);
+    }
+  const current = await readAllFiles(projectId);
+  const files: TurnFileChange[] = [];
+  for (const [path, before] of first) {
+    // The file as the turn left it: the next change's "before", or what is there now.
+    const later = await one<{ content: string | null }>(
+      `select before -> $3 #>> '{}' as content from project_changes where project_id = $1 and id > $2 and before ? $3 order by id limit 1`,
+      [projectId, lastId.get(path)!, path],
+    );
+    const after = later ? later.content : (current[path] ?? null);
+    if (before === after) continue;
+    const kind = before === null ? "create" : after === null ? "delete" : "edit";
+    const ok = diffable(before) && diffable(after);
+    files.push(ok ? { path, kind, before, after } : { path, kind, before: null, after: null, omitted: true });
+  }
+  const prev = await one<{ id: number | null }>(`select max(id) as id from project_changes where project_id = $1 and id < $2`, [projectId, rows[0]!.id]);
+  return { files: files.sort((a, b) => a.path.localeCompare(b.path)), restoreTo: prev?.id ?? null, firstChange: rows[0]!.id };
+}
+
 /**
  * Puts every file back as it was right after change `changeId`, by undoing all newer
  * changes newest-first. The restore is itself logged, so it can be undone too. Code only:

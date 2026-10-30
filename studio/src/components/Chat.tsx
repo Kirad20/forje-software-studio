@@ -1,34 +1,20 @@
-import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { api, streamPost } from "../api";
 import { AgentLanes, type Lane, type TeamTurn } from "./AgentLanes";
+import { ChangeCard, type TimelineEntry, type TurnDetail } from "./Changes";
 import { GithubCommitCard, type GithubCard } from "./GitHub";
+import { Check, Cross, Send } from "./Icons";
 import { fixMessage, ProblemsBar, type Problem } from "./Problems";
+import { filterSkills, SlashMenu, type Skill } from "./Skills";
+import { copyText, useDismiss } from "./ui";
 
 type Mode = "build" | "chat" | "plan";
-const MODES: Record<Mode, { label: string; hint: string; placeholder: string }> = {
-  build: { label: "Construir", hint: "Hace los cambios directamente", placeholder: "Pide un cambio o una función nueva…" },
-  chat: { label: "Chat", hint: "Pregunta, investiga errores o explora ideas sin cambiar nada (más barato)", placeholder: "Pregunta lo que quieras sobre tu app…" },
-  plan: { label: "Plan", hint: "Prepara un plan detallado para revisarlo antes de construir", placeholder: "Describe lo que quieres planificar…" },
+const MODES: Record<Mode, { label: string; hint: string; placeholder: string; icon: string }> = {
+  build: { label: "Construir", hint: "Hace los cambios directamente", placeholder: "Pide un cambio o una función nueva…", icon: "✦" },
+  chat: { label: "Chat", hint: "Pregunta, investiga errores o explora ideas sin cambiar nada (más barato)", placeholder: "Pregunta lo que quieras sobre tu app…", icon: "◌" },
+  plan: { label: "Plan", hint: "Prepara un plan detallado para revisarlo antes de construir", placeholder: "Describe lo que quieres planificar…", icon: "◇" },
 };
-
-/** The owner's text; pasted errors (```…```) render as code blocks. */
-function UserText({ text }: { text: string }) {
-  const parts = text.split(/```\n?/);
-  return (
-    <>
-      {parts.map((p, i) =>
-        i % 2 ? (
-          <pre key={i} className="user-code">
-            {p.trimEnd()}
-          </pre>
-        ) : (
-          <Fragment key={i}>{p}</Fragment>
-        ),
-      )}
-    </>
-  );
-}
-import { Check, Cross, Send } from "./Icons";
+const MODE_ORDER: Mode[] = ["build", "chat", "plan"];
 
 type Block =
   | { type: "text"; text: string }
@@ -86,13 +72,15 @@ interface Step {
   output?: string;
 }
 
-/** A rendered turn item: user text, assistant text, or a group of tool steps. */
-type Item =
+/** A rendered chat item. `turn` ties it to the turn it belongs to (for change cards and details). */
+type Item = (
   | { kind: "user"; text: string; element?: string; attachments?: string[] }
   | { kind: "ai"; text: string }
   | { kind: "steps"; steps: Step[] }
   | { kind: "team"; team: TeamTurn }
-  | { kind: "github"; card: GithubCard };
+  | { kind: "github"; card: GithubCard }
+  | { kind: "changes"; title: string }
+) & { turn?: string | null };
 
 /** An element picked with the Select tool in the preview. */
 export interface SelectedElement {
@@ -134,6 +122,13 @@ function readAsDataUrl(file: File): Promise<string> {
   });
 }
 
+/** Stable id for a reply, so a bookmark survives reloads. */
+function markId(text: string) {
+  let h = 5381;
+  for (let i = 0; i < text.length; i++) h = ((h << 5) + h + text.charCodeAt(i)) | 0;
+  return (h >>> 0).toString(36);
+}
+
 const TOOL_LABEL: Record<string, string> = {
   list_files: "Revisó los archivos",
   read_files: "Leyó",
@@ -146,6 +141,7 @@ const TOOL_LABEL: Record<string, string> = {
   query_database: "Consultó",
   check_build: "Comprobó que compila",
   get_logs: "Leyó los registros",
+  get_problems: "Revisó los problemas",
   list_secrets: "Revisó los secretos",
   request_secret: "Pidió el secreto",
   setup_auth: "Preparó el inicio de sesión",
@@ -154,14 +150,25 @@ const TOOL_LABEL: Record<string, string> = {
   create_checkpoint: "Checkpoint",
   publish_app: "Publicó la app",
   get_preview_url: "Enlace de vista previa",
+  submit_plan: "Planificó",
+  report_review: "Revisó el resultado",
 };
+const ROLE_LABEL: Record<string, string> = { planner: "Planificador", data: "Datos", backend: "Backend", ui: "Interfaz", qa: "Revisión", chat: "Chat" };
+const WRITES = new Set(["write_file", "edit_file", "delete_file", "rename_file"]);
 
 function summarize(name: string, input: Record<string, unknown>) {
   if (typeof input.path === "string") return input.path;
   if (Array.isArray(input.paths)) return (input.paths as string[]).join(", ");
+  if (typeof input.from === "string" && typeof input.to === "string") return `${input.from} → ${input.to}`;
   if (typeof input.sql === "string") return input.sql.replace(/\s+/g, " ").slice(0, 70);
   if (typeof input.name === "string") return input.name;
   return "";
+}
+
+/** A change card's title: the request that started the turn, in one line. */
+function turnTitle(text: string) {
+  const line = text.replace(/```[\s\S]*?```/g, " ").replace(/\s+/g, " ").trim();
+  return line.length > 72 ? `${line.slice(0, 70).trimEnd()}…` : line || "Cambios";
 }
 
 function toItems(messages: Message[], tasks: TaskRow[] = []): Item[] {
@@ -171,90 +178,307 @@ function toItems(messages: Message[], tasks: TaskRow[] = []): Item[] {
   for (const t of tasks) byTurn.set(t.turnId, [...(byTurn.get(t.turnId) ?? []), t]);
   const shown = new Set<string>();
   const items: Item[] = [];
-  const pushStep = (s: Step) => {
+  const wrote = new Set<string>();
+  const firstText = new Map<string, string>();
+  const pushStep = (s: Step, turn: string | null) => {
     const last = items[items.length - 1];
-    if (last?.kind === "steps") last.steps.push(s);
-    else items.push({ kind: "steps", steps: [s] });
+    if (last?.kind === "steps" && last.turn === turn) last.steps.push(s);
+    else items.push({ kind: "steps", steps: [s], turn });
   };
   for (const m of messages) {
+    const turn = m.turnId ?? null;
     // Multi-agent turns: the lanes go right before the turn's reply.
-    if (m.role === "assistant" && m.turnId && !shown.has(m.turnId) && byTurn.has(m.turnId)) {
-      shown.add(m.turnId);
-      items.push({ kind: "team", team: teamOf(byTurn.get(m.turnId)!) });
+    if (m.role === "assistant" && turn && !shown.has(turn) && byTurn.has(turn)) {
+      shown.add(turn);
+      const rows = byTurn.get(turn)!;
+      if (rows.some((t) => (t.steps ?? []).some((s) => s.ok && WRITES.has(s.tool)))) wrote.add(turn);
+      items.push({ kind: "team", team: teamOf(rows), turn });
     }
     for (const b of m.content) {
-      if (b.type === "github") items.push({ kind: "github", card: b });
-      if (b.type === "text" && b.text.trim()) items.push(m.role === "user" ? userItem(b.text) : { kind: "ai", text: b.text });
+      if (b.type === "github") items.push({ kind: "github", card: b, turn });
+      if (b.type === "text" && b.text.trim()) {
+        if (m.role === "user") {
+          const it = userItem(b.text);
+          if (turn && !firstText.has(turn) && it.kind === "user") firstText.set(turn, it.text);
+          items.push({ ...it, turn });
+        } else items.push({ kind: "ai", text: b.text, turn });
+      }
       if (b.type === "tool_use") {
         const r = results.get(b.id);
-        pushStep({ id: b.id, name: b.name, summary: summarize(b.name, b.input), state: !r ? "err" : r.is_error ? "err" : "ok", output: r?.content });
+        const ok = !!r && !r.is_error;
+        if (ok && turn && WRITES.has(b.name)) wrote.add(turn);
+        pushStep({ id: b.id, name: b.name, summary: summarize(b.name, b.input), state: ok ? "ok" : "err", output: r?.content }, turn);
       }
     }
+  }
+  // A change card closes each turn that wrote code.
+  for (let i = items.length - 1; i >= 0; i--) {
+    const t = items[i]!.turn;
+    if (!t || !wrote.has(t) || items[i + 1]?.turn === t) continue;
+    wrote.delete(t);
+    items.splice(i + 1, 0, { kind: "changes", title: turnTitle(firstText.get(t) ?? ""), turn: t });
   }
   return items;
 }
 
-/** Just enough markdown for builder replies: paragraphs, lists, **bold**, `code`. */
+/** What the details view lists for a turn: the request, the steps and the replies, in order. */
+function timelineOf(items: Item[], turn: string): TimelineEntry[] {
+  const out: TimelineEntry[] = [];
+  for (const it of items) {
+    if (it.turn !== turn) continue;
+    if (it.kind === "user") out.push({ kind: "user", text: it.text });
+    else if (it.kind === "ai") out.push({ kind: "text", text: it.text });
+    else if (it.kind === "steps") for (const s of it.steps) out.push({ kind: "step", label: TOOL_LABEL[s.name] ?? s.name, summary: s.summary, ok: s.state !== "err" });
+    else if (it.kind === "team")
+      for (const l of it.team.lanes)
+        for (const s of l.steps)
+          out.push({ kind: "step", label: [ROLE_LABEL[l.role], TOOL_LABEL[s.name] ?? s.name].filter(Boolean).join(" · "), summary: s.name === "submit_plan" || s.name === "report_review" ? "" : s.summary, ok: s.state !== "err" });
+  }
+  return out;
+}
+
+const inline = (s: string): ReactNode[] =>
+  s.split(/(`[^`]+`|\*\*[^*]+\*\*)/g).map((part, i) =>
+    part.startsWith("`") && part.endsWith("`") && part.length > 1 ? (
+      <code key={i}>{part.slice(1, -1)}</code>
+    ) : part.startsWith("**") && part.endsWith("**") && part.length > 3 ? (
+      <strong key={i}>{part.slice(2, -2)}</strong>
+    ) : (
+      <Fragment key={i}>{part}</Fragment>
+    ),
+  );
+
+/** Just enough markdown for builder replies: headings, paragraphs, lists, code blocks, **bold**, `code`. */
 function Markdown({ text }: { text: string }) {
-  const inline = (s: string): ReactNode[] =>
-    s.split(/(`[^`]+`|\*\*[^*]+\*\*)/g).map((part, i) =>
-      part.startsWith("`") && part.endsWith("`") ? (
-        <code key={i}>{part.slice(1, -1)}</code>
-      ) : part.startsWith("**") && part.endsWith("**") ? (
-        <strong key={i}>{part.slice(2, -2)}</strong>
-      ) : (
-        <Fragment key={i}>{part}</Fragment>
-      ),
-    );
-  const blocks = text.replace(/```[\s\S]*?```/g, "").split(/\n{2,}/);
+  const parts = text.split(/```[^\n]*\n?/);
   return (
     <>
-      {blocks.map((b, i) => {
-        const lines = b.split("\n").filter(Boolean);
-        if (lines.length && lines.every((l) => /^\s*([-*]|\d+\.)\s/.test(l)))
-          return (
-            <ul key={i}>
-              {lines.map((l, j) => (
-                <li key={j}>{inline(l.replace(/^\s*([-*]|\d+\.)\s/, ""))}</li>
-              ))}
-            </ul>
-          );
-        return (
-          <p key={i}>
-            {lines.map((l, j) => (
-              <Fragment key={j}>
-                {j > 0 && <br />}
-                {inline(l.replace(/^#+\s*/, ""))}
-              </Fragment>
-            ))}
-          </p>
-        );
-      })}
+      {parts.map((chunk, k) =>
+        k % 2 ? (
+          <pre key={k} className="md-code">
+            {chunk.trimEnd()}
+          </pre>
+        ) : (
+          chunk
+            .split(/\n{2,}/)
+            .filter((b) => b.trim())
+            .map((b, i) => {
+              const lines = b.split("\n").filter(Boolean);
+              if (lines.length && lines.every((l) => /^\s*([-*]|\d+\.)\s/.test(l))) {
+                const List = /^\s*\d+\./.test(lines[0]!) ? "ol" : "ul";
+                return (
+                  <List key={`${k}-${i}`}>
+                    {lines.map((l, j) => (
+                      <li key={j}>{inline(l.replace(/^\s*([-*]|\d+\.)\s/, ""))}</li>
+                    ))}
+                  </List>
+                );
+              }
+              if (lines.length === 1 && /^#{1,4}\s/.test(lines[0]!)) return <h4 key={`${k}-${i}`}>{inline(lines[0]!.replace(/^#+\s*/, ""))}</h4>;
+              return (
+                <p key={`${k}-${i}`}>
+                  {lines.map((l, j) => (
+                    <Fragment key={j}>
+                      {j > 0 && <br />}
+                      {inline(l.replace(/^#+\s*/, ""))}
+                    </Fragment>
+                  ))}
+                </p>
+              );
+            })
+        ),
+      )}
+    </>
+  );
+}
+
+const MENTION = /(@(?:[\w$.-]+\/)*[\w$.-]+\.\w+)/g;
+
+/** The owner's text; pasted errors (```…```) render as code blocks and @file mentions as chips. */
+function UserText({ text }: { text: string }) {
+  const parts = text.split(/```\n?/);
+  return (
+    <>
+      {parts.map((p, i) =>
+        i % 2 ? (
+          <pre key={i} className="user-code">
+            {p.trimEnd()}
+          </pre>
+        ) : (
+          <Fragment key={i}>
+            {p.split(MENTION).map((s, j) =>
+              j % 2 ? (
+                <span key={j} className="mention" title={s.slice(1)}>
+                  {s.slice(1).split("/").pop()}
+                </span>
+              ) : (
+                <Fragment key={j}>{s}</Fragment>
+              ),
+            )}
+          </Fragment>
+        ),
+      )}
+    </>
+  );
+}
+
+/** Long requests fold to a few lines, like pasted logs. */
+function UserBubble({ text }: { text: string }) {
+  const long = text.length > 420 || text.split("\n").length > 8;
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <div className={long && !open ? "folded" : undefined}>
+        <UserText text={text} />
+      </div>
+      {long && (
+        <button className="link-btn" onClick={() => setOpen((o) => !o)}>
+          {open ? "Mostrar menos" : "Mostrar más"}
+        </button>
+      )}
     </>
   );
 }
 
 function Steps({ steps }: { steps: Step[] }) {
   const [open, setOpen] = useState<string | null>(null);
+  const [all, setAll] = useState(false);
+  const running = steps.some((s) => s.state === "running");
+  // Long runs fold to the last few steps, with a count of the rest.
+  const shown = all || running || steps.length <= 5 ? steps : steps.slice(-3);
   return (
     <div className="steps">
-      {steps.map((s) => (
+      {shown.length < steps.length && (
+        <button className="link-btn small" onClick={() => setAll(true)}>
+          + {steps.length - shown.length} pasos más
+        </button>
+      )}
+      {shown.map((s) => (
         <div key={s.id}>
-          <div className={`step ${s.state === "err" ? "err" : ""}`} onClick={() => setOpen(open === s.id ? null : s.id)} style={{ cursor: "pointer" }}>
+          <button className={`step ${s.state === "err" ? "err" : ""}`} aria-expanded={open === s.id} onClick={() => setOpen(open === s.id ? null : s.id)} disabled={!s.output}>
             {s.state === "running" ? <span className="spinner" style={{ width: 11, height: 11 }} /> : s.state === "ok" ? <Check /> : <Cross />}
             <span>{TOOL_LABEL[s.name] ?? s.name}</span>
             {s.summary && <span className="what">{s.summary}</span>}
-          </div>
-          {open === s.id && s.output && (
-            <pre className="card" style={{ margin: "4px 0", padding: 8, maxHeight: 220, overflow: "auto", fontSize: 11.5, boxShadow: "none", whiteSpace: "pre-wrap" }}>
-              {s.output}
-            </pre>
-          )}
+          </button>
+          {open === s.id && s.output && <pre className="step-output">{s.output}</pre>}
         </div>
       ))}
     </div>
   );
 }
+
+// --- Composer menus ------------------------------------------------------------------------------
+
+function ModeMenu({ mode, onChange }: { mode: Mode; onChange: (m: Mode) => void }) {
+  const [open, setOpen] = useState(false);
+  const ref = useDismiss<HTMLDivElement>(open, () => setOpen(false));
+  return (
+    <div className="menu-anchor" ref={ref}>
+      <button className={`mode-btn ${mode}`} aria-haspopup="listbox" aria-expanded={open} title={`${MODES[mode].hint} · Alt+P`} onClick={() => setOpen((o) => !o)}>
+        <span aria-hidden>{MODES[mode].icon}</span> {MODES[mode].label} <span className="caret">▾</span>
+      </button>
+      {open && (
+        <div className="popover up left mode-menu" role="listbox" aria-label="Modo del chat">
+          {MODE_ORDER.map((m) => (
+            <button
+              key={m}
+              role="option"
+              aria-selected={mode === m}
+              className="menu-item tall"
+              onClick={() => {
+                onChange(m);
+                setOpen(false);
+              }}
+            >
+              <span className="mode-ico" aria-hidden>
+                {MODES[m].icon}
+              </span>
+              <span className="grow" style={{ textAlign: "left" }}>
+                <span style={{ display: "block", fontWeight: 500 }}>
+                  {MODES[m].label} {m === "chat" && <span className="pill ok tiny">más barato</span>}
+                </span>
+                <span className="small muted" style={{ whiteSpace: "normal" }}>
+                  {MODES[m].hint}
+                </span>
+              </span>
+              {mode === m && <span className="check">✓</span>}
+            </button>
+          ))}
+          <div className="menu-sep" />
+          <div className="small muted kbd-row">
+            Cambiar de modo con <kbd>Alt</kbd> <kbd>P</kbd>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+interface PlusAction {
+  label: string;
+  hint?: string;
+  icon: string;
+  run: () => void;
+}
+
+function PlusMenu({ actions, disabled }: { actions: PlusAction[]; disabled?: boolean }) {
+  const [open, setOpen] = useState(false);
+  const ref = useDismiss<HTMLDivElement>(open, () => setOpen(false));
+  return (
+    <div className="menu-anchor" ref={ref}>
+      <button className={`round-btn ${open ? "on" : ""}`} aria-label="Acciones del chat" aria-expanded={open} disabled={disabled} title="Adjuntar, mencionar archivos, comandos…" onClick={() => setOpen((o) => !o)}>
+        <span style={{ transform: open ? "rotate(45deg)" : undefined, transition: "transform .15s", display: "inline-block" }}>＋</span>
+      </button>
+      {open && (
+        <div className="popover up left plus-menu">
+          {actions.map((a) => (
+            <button
+              key={a.label}
+              className="menu-item"
+              onClick={() => {
+                setOpen(false);
+                a.run();
+              }}
+            >
+              <span className="mode-ico" aria-hidden>
+                {a.icon}
+              </span>
+              <span className="grow" style={{ textAlign: "left" }}>
+                {a.label}
+              </span>
+              {a.hint && <kbd>{a.hint}</kbd>}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MentionMenu({ files, active, onPick, onHover }: { files: string[]; active: number; onPick: (p: string) => void; onHover: (i: number) => void }) {
+  return (
+    <div className="popover up left slash-menu" role="listbox" aria-label="Archivos del proyecto">
+      <div className="menu-label">Mencionar un archivo · ↑↓ Enter</div>
+      {files.length === 0 && <div className="small muted" style={{ padding: "6px 10px" }}>Ningún archivo coincide</div>}
+      {files.map((f, i) => (
+        <button key={f} role="option" aria-selected={i === active} className={`menu-item ${i === active ? "active" : ""}`} onMouseEnter={() => onHover(i)} onMouseDown={(e) => e.preventDefault()} onClick={() => onPick(f)}>
+          <span className="file-ico" aria-hidden>
+            {/^pages\//.test(f) ? "▭" : /^components\//.test(f) ? "⬡" : /^endpoints\//.test(f) ? "⇄" : "▢"}
+          </span>
+          <span className="grow mention-name">{f.split("/").pop()}</span>
+          <span className="small muted mention-path">{f.split("/").slice(0, -1).join("/")}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** Browser dictation (Web Speech API), when the browser has it. */
+type Recognition = { lang: string; interimResults: boolean; continuous: boolean; start(): void; stop(): void; onresult: ((e: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null; onend: (() => void) | null };
+const SpeechCtor: (new () => Recognition) | undefined =
+  typeof window === "undefined" ? undefined : ((window as unknown as Record<string, unknown>).SpeechRecognition ?? (window as unknown as Record<string, unknown>).webkitSpeechRecognition) as (new () => Recognition) | undefined;
+
+const STARTERS = ["Explícame cómo está organizada la app", "Añade un modo oscuro", "Revisa la accesibilidad de la portada"];
 
 export function Chat({
   projectId,
@@ -262,6 +486,10 @@ export function Chat({
   onBuildingChange,
   selection = null,
   onClearSelection = () => {},
+  onSelectElement,
+  onOpenDetails,
+  onRestored,
+  insert,
   problems = [],
   fixNonce = 0,
   reloadKey = 0,
@@ -271,6 +499,14 @@ export function Chat({
   onBuildingChange: (b: boolean) => void;
   selection?: SelectedElement | null;
   onClearSelection?: () => void;
+  /** Starts the preview's element picker (from the + menu). */
+  onSelectElement?: () => void;
+  /** Opens a turn's details (timeline and diffs) in the stage. */
+  onOpenDetails?: (d: TurnDetail) => void;
+  /** Code went back to an earlier point from a change card. */
+  onRestored?: () => void;
+  /** Text to add to the composer from outside (e.g. "Mencionar en el chat"); a new nonce inserts again. */
+  insert?: { text: string; nonce: number } | null;
   /** What is broken in the preview right now (live from the project's event feed). */
   problems?: Problem[];
   /** Bumped when the preview's "Intentar arreglar" button is pressed. */
@@ -279,6 +515,7 @@ export function Chat({
   reloadKey?: number;
 }) {
   const [items, setItems] = useState<Item[]>([]);
+  const [loadCount, setLoadCount] = useState(0);
   const [mode, setModeState] = useState<Mode>(() => {
     try {
       const m = localStorage.getItem("forja:chat-mode");
@@ -293,6 +530,38 @@ export function Chat({
       localStorage.setItem("forja:chat-mode", m);
     } catch {}
   };
+  // Alt+P cycles Construir → Chat → Plan.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!e.altKey || e.code !== "KeyP") return;
+      e.preventDefault();
+      setMode(MODE_ORDER[(MODE_ORDER.indexOf(mode) + 1) % MODE_ORDER.length]!);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode]);
+
+  // Bookmarks (replies and change cards), kept per project in this browser.
+  const bmKey = `forja:bookmarks:${projectId}`;
+  const [bookmarks, setBookmarks] = useState<string[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem(bmKey) ?? "[]") as string[];
+    } catch {
+      return [];
+    }
+  });
+  const [onlyMarked, setOnlyMarked] = useState(false);
+  const toggleBookmark = (id: string) =>
+    setBookmarks((b) => {
+      const next = b.includes(id) ? b.filter((x) => x !== id) : [...b, id];
+      try {
+        localStorage.setItem(bmKey, JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+  const cardMark = (turn: string) => `turn:${turn}`;
+
   // Follow-ups typed while the builder works are sent, in order, when it finishes.
   const [queue, setQueue] = useState<{ text: string; mode: Mode }[]>([]);
   const queueRef = useRef(queue);
@@ -300,16 +569,29 @@ export function Chat({
   const [planTurn, setPlanTurn] = useState<string | null>(null);
   const [live, setLive] = useState<Item[]>([]);
   const [input, setInput] = useState("");
+  const [caret, setCaret] = useState(0);
+  const [menuIdx, setMenuIdx] = useState(0);
   const [attachments, setAttachments] = useState<string[]>([]);
   const [uploading, setUploading] = useState(false);
+  const [dragging, setDragging] = useState(false);
+  const [copied, setCopied] = useState<number | null>(null);
+  const [listening, setListening] = useState(false);
+  const recognition = useRef<Recognition | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
+  const textarea = useRef<HTMLTextAreaElement>(null);
+  const [files, setFiles] = useState<string[] | null>(null);
+  const [building, setBuilding] = useState(false);
+  const [error, setError] = useState("");
+  const logRef = useRef<HTMLDivElement>(null);
+  const started = useRef(false);
+  const stick = useRef(true);
 
-  const attach = async (files: FileList | null) => {
-    if (!files?.length) return;
+  const attach = async (list: FileList | File[] | null) => {
+    if (!list?.length) return;
     setUploading(true);
     setError("");
     try {
-      for (const file of [...files].slice(0, 6)) {
+      for (const file of [...list].slice(0, 6)) {
         if (file.size > 5 * 1024 * 1024) throw new Error(`${file.name} supera 5 MB`);
         const r = await api<{ path: string }>(`/projects/${projectId}/attachments`, { body: { filename: file.name, dataUrl: await readAsDataUrl(file) } });
         setAttachments((a) => [...a, r.path]);
@@ -321,15 +603,12 @@ export function Chat({
       if (fileInput.current) fileInput.current.value = "";
     }
   };
-  const [building, setBuilding] = useState(false);
-  const [error, setError] = useState("");
-  const logRef = useRef<HTMLDivElement>(null);
-  const started = useRef(false);
 
   const load = () =>
     api<{ messages: Message[]; tasks?: TaskRow[]; building: boolean; pendingPlanTurn?: string | null }>(`/projects/${projectId}/chat`).then((r) => {
       setItems(toItems(r.messages, r.tasks));
       setPlanTurn(r.pendingPlanTurn ?? null);
+      setLoadCount((n) => n + 1);
       return r;
     });
 
@@ -345,6 +624,11 @@ export function Chat({
   }, [fixNonce]);
 
   useEffect(() => {
+    if (insert?.text) addToInput(insert.text);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [insert?.nonce]);
+
+  useEffect(() => {
     void load().then((r) => {
       // First message from the dashboard prompt box.
       const first = sessionStorage.getItem(`forja:first:${projectId}`);
@@ -357,19 +641,53 @@ export function Chat({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
+  // Follow the log while it grows, unless the owner scrolled up to read. A jump, not a smooth
+  // scroll: the scroll events of an animation would read as the owner scrolling away.
+  const follow = () => {
+    if (stick.current && logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
+  };
+  useEffect(follow, [items, live, onlyMarked]);
+  // Change cards fill in after the log renders; keep following while they grow.
   useEffect(() => {
-    logRef.current?.scrollTo({ top: logRef.current.scrollHeight, behavior: "smooth" });
-  }, [items, live]);
+    const log = logRef.current;
+    if (!log || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(follow);
+    for (const child of log.children) ro.observe(child);    return () => ro.disconnect();
+  }, [items, live, onlyMarked]);
+
+  // The composer grows with its text, up to a limit.
+  useEffect(() => {
+    const t = textarea.current;
+    if (!t) return;
+    t.style.height = "auto";
+    t.style.height = `${Math.min(t.scrollHeight, 220)}px`;
+  }, [input]);
 
   const setBusy = (b: boolean) => {
     setBuilding(b);
     onBuildingChange(b);
   };
 
+  function addToInput(text: string) {
+    setInput((v) => {
+      const sep = v && !/\s$/.test(v) ? " " : "";
+      const next = `${v}${sep}${text}`;
+      setCaret(next.length);
+      return next;
+    });
+    requestAnimationFrame(() => {
+      const t = textarea.current;
+      if (!t) return;
+      t.focus();
+      t.setSelectionRange(t.value.length, t.value.length);
+    });
+  }
+
   async function send(text: string, opts: { mode?: Mode; implementPlan?: boolean } = {}) {
     if (!text.trim()) return;
     const turnMode = opts.mode ?? mode;
     setInput("");
+    stick.current = true;
     if (building) {
       setQueue((q) => [...q, { text, mode: turnMode }]);
       return;
@@ -434,46 +752,217 @@ export function Chat({
     }
   }
 
+  // "/" at the start opens the skills; "@word" right before the caret opens the file list.
+  const slashSkills = /^\/[^\s]*$/.test(input) ? filterSkills(input.slice(1)) : [];
+  const mention = slashSkills.length ? null : /(^|\s)@([^\s@]*)$/.exec(input.slice(0, caret));
+  useEffect(() => {
+    if (mention && files === null) {
+      setFiles([]);
+      api<{ files: { path: string }[] }>(`/projects/${projectId}/files`)
+        .then((r) => setFiles(r.files.map((f) => f.path).filter((p) => !p.startsWith("static/uploads/"))))
+        .catch(() => setFiles(null));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [!!mention, projectId]);
+  useEffect(() => setFiles(null), [loadCount]);
+  const mentionFiles = useMemo(() => {
+    if (!mention) return [];
+    const q = mention[2]!.toLowerCase();
+    const list = (files ?? []).filter((f) => !q || f.toLowerCase().includes(q));
+    // Names that start with the query first, then the rest.
+    return list.sort((a, b) => Number(!(a.split("/").pop() ?? "").toLowerCase().startsWith(q)) - Number(!(b.split("/").pop() ?? "").toLowerCase().startsWith(q))).slice(0, 30);
+  }, [mention?.[2], files]);
+
+  const pickSkill = (s: Skill) => {
+    setMode(s.mode);
+    setInput(s.prompt);
+    setCaret(s.prompt.length);
+    setMenuIdx(0);
+    // Leave the caret where the owner fills in their part (e.g. after "Objetivo: ").
+    requestAnimationFrame(() => {
+      const t = textarea.current;
+      if (!t) return;
+      t.focus();
+      const at = s.prompt.indexOf(": .") >= 0 ? s.prompt.indexOf(": .") + 2 : s.prompt.length;
+      t.setSelectionRange(at, s.prompt.indexOf(": .") >= 0 ? at + 1 : at);
+    });
+  };
+  const pickFile = (path: string) => {
+    const before = input.slice(0, caret).replace(/@[^\s@]*$/, `@${path} `);
+    const next = before + input.slice(caret);
+    setInput(next);
+    setCaret(before.length);
+    setMenuIdx(0);
+    requestAnimationFrame(() => textarea.current?.setSelectionRange(before.length, before.length));
+  };
+  const startMention = () => {
+    addToInput("@");
+  };
+  const dictate = () => {
+    if (!SpeechCtor) return;
+    if (listening) return recognition.current?.stop();
+    const r = new SpeechCtor();
+    r.lang = navigator.language || "es-ES";
+    r.interimResults = false;
+    r.continuous = true;
+    r.onresult = (e) => {
+      const said = Array.from(e.results)
+        .map((res) => res[0]?.transcript ?? "")
+        .join(" ")
+        .trim();
+      if (said) addToInput(said);
+    };
+    r.onend = () => setListening(false);
+    recognition.current = r;
+    setListening(true);
+    r.start();
+  };
+  useEffect(() => () => recognition.current?.stop(), []);
+
+  const copyMsg = async (i: number, text: string) => {
+    if (await copyText(text)) {
+      setCopied(i);
+      setTimeout(() => setCopied((c) => (c === i ? null : c)), 1200);
+    }
+  };
+
   const all = [...items, ...live];
+  const isMarked = (it: Item) => (it.kind === "ai" && bookmarks.includes(markId(it.text))) || (it.kind === "changes" && !!it.turn && bookmarks.includes(cardMark(it.turn)));
+  const visible = onlyMarked ? all.filter(isMarked) : all;
   const lastTurnIsPlan = !!planTurn && !building && items[items.length - 1]?.kind === "ai";
+  const menuOpen = slashSkills.length > 0 || !!mention;
+  const menuLen = slashSkills.length || mentionFiles.length;
+
+  const plusActions: PlusAction[] = [
+    { label: "Adjuntar archivos", icon: "📎", run: () => fileInput.current?.click() },
+    { label: "Mencionar un archivo", icon: "@", hint: "@", run: startMention },
+    { label: "Habilidades", icon: "/", hint: "/", run: () => (setInput("/"), setCaret(1), textarea.current?.focus()) },
+    ...(onSelectElement ? [{ label: "Seleccionar en la vista previa", icon: "⌖", run: onSelectElement }] : []),
+  ];
+
   return (
-    <section className="chat">
-      <div className="chat-log" ref={logRef}>
+    <section
+      className={`chat ${dragging ? "dropping" : ""}`}
+      onDragOver={(e) => {
+        if (e.dataTransfer.types.includes("Files")) (e.preventDefault(), setDragging(true));
+      }}
+      onDragLeave={(e) => e.currentTarget === e.target && setDragging(false)}
+      onDrop={(e) => {
+        e.preventDefault();
+        setDragging(false);
+        void attach(e.dataTransfer.files);
+      }}
+    >
+      {bookmarks.length > 0 && (
+        <div className="chat-filter">
+          <div className="segmented" role="tablist" aria-label="Filtrar el chat">
+            <button role="tab" aria-selected={!onlyMarked} className={!onlyMarked ? "on" : ""} onClick={() => setOnlyMarked(false)}>
+              Historial
+            </button>
+            <button role="tab" aria-selected={onlyMarked} className={onlyMarked ? "on" : ""} onClick={() => setOnlyMarked(true)}>
+              ★ Marcadores <span className="count">{all.filter(isMarked).length}</span>
+            </button>
+          </div>
+        </div>
+      )}
+      <div
+        className="chat-log"
+        ref={logRef}
+        onScroll={(e) => {
+          const el = e.currentTarget;
+          stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+        }}
+      >
         {all.length === 0 && (
-          <div className="empty">
-            <div style={{ fontWeight: 600, color: "var(--text)", marginBottom: 6 }}>Cuéntame qué construimos</div>
-            Describe pantallas, datos y quién la usará. Puedes pedir cambios en cualquier momento.
+          <div className="chat-empty">
+            <div className="chat-empty-mark" aria-hidden>
+              ✦
+            </div>
+            <div className="chat-empty-title">Cuéntame qué construimos</div>
+            <div className="small muted">Describe pantallas, datos y quién la usará. Escribe «/» para ver las habilidades o «@» para mencionar un archivo.</div>
+            <div className="starter-list">
+              {STARTERS.map((s) => (
+                <button key={s} className="starter" onClick={() => addToInput(s)}>
+                  {s}
+                </button>
+              ))}
+            </div>
           </div>
         )}
-        {all.map((it, i) =>
+        {onlyMarked && visible.length === 0 && <div className="small muted chat-empty">Aún no has marcado nada. Usa ☆ en una respuesta o en una tarjeta de cambios.</div>}
+        {visible.map((it, i) =>
           it.kind === "user" ? (
-            <div key={i} className="msg-user">
-              {it.attachments?.map((a) => (
-                <div key={a} className="small" style={{ opacity: 0.85, marginBottom: 4 }}>
-                  📎 {fileName(a)}
-                </div>
-              ))}
-              {it.element && (
-                <div className="small" style={{ opacity: 0.85, marginBottom: 4 }}>
-                  ⌖ {it.element}
+            <div key={i} className="msg-user-wrap">
+              <div className="msg-user">
+                {it.attachments?.map((a) => (
+                  <div key={a} className="bubble-chip">
+                    📎 {fileName(a)}
+                  </div>
+                ))}
+                {it.element && <div className="bubble-chip">⌖ {it.element}</div>}
+                <UserBubble text={it.text} />
+              </div>
+              {!building && (
+                <div className="msg-actions right">
+                  <button className="ghost sm" aria-label="Copiar mensaje" title="Copiar" onClick={() => void copyMsg(i, it.text)}>
+                    {copied === i ? "✓" : "⧉"}
+                  </button>
+                  <button
+                    className="ghost sm"
+                    aria-label="Editar y reenviar"
+                    title="Editar y reenviar"
+                    onClick={() => {
+                      setInput(it.text);
+                      setCaret(it.text.length);
+                      textarea.current?.focus();
+                    }}
+                  >
+                    ✎
+                  </button>
                 </div>
               )}
-              <UserText text={it.text} />
             </div>
           ) : it.kind === "ai" ? (
             <div key={i} className="msg-ai">
               <Markdown text={it.text} />
+              {!building && (
+                <div className="msg-actions">
+                  <button className="ghost sm" aria-label="Copiar respuesta" title="Copiar" onClick={() => void copyMsg(i, it.text)}>
+                    {copied === i ? "✓" : "⧉"}
+                  </button>
+                  <button className={`ghost sm ${bookmarks.includes(markId(it.text)) ? "marked" : ""}`} aria-pressed={bookmarks.includes(markId(it.text))} aria-label="Marcar respuesta" title="Marcar en el historial" onClick={() => toggleBookmark(markId(it.text))}>
+                    {bookmarks.includes(markId(it.text)) ? "★" : "☆"}
+                  </button>
+                </div>
+              )}
             </div>
           ) : it.kind === "team" ? (
             <AgentLanes key={i} team={it.team} />
           ) : it.kind === "github" ? (
             <GithubCommitCard key={i} card={it.card} busy={false} onFix={(text) => void send(text, { mode: "build" })} />
+          ) : it.kind === "changes" ? (
+            it.turn && (
+              <ChangeCard
+                key={`c-${it.turn}`}
+                projectId={projectId}
+                turnId={it.turn}
+                title={it.title}
+                reloadKey={loadCount}
+                marked={bookmarks.includes(cardMark(it.turn))}
+                onToggleMark={() => toggleBookmark(cardMark(it.turn!))}
+                onDetails={() => onOpenDetails?.({ turnId: it.turn!, title: it.title, timeline: timelineOf(all, it.turn!) })}
+                onRestored={() => {
+                  void load();
+                  onRestored?.();
+                }}
+              />
+            )
           ) : (
             <Steps key={i} steps={it.steps} />
           ),
         )}
-        {lastTurnIsPlan && (
-          <div className="row" style={{ gap: 8 }}>
+        {lastTurnIsPlan && !onlyMarked && (
+          <div className="plan-cta">
             <button className="primary sm" onClick={() => send("Implementa el plan.", { mode: "build", implementPlan: true })}>
               ▶ Implementar plan
             </button>
@@ -481,8 +970,13 @@ export function Chat({
           </div>
         )}
         {building && (
-          <div className="row muted small">
-            <span className="spinner" /> {live.some((it) => it.kind === "team" && it.team.lanes.some((l) => l.role === "chat")) ? "Pensando…" : "Construyendo…"}
+          <div className="thinking">
+            <span className="dots" aria-hidden>
+              <i />
+              <i />
+              <i />
+            </span>
+            {live.some((it) => it.kind === "team" && it.team.lanes.some((l) => l.role === "chat")) ? "Pensando…" : "Construyendo…"}
           </div>
         )}
         {queue.map((q, i) => (
@@ -497,68 +991,115 @@ export function Chat({
       </div>
       <div className="composer">
         <ProblemsBar problems={problems} disabled={false} onFix={(list) => void send(fixMessage(list), { mode: "build" })} />
-        {attachments.length > 0 && (
-          <div className="row" style={{ flexWrap: "wrap", gap: 6 }}>
-            {attachments.map((a) => (
-              <span key={a} className="selection-chip" style={{ padding: "3px 8px" }}>
-                📎 {fileName(a)}
-                <button className="ghost sm icon-btn" style={{ height: 20, width: 20 }} aria-label={`Quitar ${fileName(a)}`} onClick={() => setAttachments((x) => x.filter((y) => y !== a))}>
-                  ×
-                </button>
-              </span>
-            ))}
-          </div>
-        )}
-        {selection && (
-          <div className="selection-chip">
-            ⌖ <code title={selection.html}>{selection.selector}</code>
-            <button className="ghost sm icon-btn" style={{ height: 22, width: 22 }} aria-label="Quitar selección" onClick={onClearSelection}>
-              ×
-            </button>
-          </div>
-        )}
-        <textarea
-          placeholder={building ? "Envía un seguimiento: se manda al terminar…" : selection ? "¿Qué cambio en este elemento?" : MODES[mode].placeholder}
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              void send(input);
-            }
-          }}
-        />
-        <div className="row">
-          <div className="segmented mode-switch" role="radiogroup" aria-label="Modo del chat">
-            {(Object.keys(MODES) as Mode[]).map((m) => (
-              <button key={m} role="radio" aria-checked={mode === m} className={mode === m ? "on" : ""} title={MODES[m].hint} onClick={() => setMode(m)}>
-                {MODES[m].label}
-              </button>
-            ))}
-          </div>
-          <span className="grow" />
-          {building ? (
-            <>
-              <button className="sm" disabled={!input.trim()} onClick={() => send(input)}>
-                Poner en cola
-              </button>
-              <button className="sm" onClick={() => api(`/projects/${projectId}/chat/stop`, { body: {} })}>
-                Detener
-              </button>
-            </>
-          ) : (
-            <>
-              <input ref={fileInput} type="file" multiple hidden accept="image/*,.pdf,.txt,.md,.csv,.json,.svg" onChange={(e) => void attach(e.target.files)} />
-              <button className="sm ghost icon-btn" title="Adjuntar imágenes o archivos (logo, captura, CSV…)" aria-label="Adjuntar archivo" disabled={uploading} onClick={() => fileInput.current?.click()}>
-                {uploading ? <span className="spinner" /> : "📎"}
-              </button>
-              <button className="primary sm" disabled={!input.trim()} onClick={() => send(input)}>
-                <Send /> Enviar
-              </button>
-            </>
+        <div className={`composer-box mode-${mode}`}>
+          {(attachments.length > 0 || selection || uploading) && (
+            <div className="composer-chips">
+              {attachments.map((a) => (
+                <span key={a} className="selection-chip">
+                  📎 {fileName(a)}
+                  <button className="ghost sm icon-btn" style={{ height: 20, width: 20 }} aria-label={`Quitar ${fileName(a)}`} onClick={() => setAttachments((x) => x.filter((y) => y !== a))}>
+                    ×
+                  </button>
+                </span>
+              ))}
+              {uploading && (
+                <span className="selection-chip">
+                  <span className="spinner" style={{ width: 11, height: 11 }} /> Subiendo…
+                </span>
+              )}
+              {selection && (
+                <span className="selection-chip">
+                  ⌖ <code title={selection.html}>{selection.selector}</code>
+                  <button className="ghost sm icon-btn" style={{ height: 20, width: 20 }} aria-label="Quitar selección" onClick={onClearSelection}>
+                    ×
+                  </button>
+                </span>
+              )}
+            </div>
           )}
+          <div className="menu-anchor" style={{ display: "block" }}>
+            {slashSkills.length > 0 && <SlashMenu skills={slashSkills} active={Math.min(menuIdx, slashSkills.length - 1)} onHover={setMenuIdx} onPick={pickSkill} />}
+            {mention && <MentionMenu files={mentionFiles} active={Math.min(menuIdx, Math.max(0, mentionFiles.length - 1))} onHover={setMenuIdx} onPick={pickFile} />}
+            <textarea
+              ref={textarea}
+              id="chatinput"
+              aria-label="Mensaje para el constructor"
+              rows={2}
+              placeholder={building ? "Envía un seguimiento: se manda al terminar…" : selection ? "¿Qué cambio en este elemento?" : MODES[mode].placeholder}
+              value={input}
+              onChange={(e) => {
+                setInput(e.target.value);
+                setCaret(e.target.selectionStart);
+                setMenuIdx(0);
+              }}
+              onSelect={(e) => setCaret(e.currentTarget.selectionStart)}
+              onPaste={(e) => {
+                const pasted = [...e.clipboardData.files];
+                if (pasted.length) (e.preventDefault(), void attach(pasted));
+              }}
+              onKeyDown={(e) => {
+                if (menuOpen && menuLen > 0) {
+                  if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+                    e.preventDefault();
+                    setMenuIdx((Math.min(menuIdx, menuLen - 1) + (e.key === "ArrowDown" ? 1 : menuLen - 1)) % menuLen);
+                    return;
+                  }
+                  if (e.key === "Enter" || e.key === "Tab") {
+                    e.preventDefault();
+                    if (slashSkills.length) pickSkill(slashSkills[Math.min(menuIdx, menuLen - 1)]!);
+                    else pickFile(mentionFiles[Math.min(menuIdx, menuLen - 1)]!);
+                    return;
+                  }
+                }
+                if (menuOpen && e.key === "Escape") {
+                  e.preventDefault();
+                  if (slashSkills.length) setInput("");
+                  else setInput(input.slice(0, caret).replace(/@[^\s@]*$/, "") + input.slice(caret));
+                  return;
+                }
+                if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+                  e.preventDefault();
+                  void send(input);
+                }
+              }}
+            />
+          </div>
+          <div className="composer-tools">
+            <input ref={fileInput} type="file" multiple hidden accept="image/*,.pdf,.txt,.md,.csv,.json,.svg" onChange={(e) => void attach(e.target.files)} />
+            <PlusMenu actions={plusActions} />
+            <ModeMenu mode={mode} onChange={setMode} />
+            <span className="grow" />
+            {SpeechCtor && (
+              <button className={`round-btn ${listening ? "rec" : ""}`} aria-label={listening ? "Dejar de dictar" : "Dictar"} aria-pressed={listening} title={listening ? "Dejar de dictar" : "Dictar con la voz"} onClick={dictate}>
+                {listening ? "■" : "🎙"}
+              </button>
+            )}
+            {building ? (
+              <>
+                <button className="sm" disabled={!input.trim()} onClick={() => send(input)}>
+                  Poner en cola
+                </button>
+                <button className="round-btn stop" aria-label="Detener" title="Detener" onClick={() => api(`/projects/${projectId}/chat/stop`, { body: {} })}>
+                  ■
+                </button>
+              </>
+            ) : (
+              <button className="send-btn" aria-label="Enviar mensaje" title="Enviar (Enter) · Shift+Enter para salto de línea" disabled={!input.trim()} onClick={() => send(input)}>
+                <Send />
+              </button>
+            )}
+          </div>
+        </div>
+        <div className="composer-hint small muted">
+          <span>
+            <kbd>/</kbd> habilidades · <kbd>@</kbd> archivos · <kbd>Alt</kbd>+<kbd>P</kbd> modo
+          </span>
+          <span className="grow" />
+          {mode === "chat" && <span>Chat: solo lee, no cambia el código</span>}
+          {mode === "plan" && <span>Plan: nada cambia hasta que lo apruebes</span>}
         </div>
       </div>
+      {dragging && <div className="drop-hint">Suelta para adjuntar</div>}
     </section>
   );
 }

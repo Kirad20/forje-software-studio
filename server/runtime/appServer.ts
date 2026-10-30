@@ -297,10 +297,11 @@ const escapeHtml = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt
 function liveReload(projectId: string): Response {
   let onEvent: (e: ProjectEvent) => void;
   let ping: NodeJS.Timeout;
+  // The pending reload must be cleared too when the page goes away, or it writes to a closed stream.
+  let timer: NodeJS.Timeout | undefined;
   const stream = new ReadableStream({
     start(controller) {
       const enc = new TextEncoder();
-      let timer: NodeJS.Timeout | undefined;
       onEvent = (e) => {
         if (e.type !== "files" || e.paths.every(isDevFile)) return;
         // Debounce bursts of writes from the builder into one reload.
@@ -313,6 +314,7 @@ function liveReload(projectId: string): Response {
     cancel() {
       projectEvents.off(projectId, onEvent);
       clearInterval(ping);
+      clearTimeout(timer);
     },
   });
   return new Response(stream, { headers: { "content-type": "text/event-stream", "cache-control": "no-cache" } });

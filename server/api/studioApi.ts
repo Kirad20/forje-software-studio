@@ -817,6 +817,11 @@ studioApi.get("/projects/:id/logs", (c) => c.json({ logs: readLogs(pid(c), { lim
 
 // Change timeline and named checkpoints
 studioApi.get("/projects/:id/changes", async (c) => c.json({ changes: await projects.listChanges(pid(c)) }));
+/** One chat turn's code changes, file by file, for the change card and its details view. */
+studioApi.get("/projects/:id/turns/:turnId/changes", async (c) => {
+  const r = await projects.turnChanges(pid(c), c.req.param("turnId"));
+  return r ? c.json(r) : c.json({ error: "Turno no encontrado" }, 404);
+});
 studioApi.post("/projects/:id/checkpoints", async (c) => {
   const { label, description } = await c.req.json<{ label: string; description?: string }>();
   return c.json({ id: await projects.createCheckpoint(pid(c), label || "Checkpoint", "owner", description, c.get("account").email) });

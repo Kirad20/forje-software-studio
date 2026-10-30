@@ -139,6 +139,13 @@ try {
   const changes = (await req("GET", `/api/projects/${project.id}/changes`)).json.changes;
   ok(changes.some((c) => /^ui@fake-/.test(c.actor ?? "")) && changes.some((c) => /^backend@fake-/.test(c.actor ?? "")), "timeline records role@model for each change");
 
+  // The turn's change card: each file it touched, before and after.
+  const turnId = chat.messages.find((m) => m.role === "user")?.turnId;
+  const turn = (await req("GET", `/api/projects/${project.id}/turns/${turnId}/changes`)).json;
+  const notesPage = turn.files?.find((f) => f.path === "pages/notes.tsx");
+  ok(notesPage?.kind === "create" && notesPage.before === null && typeof notesPage.after === "string" && notesPage.after.length > 0, "a turn lists the files it created with their content", JSON.stringify(turn).slice(0, 300));
+  ok(turn.files.every((f) => f.before !== f.after || f.omitted) && typeof turn.firstChange === "number", "a turn's change list has real diffs only");
+
   // Router: decisions logged with scored candidates; learning recorded.
   const router = (await req("GET", `/api/projects/${project.id}/router`)).json;
   ok(router.decisions.length >= 5 && router.decisions.every((d) => d.candidates.length >= 1 && d.reason), "every model choice is logged with its reasons");
