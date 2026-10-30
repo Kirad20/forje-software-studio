@@ -66,6 +66,8 @@ export interface Project {
   systemPrompt: string;
   designPrompt: string;
   seo: { siteName?: string; siteDescription?: string; robots?: boolean; sitemap?: boolean };
+  /** Present on projects opened by id: whether you own it or collaborate on it. */
+  access?: "owner" | "editor";
   previewUrl: string;
   previewOrigin: string;
   appUrl: string | null;

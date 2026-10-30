@@ -51,6 +51,8 @@ export async function verifyLoginCode(email: string, code: string): Promise<stri
     account = { id: newId() };
     await q(`insert into accounts (id, email, credits) values ($1, $2, $3)`, [account.id, email, config.freeCredits]);
   }
+  const { claimInvites } = await import("./members.js");
+  await claimInvites(account.id, email);
   const token = newToken();
   await q(
     `insert into account_sessions (token_hash, account_id, expires_at) values ($1, $2, now() + ($3 || ' days')::interval)`,

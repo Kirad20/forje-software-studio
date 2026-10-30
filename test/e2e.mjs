@@ -316,6 +316,35 @@ ok(call.json?.result?.content?.[0]?.text?.includes("Compila"), "mcp check_build"
 const noauth = await req("POST", "/mcp", { headers: { accept: "application/json, text/event-stream" }, body: { jsonrpc: "2.0", id: 1, method: "tools/list" } });
 ok(noauth.status === 401, "mcp requires token");
 
+// Collaborators: invite before sign-up, claimed on first sign-in; editors build, owners manage.
+const ownerCookie = jar.localhost;
+async function signInAs(email) {
+  jar.localhost = "";
+  await req("POST", "/api/auth/request", { body: { email } });
+  const c = [...serverLog.matchAll(new RegExp(`${email.replace(".", "\\.")}: (\\d{6})`, "g"))].pop()[1];
+  await req("POST", "/api/auth/verify", { body: { email, code: c } });
+  return jar.localhost;
+}
+const invite = await req("POST", `/api/projects/${project.id}/members`, { body: { email: "bob@example.com" } });
+ok(invite.json?.joined === false, "invite pending for an email without account", invite.text);
+const bobCookie = await signInAs("bob@example.com");
+const bobList = await req("GET", "/api/projects");
+ok(bobList.json.shared?.some((p) => p.id === project.id) && !bobList.json.projects.some((p) => p.id === project.id), "invite claimed on sign-in: project is shared with bob");
+ok((await req("GET", `/api/projects/${project.id}`)).json?.project?.access === "editor", "bob opens the project as editor");
+ok((await req("PUT", `/api/projects/${project.id}/file`, { body: { path: "pages/bob.tsx", content: "export default () => <p>bob</p>;" } })).status === 200, "editor can write files");
+ok((await req("DELETE", `/api/projects/${project.id}`)).status === 403, "editor cannot delete the project");
+ok((await req("POST", `/api/projects/${project.id}/members`, { body: { email: "eve@example.com" } })).status === 403, "editor cannot invite");
+ok((await req("GET", `/api/projects/${project.id}/changes`)).json.changes[0].actor === "bob@example.com", "editor writes are logged with who made them");
+await signInAs("carol@example.com");
+ok((await req("GET", `/api/projects/${project.id}`)).status === 404, "strangers cannot see the project");
+jar.localhost = ownerCookie;
+const members = await req("GET", `/api/projects/${project.id}/members`);
+ok(members.json.members.length === 1 && members.json.members[0].email === "bob@example.com", "owner sees bob as member", members.text);
+await req("DELETE", `/api/projects/${project.id}/members/bob%40example.com`);
+jar.localhost = bobCookie;
+ok((await req("GET", `/api/projects/${project.id}`)).status === 404, "removed collaborator loses access");
+jar.localhost = ownerCookie;
+
 // Sign-in codes are rate limited per email.
 let limited = 0;
 for (let i = 0; i < 7; i++) if ((await req("POST", "/api/auth/request", { body: { email: "spam@example.com" } })).status === 429) limited++;

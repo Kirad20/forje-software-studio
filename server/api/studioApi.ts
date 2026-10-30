@@ -30,6 +30,7 @@ import {
   updateIntegrationValue,
 } from "../platform/integrations.js";
 import { usageSummary } from "../platform/usage.js";
+import { accessOf, inviteMember, listMembers, removeMember, sharedProjectIds, type Access } from "../platform/members.js";
 import { isHttps, rateLimit, RateLimitError, studioOrigins } from "../lib/security.js";
 
 const quoteIdent = (name: string) => `"${name.replace(/"/g, '""')}"`;
@@ -54,7 +55,7 @@ async function removeProjectData(projectId: string) {
   await rm(path.join(config.dataDir, "projects", projectId), { recursive: true, force: true }).catch(() => {});
 }
 
-type Env = { Variables: { account: accounts.Account; project: projects.Project } };
+type Env = { Variables: { account: accounts.Account; project: projects.Project; access: Access } };
 
 export const SESSION_COOKIE = "forja_session";
 
@@ -213,8 +214,11 @@ const projectView = async (p: projects.Project) => ({
 });
 
 studioApi.get("/projects", async (c) => {
-  const list = await projects.listProjects(c.get("account").id);
-  return c.json({ projects: list.map((p) => ({ ...p, appUrl: p.slug ? appUrl(p.slug) : null })) });
+  const me = c.get("account").id;
+  const own = await projects.listProjects(me);
+  const shared = (await Promise.all((await sharedProjectIds(me)).map((id) => projects.getProject(id)))).filter((p): p is projects.Project => !!p);
+  const view = (p: projects.Project, access: Access) => ({ ...p, access, appUrl: p.slug ? appUrl(p.slug) : null });
+  return c.json({ projects: own.map((p) => view(p, "owner")), shared: shared.map((p) => view(p, "editor")) });
 });
 
 /** The dashboard's prompt box: the project is named from the idea, and the studio then sends the idea to the builder. */
@@ -227,25 +231,34 @@ studioApi.post("/projects", async (c) => {
 
 studioApi.use("/projects/:id/*", async (c, next) => {
   const p = await projects.getProject(c.req.param("id")!);
-  if (!p || p.ownerId !== c.get("account").id) return c.json({ error: "Proyecto no encontrado" }, 404);
+  const access = await accessOf(c.get("account").id, p);
+  if (!p || !access) return c.json({ error: "Proyecto no encontrado" }, 404);
   c.set("project", p);
+  c.set("access", access);
   await next();
 });
 studioApi.use("/projects/:id", async (c, next) => {
   const p = await projects.getProject(c.req.param("id")!);
-  if (!p || p.ownerId !== c.get("account").id) return c.json({ error: "Proyecto no encontrado" }, 404);
+  const access = await accessOf(c.get("account").id, p);
+  if (!p || !access) return c.json({ error: "Proyecto no encontrado" }, 404);
   c.set("project", p);
+  c.set("access", access);
   await next();
 });
+
+/** Owner-only actions answer 403 to collaborators. */
+const ownerOnly = (c: Context<Env>) => (c.get("access") === "owner" ? null : c.json({ error: "Solo la persona dueña del proyecto puede hacer esto." }, 403));
 
 const pid = (c: Context<Env>) => c.get("project").id;
 
 studioApi.get("/projects/:id", async (c) => {
-  await projects.markOpened(pid(c));
-  return c.json({ project: await projectView(c.get("project")) });
+  if (c.get("access") === "owner") await projects.markOpened(pid(c));
+  return c.json({ project: { ...(await projectView(c.get("project"))), access: c.get("access") } });
 });
 studioApi.patch("/projects/:id", async (c) => {
   const patch = await c.req.json<projects.ProjectPatch>();
+  // Folders, favorites and archive are the owner's own organisation.
+  if (c.get("access") !== "owner") for (const k of ["folderId", "favorite", "archived"] as const) delete patch[k];
   if (patch.folderId) {
     const mine = await projects.listFolders(c.get("account").id);
     if (!mine.some((f) => f.id === patch.folderId)) return c.json({ error: "Carpeta no encontrada" }, 404);
@@ -254,6 +267,8 @@ studioApi.patch("/projects/:id", async (c) => {
   return c.json({ project: await projectView((await projects.getProject(pid(c)))!) });
 });
 studioApi.delete("/projects/:id", async (c) => {
+  const denied = ownerOnly(c);
+  if (denied) return denied;
   await unpublishProject(pid(c));
   await projects.deleteProject(pid(c));
   await removeProjectData(pid(c));
@@ -308,6 +323,27 @@ studioApi.get("/projects/:id/services", async (c) => {
 
 studioApi.get("/projects/:id/analytics", async (c) => c.json(await analyticsSummary(pid(c), Number(c.req.query("days") ?? 7))));
 
+// Collaborators
+studioApi.get("/projects/:id/members", async (c) => {
+  const owner = await accounts.getAccount(c.get("project").ownerId);
+  return c.json({ owner: { email: owner?.email, name: owner?.name }, ...(await listMembers(pid(c))), access: c.get("access") });
+});
+studioApi.post("/projects/:id/members", async (c) => {
+  const denied = ownerOnly(c);
+  if (denied) return denied;
+  const { email } = await c.req.json<{ email: string }>();
+  rateLimit(`invite:${c.get("account").id}`, 30, 60 * 60_000);
+  return c.json(await inviteMember(c.get("project"), c.get("account").email, email ?? ""));
+});
+studioApi.delete("/projects/:id/members/:who", async (c) => {
+  // The owner removes anyone; a collaborator can only leave.
+  const who = decodeURIComponent(c.req.param("who"));
+  const me = c.get("account");
+  if (c.get("access") !== "owner" && who !== me.id && who !== me.email) return c.json({ error: "No puedes quitar a otras personas." }, 403);
+  await removeMember(pid(c), who);
+  return c.json({ ok: true });
+});
+
 // Integrations connected to this project
 studioApi.get("/projects/:id/integrations", async (c) =>
   c.json({ all: await listIntegrations(c.get("account").id), connected: await projectIntegrationIds(pid(c)) }),
@@ -343,7 +379,7 @@ studioApi.get("/projects/:id/file", async (c) => {
 });
 studioApi.put("/projects/:id/file", async (c) => {
   const { path, content } = await c.req.json<{ path: string; content: string }>();
-  await projects.writeFile(pid(c), path, content);
+  await projects.writeFile(pid(c), path, content, "owner", c.get("account").email);
   return c.json({ ok: true });
 });
 
@@ -514,10 +550,10 @@ studioApi.get("/projects/:id/logs", (c) => c.json({ logs: readLogs(pid(c), { lim
 studioApi.get("/projects/:id/changes", async (c) => c.json({ changes: await projects.listChanges(pid(c)) }));
 studioApi.post("/projects/:id/checkpoints", async (c) => {
   const { label, description } = await c.req.json<{ label: string; description?: string }>();
-  return c.json({ id: await projects.createCheckpoint(pid(c), label || "Checkpoint", "owner", description) });
+  return c.json({ id: await projects.createCheckpoint(pid(c), label || "Checkpoint", "owner", description, c.get("account").email) });
 });
 studioApi.post("/projects/:id/changes/:cid/restore", async (c) => {
-  await projects.restoreToChange(pid(c), Number(c.req.param("cid")), "owner");
+  await projects.restoreToChange(pid(c), Number(c.req.param("cid")), "owner", c.get("account").email);
   return c.json({ ok: true });
 });
 

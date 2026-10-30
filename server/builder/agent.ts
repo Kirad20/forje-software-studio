@@ -109,8 +109,10 @@ export async function runBuilderTurn(account: Account, projectId: string, userTe
   const ctx: ToolContext = { account, projectId, author: "builder" };
   try {
     const project = await getProject(projectId);
-    const fresh = await getAccount(account.id);
-    if ((fresh?.credits ?? 0) <= 0) throw new Error("No te quedan créditos para el constructor.");
+    // Credits are the project owner's, whoever is chatting (collaborators included).
+    const payer = project?.ownerId ?? account.id;
+    const fresh = await getAccount(payer);
+    if ((fresh?.credits ?? 0) <= 0) throw new Error("La cuenta dueña del proyecto no tiene créditos para el constructor.");
 
     const userMsg: LlmMessage = { role: "user", content: [{ type: "text", text: userText }] };
     await save(projectId, userMsg);
@@ -135,7 +137,7 @@ export async function runBuilderTurn(account: Account, projectId: string, userTe
         maxTokens: 16000,
         signal: abort.signal,
       });
-      credits += await charge(account.id, projectId, "builder", config.builder.model, res.usage);
+      credits += await charge(payer, projectId, "builder", config.builder.model, res.usage);
       const assistant: LlmMessage = { role: "assistant", content: res.content };
       history.push(assistant);
       await save(projectId, assistant);

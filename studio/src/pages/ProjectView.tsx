@@ -6,7 +6,7 @@ import { External, Refresh } from "../components/Icons";
 import { AiPanel, CodePanel, EmailPanel, JobsPanel, LogsPanel, UsersPanel } from "../components/Panels";
 import { AnalyticsPanel, DataPanel, DocsPanel, IntegrationsPanel, PaymentsPanel, SeoPanel, StoragePanel } from "../components/ServicePanels";
 import { Avatar, copyText, Menu, MenuItem, useDismiss } from "../components/ui";
-import { CheckpointPanel, DEVICES, PagePalette, PreviewCanvas, ProjectSettings, PublishPanel, type Device, type PreviewHandle } from "../components/Workspace";
+import { CheckpointPanel, Collaborators, DEVICES, PagePalette, PreviewCanvas, ProjectSettings, PublishPanel, type Device, type PreviewHandle } from "../components/Workspace";
 
 type View = "preview" | "services" | "settings";
 type ServiceKey = "data" | "users" | "ai" | "integrations" | "analytics" | "seo" | "docs" | "jobs" | "storage" | "email" | "payments" | "logs" | "code";
@@ -181,6 +181,27 @@ export function ProjectView({ id, me, onCredits }: { id: string; me: Me; onCredi
               <span className="spinner" style={{ width: 10, height: 10 }} /> construyendo
             </span>
           )}
+          <Menu
+            align="right"
+            className="panel-pop"
+            button={(_, toggle) => (
+              <button className="sm ghost" style={{ height: 32 }} title="Colaboradores" aria-label="Colaboradores" onClick={toggle}>
+                <span className="mini-avatar" style={{ background: "#4f46e5", width: 22, height: 22 }}>
+                  {(me.name || me.email).slice(0, 1).toUpperCase()}
+                </span>
+                ＋
+              </button>
+            )}
+          >
+            {() => (
+              <div style={{ padding: 14, width: 340 }}>
+                <strong>Colaboradores</strong>
+                <div style={{ marginTop: 10 }}>
+                  <Collaborators projectId={id} onLeft={() => (location.href = "/")} />
+                </div>
+              </div>
+            )}
+          </Menu>
           {project.appUrl && (
             <a className="btn sm" href={project.appUrl} target="_blank" rel="noreferrer" title="Abrir la app en vivo">
               <External /> En vivo
@@ -223,7 +244,7 @@ export function ProjectView({ id, me, onCredits }: { id: string; me: Me; onCredi
               <button className={`tool ${panel === "checkpoints" ? "on" : ""}`} onClick={() => setPanel(panel === "checkpoints" ? null : "checkpoints")}>
                 ⚑ Checkpoint
               </button>
-              {panel === "checkpoints" && <CheckpointPanel projectId={id} reloadKey={filesKey} onClose={closePanel} />}
+              {panel === "checkpoints" && <CheckpointPanel projectId={id} reloadKey={filesKey} onClose={closePanel} myEmail={me.email} />}
             </div>
             <button className={`tool ${selecting ? "on" : ""}`} onClick={toggleSelect} title="Elige un elemento de la vista previa para pedir un cambio sobre él">
               ⌖ Seleccionar

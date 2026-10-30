@@ -153,6 +153,7 @@ create table if not exists project_changes (
   before jsonb not null default '{}',
   created_at timestamptz not null default now()
 );
+alter table project_changes add column if not exists actor text;
 create index if not exists project_changes_project on project_changes (project_id, id desc);
 create table if not exists account_integrations (
   id text primary key,
@@ -185,6 +186,21 @@ create table if not exists builder_actions (
   day date not null default current_date,
   count integer not null default 0,
   primary key (account_id, day)
+);
+create table if not exists project_members (
+  project_id text not null references projects(id) on delete cascade,
+  account_id text not null references accounts(id) on delete cascade,
+  role text not null default 'editor',
+  created_at timestamptz not null default now(),
+  primary key (project_id, account_id)
+);
+create table if not exists project_invites (
+  project_id text not null references projects(id) on delete cascade,
+  email text not null,
+  role text not null default 'editor',
+  invited_by text not null,
+  created_at timestamptz not null default now(),
+  primary key (project_id, email)
 );
 create table if not exists storage_objects (
   project_id text not null references projects(id) on delete cascade,

@@ -125,6 +125,7 @@ interface Change {
   author: string;
   label: string | null;
   description: string | null;
+  actor: string | null;
   createdAt: string;
 }
 
@@ -140,7 +141,7 @@ const KIND_LABEL: Record<string, (c: Change) => string> = {
 const AUTHOR: Record<string, string> = { builder: "Constructor", owner: "Tú", mcp: "Agente MCP", system: "Forja" };
 const ICON: Record<string, string> = { create: "＋", edit: "✎", delete: "−", rename: "⇄", restore: "↺", checkpoint: "⚑", publish: "🚀" };
 
-export function CheckpointPanel({ projectId, reloadKey, onClose }: { projectId: string; reloadKey: number; onClose: () => void }) {
+export function CheckpointPanel({ projectId, reloadKey, onClose, myEmail }: { projectId: string; reloadKey: number; onClose: () => void; myEmail: string }) {
   const [changes, setChanges] = useState<Change[] | null>(null);
   const [onlyNamed, setOnlyNamed] = useState(false);
   const [naming, setNaming] = useState(false);
@@ -200,7 +201,7 @@ export function CheckpointPanel({ projectId, reloadKey, onClose }: { projectId: 
               {c.description && <div className="small muted clamp">{c.description}</div>}
               {c.paths.length > 0 && c.kind !== "restore" && <div className="paths">{c.paths.join(", ")}</div>}
               <div className="small muted">
-                {AUTHOR[c.author] ?? c.author} · {timeAgo(c.createdAt)}
+                {c.author === "owner" && c.actor && c.actor !== myEmail ? c.actor : (AUTHOR[c.author] ?? c.author)} · {timeAgo(c.createdAt)}
               </div>
             </div>
             {i > 0 && !onlyNamed ? (
@@ -395,6 +396,115 @@ export function PublishPanel({ project, onDone, onClose }: { project: Project; o
   );
 }
 
+// --- Collaborators ---------------------------------------------------------------------------
+
+interface Members {
+  owner: { email?: string; name?: string | null };
+  members: { accountId: string; email: string; name: string | null; createdAt: string }[];
+  invites: { email: string; createdAt: string }[];
+  access: "owner" | "editor";
+}
+
+export function Collaborators({ projectId, onLeft }: { projectId: string; onLeft?: () => void }) {
+  const [data, setData] = useState<Members | null>(null);
+  const [email, setEmail] = useState("");
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const load = () => api<Members>(`/projects/${projectId}/members`).then(setData);
+  useEffect(() => {
+    void load();
+  }, [projectId]);
+  if (!data) return <span className="spinner" />;
+  const isOwner = data.access === "owner";
+  const Person = ({ email, name, tag, action }: { email: string; name?: string | null; tag: string; action?: React.ReactNode }) => (
+    <div className="row" style={{ padding: "6px 0" }}>
+      <span className="mini-avatar" style={{ background: "#64748b" }}>
+        {(name || email).slice(0, 1).toUpperCase()}
+      </span>
+      <div className="grow" style={{ minWidth: 0 }}>
+        <div style={{ fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis" }}>{name || email}</div>
+        {name && <div className="small muted">{email}</div>}
+      </div>
+      <span className="pill">{tag}</span>
+      {action}
+    </div>
+  );
+  return (
+    <div className="stack" style={{ gap: 8 }}>
+      <Person email={data.owner.email ?? ""} name={data.owner.name} tag="Dueña" />
+      {data.members.map((m) => (
+        <Person
+          key={m.accountId}
+          email={m.email}
+          name={m.name}
+          tag="Editor"
+          action={
+            isOwner && (
+              <button className="sm ghost danger" onClick={() => api(`/projects/${projectId}/members/${encodeURIComponent(m.email)}`, { method: "DELETE" }).then(load)}>
+                Quitar
+              </button>
+            )
+          }
+        />
+      ))}
+      {data.invites.map((i) => (
+        <Person
+          key={i.email}
+          email={i.email}
+          tag="Invitación pendiente"
+          action={
+            isOwner && (
+              <button className="sm ghost danger" onClick={() => api(`/projects/${projectId}/members/${encodeURIComponent(i.email)}`, { method: "DELETE" }).then(load)}>
+                Cancelar
+              </button>
+            )
+          }
+        />
+      ))}
+      {isOwner ? (
+        <>
+          <div className="row">
+            <input type="email" placeholder="correo@ejemplo.com" value={email} onChange={(e) => setEmail(e.target.value)} />
+            <button
+              className="primary"
+              disabled={!email.trim()}
+              onClick={async () => {
+                setError("");
+                try {
+                  const r = await api<{ joined: boolean }>(`/projects/${projectId}/members`, { body: { email } });
+                  setNotice(r.joined ? `${email} ya puede abrir el proyecto.` : `Invitación guardada: ${email} entrará al iniciar sesión con ese correo.`);
+                  setEmail("");
+                  void load();
+                } catch (e) {
+                  setError((e as Error).message);
+                }
+              }}
+            >
+              Invitar
+            </button>
+          </div>
+          <div className="small muted">Los colaboradores pueden construir, probar y publicar. Los créditos de IA se cobran siempre a la cuenta dueña.</div>
+        </>
+      ) : (
+        <button
+          className="danger sm"
+          style={{ justifySelf: "start" }}
+          onClick={async () => {
+            if (!confirm("¿Salir de este proyecto? Necesitarás otra invitación para volver.")) return;
+            const me = await api<{ account: { id: string } }>("/me");
+            await api(`/projects/${projectId}/members/${me.account.id}`, { method: "DELETE" });
+            onLeft?.();
+          }}
+        >
+          Salir del proyecto
+        </button>
+      )}
+      {error && <div className="error-box">{error}</div>}
+      {notice && <div className="small" style={{ color: "var(--ok)" }}>{notice}</div>}
+    </div>
+  );
+}
+
 // --- Project settings ------------------------------------------------------------------------
 
 export function ProjectSettings({ project, onChange }: { project: Project; onChange: () => void }) {
@@ -486,6 +596,11 @@ export function ProjectSettings({ project, onChange }: { project: Project; onCha
         </section>
 
         <section className="card section">
+          <h3>☺ Colaboradores</h3>
+          <Collaborators projectId={project.id} onLeft={() => go("/")} />
+        </section>
+
+        <section className="card section">
           <h3>◉ Visibilidad</h3>
           <div className="row-setting">
             <div>
@@ -520,7 +635,10 @@ export function ProjectSettings({ project, onChange }: { project: Project; onCha
           </div>
         </section>
 
-        <section className="card section" style={{ borderColor: "color-mix(in srgb, var(--err) 35%, var(--border))" }}>
+        <section
+          className="card section"
+          style={{ borderColor: "color-mix(in srgb, var(--err) 35%, var(--border))", display: project.access === "editor" ? "none" : undefined }}
+        >
           <div className="row-setting">
             <div>
               <strong>Borrar proyecto</strong>

@@ -170,9 +170,9 @@ export async function readFile(projectId: string, path: string): Promise<string 
 
 async function logChange(
   projectId: string,
-  change: { kind: string; paths: string[]; author: Author; before?: Record<string, string | null>; label?: string; description?: string },
+  change: { kind: string; paths: string[]; author: Author; before?: Record<string, string | null>; label?: string; description?: string; actor?: string },
 ) {
-  await q(`insert into project_changes (project_id, kind, paths, author, label, description, before) values ($1, $2, $3, $4, $5, $6, $7)`, [
+  await q(`insert into project_changes (project_id, kind, paths, author, label, description, before, actor) values ($1, $2, $3, $4, $5, $6, $7, $8)`, [
     projectId,
     change.kind,
     JSON.stringify(change.paths),
@@ -180,10 +180,12 @@ async function logChange(
     change.label ?? null,
     change.description ?? null,
     JSON.stringify(change.before ?? {}),
+    change.actor ?? null,
   ]);
 }
 
-export async function writeFile(projectId: string, path: string, content: string, author: Author = "owner") {
+/** `actor` is the email of the person behind the change, for the timeline. */
+export async function writeFile(projectId: string, path: string, content: string, author: Author = "owner", actor?: string) {
   assertValidPath(path);
   const before = await readFile(projectId, path);
   if (before === content) return;
@@ -192,7 +194,7 @@ export async function writeFile(projectId: string, path: string, content: string
      on conflict (project_id, path) do update set content = excluded.content, updated_at = now()`,
     [projectId, path, content],
   );
-  await logChange(projectId, { kind: before === undefined ? "create" : "edit", paths: [path], author, before: { [path]: before ?? null } });
+  await logChange(projectId, { kind: before === undefined ? "create" : "edit", paths: [path], author, actor, before: { [path]: before ?? null } });
   await touch(projectId, [path]);
 }
 
@@ -222,8 +224,8 @@ async function touch(projectId: string, paths: string[]) {
 
 // --- Checkpoints: named points on the change timeline ------------------------------
 
-export async function createCheckpoint(projectId: string, label: string, author: Author = "owner", description?: string) {
-  await logChange(projectId, { kind: "checkpoint", paths: [], author, label: label.slice(0, 120), description });
+export async function createCheckpoint(projectId: string, label: string, author: Author = "owner", description?: string, actor?: string) {
+  await logChange(projectId, { kind: "checkpoint", paths: [], author, actor, label: label.slice(0, 120), description });
   return (await one<{ id: number }>(`select max(id) as id from project_changes where project_id = $1`, [projectId]))!.id;
 }
 
@@ -234,12 +236,13 @@ export interface ChangeEntry {
   author: Author;
   label: string | null;
   description: string | null;
+  actor: string | null;
   createdAt: string;
 }
 
 export async function listChanges(projectId: string, limit = 300): Promise<ChangeEntry[]> {
   return q<ChangeEntry>(
-    `select id, kind, paths, author, label, description, created_at as "createdAt"
+    `select id, kind, paths, author, label, description, actor, created_at as "createdAt"
      from project_changes where project_id = $1 order by id desc limit $2`,
     [projectId, limit],
   );
@@ -250,7 +253,7 @@ export async function listChanges(projectId: string, limit = 300): Promise<Chang
  * changes newest-first. The restore is itself logged, so it can be undone too. Code only:
  * the app's data is untouched.
  */
-export async function restoreToChange(projectId: string, changeId: number, author: Author = "owner") {
+export async function restoreToChange(projectId: string, changeId: number, author: Author = "owner", actor?: string) {
   const target = await one<{ id: number; label: string | null; kind: string; created_at: string }>(
     `select id, label, kind, created_at from project_changes where project_id = $1 and id = $2`,
     [projectId, changeId],
@@ -283,6 +286,7 @@ export async function restoreToChange(projectId: string, changeId: number, autho
     kind: "restore",
     paths: [...desired.keys()],
     author,
+    actor,
     label: `Restaurado a ${target.label ?? `cambio #${target.id}`}`,
     before: undo,
   });

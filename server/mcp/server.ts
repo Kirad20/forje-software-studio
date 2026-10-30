@@ -6,6 +6,7 @@ import { builderTools, previewUrl, toolByName } from "../builder/tools.js";
 import type { Account } from "../platform/accounts.js";
 import { createProject, getProject, listProjects } from "../platform/projects.js";
 import { countAction } from "../platform/usage.js";
+import { accessOf, sharedProjectIds } from "../platform/members.js";
 
 /**
  * Remote MCP server: lets any MCP client (Claude, ChatGPT, Cursor, Codex...) build Forja
@@ -70,7 +71,8 @@ function buildServer(account: Account) {
     try {
       switch (req.params.name) {
         case "list_projects": {
-          const list = await listProjects(account.id);
+          const shared = (await Promise.all((await sharedProjectIds(account.id)).map((id) => getProject(id)))).filter((p) => !!p);
+          const list = [...(await listProjects(account.id)), ...shared];
           return text(list.map((p) => `${p.id}  ${p.name}${p.slug ? `  (publicado: ${p.slug})` : ""}`).join("\n") || "Sin proyectos.");
         }
         case "create_project": {
@@ -84,7 +86,7 @@ function buildServer(account: Account) {
       if (!tool) return text(`Herramienta desconocida: ${req.params.name}`, true);
       const projectId = String(args.projectId ?? "");
       const project = await getProject(projectId);
-      if (!project || project.ownerId !== account.id) return text("Proyecto no encontrado en esta cuenta.", true);
+      if (!(await accessOf(account.id, project))) return text("Proyecto no encontrado en esta cuenta.", true);
       await countAction(account.id);
       // Every write lands in the project's change log as "mcp", so it can be undone from the studio.
       return text(await tool.run(args, { account, projectId, author: "mcp" }));

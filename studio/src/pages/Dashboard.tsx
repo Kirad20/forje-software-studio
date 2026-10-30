@@ -69,6 +69,8 @@ function StatusPill({ p }: { p: Project }) {
 
 export function Dashboard() {
   const [projects, setProjects] = useState<Project[] | null>(null);
+  const [shared, setShared] = useState<Project[]>([]);
+  const [tab, setTab] = useState<"mine" | "shared">("mine");
   const [folders, setFolders] = useState<Folder[]>([]);
   const [prompt, setPrompt] = useState("");
   const [busy, setBusy] = useState(false);
@@ -85,8 +87,9 @@ export function Dashboard() {
   const placeholder = useTypingPlaceholder();
 
   const load = async () => {
-    const [p, f] = await Promise.all([api<{ projects: Project[] }>("/projects"), api<{ folders: Folder[] }>("/folders")]);
+    const [p, f] = await Promise.all([api<{ projects: Project[]; shared: Project[] }>("/projects"), api<{ folders: Folder[] }>("/folders")]);
     setProjects(p.projects);
+    setShared(p.shared ?? []);
     setFolders(f.folders);
   };
   useEffect(() => {
@@ -114,7 +117,7 @@ export function Dashboard() {
   };
 
   const shown = useMemo(() => {
-    let list = projects ?? [];
+    let list = (tab === "mine" ? projects : shared) ?? [];
     if (search) list = list.filter((p) => `${p.name} ${p.description}`.toLowerCase().includes(search.toLowerCase()));
     if (folder === "none") list = list.filter((p) => !p.folderId);
     else if (folder !== "all") list = list.filter((p) => p.folderId === folder);
@@ -127,12 +130,15 @@ export function Dashboard() {
       name: (a, b) => a.name.localeCompare(b.name),
     };
     return [...list].sort(by[sort]);
-  }, [projects, search, folder, favorites, status, sort]);
+  }, [projects, shared, tab, search, folder, favorites, status, sort]);
 
   const favCount = (projects ?? []).filter((p) => p.favorite).length;
   const folderName = folder === "all" ? "Todas" : folder === "none" ? "Sin carpeta" : (folders.find((f) => f.id === folder)?.name ?? "Todas");
 
-  const actions = (p: Project) => (
+  const actions = (p: Project) =>
+    tab === "shared" ? (
+      <span className="pill accent" title="Proyecto de otra persona en el que colaboras">Compartido</span>
+    ) : (
     <Menu
       align="right"
       button={(_, toggle) => (
@@ -173,7 +179,7 @@ export function Dashboard() {
         </div>
       )}
     </Menu>
-  );
+    );
 
   const links = (p: Project) => (
     <>
@@ -236,11 +242,11 @@ export function Dashboard() {
       </section>
 
       <div className="segmented">
-        <button className="on">
+        <button className={tab === "mine" ? "on" : ""} onClick={() => setTab("mine")}>
           Tus proyectos <span className="count">{projects?.length ?? 0}</span>
         </button>
-        <button disabled title="Colaboradores aún no disponibles">
-          Compartidos contigo <span className="count">0</span>
+        <button className={tab === "shared" ? "on" : ""} onClick={() => (setTab("shared"), setFolder("all"), setFavorites(false))}>
+          Compartidos contigo <span className="count">{shared.length}</span>
         </button>
       </div>
 
@@ -339,7 +345,11 @@ export function Dashboard() {
         </div>
       ) : shown.length === 0 ? (
         <div className="card empty">
-          {projects.length ? "Ningún proyecto coincide con los filtros." : "Aún no tienes proyectos. Describe tu primera app arriba."}
+          {tab === "shared"
+            ? "Nadie ha compartido proyectos contigo todavía."
+            : projects.length
+              ? "Ningún proyecto coincide con los filtros."
+              : "Aún no tienes proyectos. Describe tu primera app arriba."}
         </div>
       ) : view === "grid" ? (
         <div className="projects-grid">
@@ -402,7 +412,7 @@ export function Dashboard() {
                   </td>
                   <td>{folders.find((f) => f.id === p.folderId)?.name ?? "—"}</td>
                   <td>{timeAgo(p.lastOpenedAt)}</td>
-                  <td>Tú</td>
+                  <td>{tab === "shared" ? "Otra persona" : "Tú"}</td>
                   <td>
                     <div className="row" style={{ gap: 4 }}>
                       {links(p)}
