@@ -8,9 +8,11 @@ import { realtimeStats } from "../baas/realtime.js";
 import { deleteSecret, listSecrets, setSecret } from "../baas/secrets.js";
 import { deleteObject, listObjects, storageUsage } from "../baas/storage.js";
 import { loadHistory, type AgentEvent } from "../builder/agent.js";
-import { isBuilding, penalizeTurn, runBuilderTurn, stopBuilding } from "../builder/orchestrator.js";
+import { isBuilding, penalizeTurn, pendingPlan, runBuilderTurn, stopBuilding, type ChatMode } from "../builder/orchestrator.js";
 import * as accounts from "../platform/accounts.js";
 import { projectEvents, readLogs, type ProjectEvent } from "../platform/events.js";
+import { clearProblems, listProblems, recheckBuild, watchProblems } from "../platform/problems.js";
+import * as github from "../platform/github.js";
 import * as projects from "../platform/projects.js";
 import { publishProject, suggestSlug, unpublishProject } from "../runtime/publish.js";
 import { appUrl, previewOrigin, previewUrl, shareToken } from "../runtime/urls.js";
@@ -147,6 +149,14 @@ studioApi.post("/auth/logout", async (c) => {
   return c.json({ ok: true });
 });
 
+// GitHub push webhook: signed with GITHUB_WEBHOOK_SECRET, no session.
+studioApi.post("/github/webhook", async (c) => {
+  if (c.req.header("x-github-event") === "ping") return c.json({ ok: true });
+  const raw = await c.req.text();
+  const projects = await github.handleWebhook(raw, c.req.header("x-hub-signature-256"));
+  return c.json({ ok: true, projects });
+});
+
 // Everything below needs a signed-in account.
 studioApi.use("*", async (c, next) => {
   const account = await accounts.accountFromSession(getCookie(c, SESSION_COOKIE));
@@ -220,6 +230,34 @@ studioApi.post("/models/sync", async (c) => {
   if (!config.openrouterKey) return c.json({ error: "Configura OPENROUTER_API_KEY para sincronizar el catálogo." }, 400);
   rateLimit(`sync:${c.get("account").id}`, 3, 60 * 60_000);
   return c.json({ synced: await syncOpenRouter() });
+});
+
+// --- GitHub account: a token typed in the studio (never in chat), or OAuth when configured ----------
+studioApi.get("/github", async (c) => c.json(await github.accountStatus(c.get("account").id)));
+studioApi.post("/github/token", async (c) => {
+  const { token } = await c.req.json<{ token: string }>();
+  rateLimit(`github-token:${c.get("account").id}`, 10, 60 * 60_000);
+  try {
+    return c.json(await github.connectAccount(c.get("account").id, String(token ?? "")));
+  } catch (e) {
+    return c.json({ error: (e as github.GithubError).status === 401 ? "GitHub no aceptó ese token." : (e as Error).message }, 400);
+  }
+});
+studioApi.delete("/github", async (c) => {
+  await github.disconnectAccount(c.get("account").id);
+  return c.json({ ok: true });
+});
+studioApi.get("/github/oauth/start", (c) => {
+  if (!config.github.clientId) return c.json({ error: "OAuth de GitHub no configurado" }, 404);
+  return c.redirect(github.oauthStart(c.get("account").id));
+});
+studioApi.get("/github/oauth/callback", async (c) => {
+  try {
+    await github.oauthFinish(c.get("account").id, c.req.query("code") ?? "", c.req.query("state") ?? "");
+    return c.redirect("/account?github=ok");
+  } catch (e) {
+    return c.redirect(`/account?github=${encodeURIComponent((e as Error).message)}`);
+  }
 });
 
 // Folders
@@ -444,6 +482,44 @@ studioApi.get("/projects/:id/router", async (c) => {
   return c.json({ decisions, learnt, spend });
 });
 
+// GitHub: this project's repository (two-way sync).
+const githubError = (c: Context<Env>, e: unknown) =>
+  c.json({ error: (e as Error).message }, (e instanceof github.GithubError && [400, 401, 403, 404, 409, 422].includes(e.status) ? e.status : 502) as 400);
+studioApi.get("/projects/:id/github", async (c) =>
+  c.json({ account: await github.accountStatus(c.get("account").id), link: await github.getLink(pid(c)), canEdit: c.get("access") === "owner" }),
+);
+studioApi.post("/projects/:id/github", async (c) => {
+  const denied = ownerOnly(c);
+  if (denied) return denied;
+  const body = await c.req.json<{ mode: "create" | "link"; name?: string; private?: boolean; repo?: string; branch?: string }>();
+  rateLimit(`github-link:${c.get("account").id}`, 10, 60 * 60_000);
+  try {
+    const result =
+      body.mode === "link"
+        ? await github.linkRepo(pid(c), c.get("account").id, { repo: body.repo ?? "", branch: body.branch })
+        : await github.createRepo(pid(c), c.get("account").id, { name: body.name || c.get("project").name, private: body.private, description: c.get("project").description });
+    github.watchLinked(pid(c));
+    return c.json({ link: await github.getLink(pid(c)), result });
+  } catch (e) {
+    return githubError(c, e);
+  }
+});
+studioApi.post("/projects/:id/github/sync", async (c) => {
+  rateLimit(`github-sync:${pid(c)}`, 30, 10 * 60_000);
+  try {
+    const result = await github.syncProject(pid(c), { message: "Sincronización manual desde Forja" });
+    return c.json({ link: await github.getLink(pid(c)), result });
+  } catch (e) {
+    return githubError(c, e);
+  }
+});
+studioApi.delete("/projects/:id/github", async (c) => {
+  const denied = ownerOnly(c);
+  if (denied) return denied;
+  await github.unlink(pid(c));
+  return c.json({ ok: true });
+});
+
 // Collaborators
 studioApi.get("/projects/:id/members", async (c) => {
   const owner = await accounts.getAccount(c.get("project").ownerId);
@@ -478,9 +554,21 @@ studioApi.delete("/projects/:id/integrations/:iid", async (c) => {
   return c.json({ ok: true });
 });
 
-/** Live feed for the studio: file changes, publishes and log lines. */
+// What is broken in the preview right now (build, browser, network, server).
+studioApi.get("/projects/:id/problems", async (c) => {
+  watchProblems(pid(c));
+  if (c.req.query("recheck") !== "0") await recheckBuild(pid(c));
+  return c.json({ problems: listProblems(pid(c)) });
+});
+studioApi.post("/projects/:id/problems/clear", (c) => {
+  clearProblems(pid(c));
+  return c.json({ ok: true });
+});
+
+/** Live feed for the studio: file changes, publishes, log lines and problems. */
 studioApi.get("/projects/:id/events", (c) => {
   const id = pid(c);
+  watchProblems(id);
   return sse((send) => {
     const on = (e: ProjectEvent) => send(e);
     projectEvents.on(id, on);
@@ -518,10 +606,12 @@ studioApi.get("/projects/:id/chat", async (c) => {
   // Custom (env-declared) models are not in model_catalog: label them from the live catalog.
   const labels = new Map((await availableModels()).map((m) => [m.id, m.label]));
   for (const t of tasks as { modelId: string | null; model: string | null }[]) if (t.modelId && labels.has(t.modelId)) t.model = labels.get(t.modelId)!;
-  return c.json({ messages: await loadHistory(pid(c)), tasks, building: isBuilding(pid(c)) });
+  const plan = await pendingPlan(pid(c));
+  return c.json({ messages: await loadHistory(pid(c)), tasks, building: isBuilding(pid(c)), pendingPlanTurn: plan?.turnId ?? null });
 });
 studioApi.post("/projects/:id/chat", async (c) => {
-  const { message, attachments } = await c.req.json<{ message: string; attachments?: string[] }>();
+  const { message, attachments, mode, implementPlan } = await c.req.json<{ message: string; attachments?: string[]; mode?: string; implementPlan?: boolean }>();
+  const chatMode: ChatMode = mode === "chat" || mode === "plan" ? mode : "build";
   if (!message?.trim()) return c.json({ error: "Mensaje vacío" }, 400);
   if (message.length > 20_000) return c.json({ error: "Mensaje demasiado largo" }, 400);
   if (isBuilding(pid(c))) return c.json({ error: "El constructor ya está trabajando" }, 409);
@@ -529,7 +619,7 @@ studioApi.post("/projects/:id/chat", async (c) => {
   const id = pid(c);
   const files = (Array.isArray(attachments) ? attachments : []).filter((p) => typeof p === "string");
   return sse((send, close) => {
-    void runBuilderTurn(account, id, message, (e: AgentEvent) => send(e), files).finally(close);
+    void runBuilderTurn(account, id, message, (e: AgentEvent) => send(e), files, chatMode, !!implementPlan).finally(close);
     return () => {};
   });
 });

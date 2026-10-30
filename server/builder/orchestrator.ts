@@ -7,6 +7,8 @@ import { getAccount, type Account } from "../platform/accounts.js";
 import { one, q } from "../platform/db.js";
 import { createCheckpoint, getProject, readAllFiles, type Project } from "../platform/projects.js";
 import { imageBlocks, runAgent, save, UPLOADS, type AgentEvent, type AgentResult } from "./agent.js";
+import { formatProblems, listProblems, recheckBuild, watchProblems } from "../platform/problems.js";
+import { holdSync, releaseSync } from "../platform/github.js";
 import { projectMap, selectContext } from "./index.js";
 import { MAX_STEPS, PLANNER_FILES, ROLE_PROMPTS, ROLE_TOOLS } from "./roles.js";
 import { builderTools, toolByName, type BuilderTool, type ToolContext } from "./tools.js";
@@ -308,18 +310,83 @@ async function runFast(s: TurnState): Promise<void> {
       routing: { complexity: s.features.complexity, domains: s.features.domains, needsVision: s.features.needsVision },
     },
   );
-  if (r.model) await recordOutcome(taskClassOf("fast", s.features), r.model, rewardOf(r, null), r.usd);
-  const reply = r.text || "Listo.";
+  s.wrote ||= !!ctx.wrote;
+  let reply = r.text || "Listo.";
+  // If the change left the app not compiling, fix it before handing back (at most twice).
+  let broken = s.wrote ? await recheckBuild(s.project.id) : [];
+  if (r.model) await recordOutcome(taskClassOf("fast", s.features), r.model, rewardOf({ ...r, buildOk: r.buildOk && !broken.length }, null), r.usd);
+  for (let round = 1; round <= 2 && broken.length && !s.signal.aborted; round++) {
+    const fixCtx: ToolContext = { account: s.account, projectId: s.project.id, author: "builder" };
+    const fix = await runLane(
+      s,
+      { id: `fix${round}`, role: "fast", goal: "Arreglar los errores de compilación", files: [], dependsOn: [] },
+      {
+        system: `${ROLE_PROMPTS.fast}\n\n${projectSection(s.project, s.account)}`,
+        messages: [
+          {
+            role: "user",
+            content: `## Petición del dueño (ya hecha)\n${s.request}\n\n## Lo que hiciste\n${reply}\n\n## La app ya no compila\n${formatProblems(broken)}\n\nArregla la causa con el menor cambio posible y comprueba con get_problems. Responde en una o dos frases qué arreglaste.`,
+          },
+        ],
+        tools: builderTools,
+        ctx: fixCtx,
+        routing: { complexity: 2, domains: s.features.domains, needsVision: false },
+      },
+    );
+    broken = await recheckBuild(s.project.id);
+    if (fix.text) reply = `${reply}\n\n${fix.text}`;
+  }
+  if (broken.length) reply += `\n\n⚠ Todavía no compila: ${broken[0]!.title}`;
   await save(s.project.id, { role: "assistant", content: [{ type: "text", text: reply }] }, s.turnId);
+  if (reply !== (r.text || "Listo.")) s.emit({ type: "text", text: reply.slice((r.text || "Listo.").length).trim() });
 }
 
-async function runTeam(s: TurnState): Promise<boolean> {
+/**
+ * The team path. `given` is a plan approved earlier in Plan mode (no re-planning);
+ * `planOnly` stops after planning so the owner can review the plan first.
+ */
+const CHAT_TOOLS = ["project_map", "read_files", "find_symbol", "related_files", "search_code", "describe_database", "query_database", "get_problems", "get_logs", "list_secrets", "fetch_url"];
+
+/** Chat mode: answers, explains and investigates with read-only tools; changes nothing. */
+async function runChat(s: TurnState): Promise<void> {
+  const ctx: ToolContext = { account: s.account, projectId: s.project.id, author: "builder" };
+  const r = await runLane(
+    s,
+    { id: "chat", role: "chat", goal: s.request.slice(0, 500), files: [], dependsOn: [] },
+    {
+      system: `${ROLE_PROMPTS.fast}\n\n# Chat mode\nThe owner wants to talk, not build: answer, explain, investigate (code, data, logs, problems) and propose. You cannot change files or data in this mode. When you suggest changes, describe them as concrete steps and end by suggesting Build mode (or Plan mode for big ones). Keep answers short and in the owner's language.\n\n${projectSection(s.project, s.account)}`,
+      messages: [{ role: "user", content: [{ type: "text", text: [s.context, `## Pregunta\n${s.request}`].filter(Boolean).join("\n\n") }, ...s.images] }],
+      tools: tools(CHAT_TOOLS),
+      ctx,
+      routing: { complexity: Math.min(3, s.features.complexity), domains: s.features.domains, needsVision: s.features.needsVision },
+    },
+  );
+  if (r.model) await recordOutcome(taskClassOf("chat", s.features), r.model, rewardOf(r, null), r.usd);
+  await save(s.project.id, { role: "assistant", content: [{ type: "text", text: r.text || "…" }] }, s.turnId);
+}
+
+export type ChatMode = "build" | "chat" | "plan";
+
+/** A commit title from the owner's request: first line, without pasted errors or element context. */
+function commitMessage(request: string): string {
+  if (request.startsWith("Arregla est")) return "Forja: arreglar errores de la vista previa";
+  const line = request.replace(/\n\n\[Elemento seleccionado[\s\S]*$/, "").replace(/```[\s\S]*?```/g, "").split("\n").find((l) => l.trim()) ?? "Cambios";
+  return `Forja: ${line.trim().slice(0, 72)}`;
+}
+
+/** The plan waiting for approval in this project, if any (from Plan mode). */
+export async function pendingPlan(projectId: string): Promise<{ turnId: string; plan: Plan } | null> {
+  const row = await one<{ turn_id: string; plan: Plan }>(`select turn_id, plan from project_plans where project_id = $1`, [projectId]);
+  return row ? { turnId: row.turn_id, plan: row.plan } : null;
+}
+
+async function runTeam(s: TurnState, opts: { given?: Plan; planOnly?: boolean } = {}): Promise<boolean> {
   const files = await readAllFiles(s.project.id);
   const map = projectMap(files, await describeSchema(s.project.id, true));
   const head = projectSection(s.project, s.account);
 
   // 1. Plan.
-  let plan: Plan | null = null;
+  let plan: Plan | null = opts.given ?? null;
   const submitPlan: BuilderTool = {
     name: "submit_plan",
     description: "Entrega el plan final (una sola vez). tasks: 1–6 tareas con id, role (data|backend|ui), goal, files (rutas exactas o carpetas terminadas en /) y depends_on.",
@@ -352,7 +419,8 @@ async function runTeam(s: TurnState): Promise<boolean> {
     },
   };
   const plannerCtx: ToolContext = { account: s.account, projectId: s.project.id, author: "builder", owned: PLANNER_FILES };
-  await runLane(
+  if (!opts.given)
+    await runLane(
     s,
     { id: "plan", role: "planner", goal: "Planificar el trabajo del equipo", files: PLANNER_FILES, dependsOn: [] },
     {
@@ -363,7 +431,8 @@ async function runTeam(s: TurnState): Promise<boolean> {
           content: [{ type: "text", text: [s.context, `## Petición del dueño\n${s.request}`, map, "Planifica y llama a submit_plan."].filter(Boolean).join("\n\n") }, ...s.images],
         },
       ],
-      tools: [...tools(ROLE_TOOLS.planner), submitPlan],
+      // In Plan mode nothing is written until the owner approves.
+      tools: [...tools(opts.planOnly ? ROLE_TOOLS.planner.filter((n) => !/write|edit/.test(n)) : ROLE_TOOLS.planner), submitPlan],
       ctx: plannerCtx,
       routing: { complexity: s.features.complexity, domains: s.features.domains, needsVision: s.features.needsVision },
     },
@@ -371,7 +440,28 @@ async function runTeam(s: TurnState): Promise<boolean> {
   const finalPlan = plan as Plan | null;
   if (!finalPlan) return false;
   s.emit({ type: "plan", summary: finalPlan.summary, tasks: finalPlan.tasks.map((t) => ({ id: t.id, role: t.role, goal: t.goal, files: t.files, dependsOn: t.dependsOn })) });
-  if (finalPlan.summary) s.emit({ type: "text", text: finalPlan.summary });
+  if (opts.planOnly) {
+    await q(
+      `insert into project_plans (project_id, turn_id, plan) values ($1, $2, $3)
+       on conflict (project_id) do update set turn_id = excluded.turn_id, plan = excluded.plan, created_at = now()`,
+      [s.project.id, s.turnId, JSON.stringify(finalPlan)],
+    );
+    const ROLE_ES: Record<SpecialistRole, string> = { data: "Datos", backend: "Backend", ui: "Interfaz" };
+    const text = [
+      finalPlan.summary,
+      finalPlan.tasks
+        .map((t, i) => `${i + 1}. **${ROLE_ES[t.role]}** — ${t.goal.split("\n")[0]!.slice(0, 240)}${t.dependsOn.length ? ` (después de ${t.dependsOn.join(", ")})` : ""}`)
+        .join("\n"),
+      finalPlan.contract ? `**Contrato**\n${finalPlan.contract.slice(0, 1500)}` : "",
+      "Pulsa «Implementar plan» para construirlo, o dime qué cambiar.",
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+    s.emit({ type: "text", text });
+    await save(s.project.id, { role: "assistant", content: [{ type: "text", text }] }, s.turnId);
+    return true;
+  }
+  if (finalPlan.summary && !opts.given) s.emit({ type: "text", text: finalPlan.summary });
 
   // 2. Specialists in parallel along the dependency graph.
   const overview = finalPlan.tasks.map((t) => `- ${t.id} (${t.role}): ${t.goal.split("\n")[0]!.slice(0, 160)} · archivos: ${t.files.join(", ") || "—"}`).join("\n");
@@ -506,7 +596,7 @@ async function runTeam(s: TurnState): Promise<boolean> {
       { complexity: 1, domains: [], needsVision: false },
       {
         system:
-          "Eres Forja. Escribe la respuesta final al dueño en su idioma (el de su petición): qué se construyó, qué probar en la vista previa y qué tiene que hacer él (secretos, contraseña). Breve, en viñetas, sin código.",
+          "Eres Forja. Escribe la respuesta final al dueño en su idioma (el de su petición), en palabras sencillas y sin código: primero qué quedó hecho; luego qué se comprobó y qué NO se comprobó (sé honesto: si la revisión falló o algo no se probó, dilo); qué probar en la vista previa; una lista «Ten en cuenta» con atajos tomados, cosas pendientes y lo que tiene que hacer él (secretos, contraseña); y como mucho una pregunta final con el siguiente paso obvio. Breve, en viñetas.",
         messages: [
           {
             role: "user",
@@ -530,10 +620,19 @@ async function runTeam(s: TurnState): Promise<boolean> {
   return true;
 }
 
-export async function runBuilderTurn(account: Account, projectId: string, userText: string, emit: (e: AgentEvent) => void, attachments: string[] = []) {
+export async function runBuilderTurn(
+  account: Account,
+  projectId: string,
+  userText: string,
+  emit: (e: AgentEvent) => void,
+  attachments: string[] = [],
+  mode: ChatMode = "build",
+  implementPlan = false,
+) {
   if (active.has(projectId)) throw new Error("El constructor ya está trabajando en este proyecto.");
   const abort = new AbortController();
   active.set(projectId, abort);
+  holdSync(projectId);
   const turnId = newId();
   const project = (await getProject(projectId))!;
   const payer = project.ownerId;
@@ -565,12 +664,24 @@ export async function runBuilderTurn(account: Account, projectId: string, userTe
     await save(projectId, { role: "user", content: [{ type: "text", text }] }, turnId);
     s.images = await imageBlocks(projectId, text);
     s.context = await turnContext(projectId, turnId);
+    // Like a developer glancing at the console first: what is broken in the preview right now.
+    watchProblems(projectId);
+    await recheckBuild(projectId).catch(() => {});
+    const open = listProblems(projectId);
+    if (open.length) s.context += `\n\n## Problemas abiertos en la vista previa\n${formatProblems(open, 8)}`;
     const fileCount = Object.keys(await readAllFiles(projectId)).length;
     s.features = await analyzeRequest(scope, userText, { images: s.images.length, targeted: userText.includes("[Elemento seleccionado"), fileCount });
-    const fast = useFastPath(s.features);
-    emit({ type: "route", fastPath: fast, features: s.features });
+    const approved = implementPlan && mode === "build" ? await pendingPlan(projectId) : null;
+    const fast = mode === "chat" || (mode === "build" && !approved && useFastPath(s.features));
+    emit({ type: "route", fastPath: fast, features: s.features, mode });
 
-    if (fast) await runFast(s);
+    if (mode === "chat") await runChat(s);
+    else if (mode === "plan") {
+      if (!(await runTeam(s, { planOnly: true }))) throw new Error("No pude preparar un plan. Prueba a describir la petición con más detalle.");
+    } else if (approved) {
+      await q(`delete from project_plans where project_id = $1`, [projectId]);
+      await runTeam(s, { given: approved.plan });
+    } else if (fast) await runFast(s);
     else if (!(await runTeam(s))) {
       emit({ type: "text", text: "No pude repartir el trabajo; lo hago con un solo agente." });
       await runFast(s);
@@ -589,6 +700,8 @@ export async function runBuilderTurn(account: Account, projectId: string, userTe
     active.delete(projectId);
     // A named point per turn, labelled with the request, on top of the per-file change log.
     if (s.wrote) await createCheckpoint(projectId, userText.slice(0, 80), "builder").catch(() => {});
+    // Linked to GitHub: the whole turn goes up as one commit named after the request.
+    void releaseSync(projectId, commitMessage(userText)).catch(() => {});
     void updateSummary(projectId, billing, scope).catch(() => {});
   }
 }

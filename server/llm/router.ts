@@ -8,7 +8,7 @@ import { ModelCallError, textOf, type Effort, type LlmRequest, type LlmResponse,
 
 // --- Roles ------------------------------------------------------------------------------------
 
-export type Role = "router" | "planner" | "data" | "backend" | "ui" | "qa" | "fast" | "summarizer" | "app";
+export type Role = "router" | "planner" | "data" | "backend" | "ui" | "qa" | "fast" | "chat" | "summarizer" | "app";
 
 interface RoleProfile {
   /** Minimum tier before complexity adjustments. */
@@ -29,6 +29,7 @@ export const ROLES: Record<Role, RoleProfile> = {
   ui: { minTier: 3, effort: "medium", needsTools: true, estIn: 60_000, estOut: 12_000 },
   qa: { minTier: 3, effort: "medium", needsTools: true, estIn: 50_000, estOut: 3_000 },
   fast: { minTier: 2, effort: "medium", needsTools: true, estIn: 40_000, estOut: 5_000 },
+  chat: { minTier: 1, effort: "low", needsTools: true, estIn: 25_000, estOut: 1_500 },
   app: { minTier: 1, effort: "low", needsTools: false, estIn: 2_000, estOut: 500 },
 };
 

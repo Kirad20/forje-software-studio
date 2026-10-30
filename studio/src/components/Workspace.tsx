@@ -4,6 +4,7 @@ import { DeleteDialog } from "../pages/Dashboard";
 import { go } from "../router";
 import type { SelectedElement } from "./Chat";
 import { Avatar, copyText, Modal, Switch } from "./ui";
+import { GithubSection } from "./GitHub";
 import { ProjectModels } from "./Models";
 
 // --- Preview canvas -----------------------------------------------------------------------
@@ -32,8 +33,8 @@ const LOADING_STEPS = ["Preparando el entorno", "Compilando la app", "Cargando l
  */
 export const PreviewCanvas = forwardRef<
   PreviewHandle,
-  { project: Project; device: Device; fullscreen: boolean; onPath: (p: string) => void; onSelected: (el: SelectedElement) => void; onSelectEnded: () => void }
->(function PreviewCanvas({ project, device, fullscreen, onPath, onSelected, onSelectEnded }, ref) {
+  { project: Project; device: Device; fullscreen: boolean; onPath: (p: string) => void; onSelected: (el: SelectedElement) => void; onSelectEnded: () => void; onFix?: () => void }
+>(function PreviewCanvas({ project, device, fullscreen, onPath, onSelected, onSelectEnded, onFix }, ref) {
   const frame = useRef<HTMLIFrameElement>(null);
   const [nonce, setNonce] = useState(0);
   const [step, setStep] = useState(0);
@@ -59,10 +60,11 @@ export const PreviewCanvas = forwardRef<
       if (m.type === "forja:path") onPath(m.path);
       if (m.type === "forja:selected") onSelected(m.element);
       if (m.type === "forja:select-ended") onSelectEnded();
+      if (m.type === "forja:fix") onFix?.();
     };
     window.addEventListener("message", onMsg);
     return () => window.removeEventListener("message", onMsg);
-  }, [origin, onPath, onSelected, onSelectEnded]);
+  }, [origin, onPath, onSelected, onSelectEnded, onFix]);
 
   useEffect(() => {
     if (loaded) return;
@@ -684,6 +686,8 @@ export function ProjectSettings({ project, onChange }: { project: Project; onCha
         <AppearanceSection project={project} onChange={onChange} />
 
         <ProjectModels projectId={project.id} canEdit={project.access !== "editor"} />
+
+        <GithubSection projectId={project.id} projectName={project.name} />
 
         <section className="card section">
           <h3>✦ Instrucciones para la IA</h3>

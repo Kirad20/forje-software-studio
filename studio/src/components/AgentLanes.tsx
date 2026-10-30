@@ -36,6 +36,7 @@ const ROLE: Record<string, { label: string; icon: string }> = {
   ui: { label: "Interfaz", icon: "▭" },
   qa: { label: "Revisión", icon: "✓" },
   fast: { label: "Constructor", icon: "✦" },
+  chat: { label: "Chat", icon: "◌" },
 };
 
 const STEP_LABEL: Record<string, string> = {
@@ -55,6 +56,7 @@ const STEP_LABEL: Record<string, string> = {
   run_tests: "Pruebas",
   call_endpoint: "Probó",
   get_logs: "Leyó los registros",
+  get_problems: "Revisó los errores",
   submit_plan: "Entregó el plan",
   report_review: "Entregó la revisión",
   request_secret: "Pidió el secreto",
@@ -121,7 +123,7 @@ function LaneCard({ lane }: { lane: Lane }) {
 
 /** One builder turn as a team: plan, one lane per agent (each with its model), review and savings. */
 export function AgentLanes({ team }: { team: TeamTurn }) {
-  const solo = team.lanes.length === 1 && team.lanes[0]!.role === "fast";
+  const solo = team.lanes.length === 1 && ["fast", "chat"].includes(team.lanes[0]!.role);
   if (solo) {
     const l = team.lanes[0]!;
     return (

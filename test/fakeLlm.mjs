@@ -83,7 +83,21 @@ function script(body) {
       };
     return { role: "ui", res: reply("Página /notes lista.") };
   }
+  // Chat mode: reads, never writes.
+  if (sys.includes("# Chat mode")) {
+    if (step === 0) return { role: "chat", res: reply(null, [call("get_problems", {})]) };
+    return { role: "chat", res: reply(`Respuesta de chat. ${lastTool.startsWith("Sin problemas") ? "No hay errores ahora." : "Hay errores."}`) };
+  }
+  // Fix pass after a change that broke the build.
+  if (userText.includes("## La app ya no compila")) {
+    if (step === 0) return { role: "fix", res: reply(null, [call("write_file", { path: "pages/_index.tsx", content: "export default function Home() { return <h1>Portada</h1>; }\n" })]) };
+    return { role: "fix", res: reply("Arreglé la portada.") };
+  }
   // Fast agent: the full manual, a single opening message with "## Petición".
+  if (userText.includes("## Petición") && userText.includes("Rompe la portada")) {
+    if (step === 0) return { role: "fast", res: reply(null, [call("write_file", { path: "pages/_index.tsx", content: "export default function Home() { return <h1>Portada</h1>\n" })]) };
+    return { role: "fast", res: reply("Cambié la portada.") };
+  }
   if (userText.includes("## Petición")) {
     if (step === 0) return { role: "fast", res: reply(null, [call("write_file", { path: "base.css", content: ":root { --primary: #16a34a; }\n" })]) };
     return { role: "fast", res: reply("Cambié el color principal a verde.") };

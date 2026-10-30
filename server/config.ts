@@ -37,6 +37,17 @@ export const config = {
   smtpUrl: env.SMTP_URL ?? "",
   emailFrom: env.EMAIL_FROM ?? "noreply@forja.local",
   stripeKey: env.STRIPE_SECRET_KEY ?? "",
+  github: {
+    /** REST API base (GitHub Enterprise: https://host/api/v3). */
+    apiUrl: (env.GITHUB_API_URL ?? "https://api.github.com").replace(/\/$/, ""),
+    /** Optional OAuth app for "Conectar con GitHub"; without it, accounts connect with a personal access token. */
+    clientId: env.GITHUB_CLIENT_ID ?? "",
+    clientSecret: env.GITHUB_CLIENT_SECRET ?? "",
+    webUrl: (env.GITHUB_WEB_URL ?? "https://github.com").replace(/\/$/, ""),
+    /** Verifies push webhooks (POST /api/github/webhook); without it, linked repos are polled. */
+    webhookSecret: env.GITHUB_WEBHOOK_SECRET ?? "",
+    pollMs: Number(env.GITHUB_POLL_MS ?? 60_000),
+  },
   /** A project database closes after this long without queries ("sleeps"). */
   dbIdleMs: 60_000,
   /** Longest a single endpoint call or job run may take. */

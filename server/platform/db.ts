@@ -291,6 +291,37 @@ create table if not exists agent_tasks (
 create index if not exists agent_tasks_turn on agent_tasks (project_id, turn_id);
 alter table chat_messages add column if not exists turn_id text;
 
+-- GitHub: one connection per account (token encrypted), one linked repository per project.
+create table if not exists github_accounts (
+  account_id text primary key references accounts(id) on delete cascade,
+  login text not null,
+  token_enc text not null,
+  created_at timestamptz not null default now()
+);
+create table if not exists project_github (
+  project_id text primary key references projects(id) on delete cascade,
+  account_id text not null references accounts(id) on delete cascade,
+  owner text not null,
+  repo text not null,
+  branch text not null default 'main',
+  -- Last commit both sides agree on, its tree, and path -> git blob sha at that point.
+  last_sha text,
+  last_tree text,
+  synced jsonb not null default '{}',
+  status text not null default 'ok',
+  error text,
+  synced_at timestamptz,
+  created_at timestamptz not null default now()
+);
+
+-- A plan from Plan mode, waiting for the owner to approve it ("Implementar plan").
+create table if not exists project_plans (
+  project_id text primary key references projects(id) on delete cascade,
+  turn_id text not null,
+  plan jsonb not null,
+  created_at timestamptz not null default now()
+);
+
 -- Rolling summary of older chat turns, so each turn sends a short context.
 create table if not exists conversation_summaries (
   project_id text primary key references projects(id) on delete cascade,

@@ -7,6 +7,7 @@ import { listSecrets, requestSecret } from "../baas/secrets.js";
 import type { Account } from "../platform/accounts.js";
 import { readLogs } from "../platform/events.js";
 import * as projects from "../platform/projects.js";
+import { formatProblems, listProblems, recheckBuild, watchProblems } from "../platform/problems.js";
 import { checkProject, compileServerModule, endpointRoutes, formatProblem, jobFiles, pageRoutes } from "../runtime/bundler.js";
 import { runInSandbox } from "../runtime/sandbox.js";
 import { publishProject } from "../runtime/publish.js";
@@ -342,6 +343,17 @@ export const builderTools: BuilderTool[] = [
     async run(i: { errors_only?: boolean; limit?: number }, ctx) {
       const logs = readLogs(ctx.projectId, { level: i.errors_only ? "error" : undefined, limit: i.limit ?? 60 });
       return clip(logs.map((l) => `${l.at} [${l.env}/${l.source}/${l.level}] ${l.message}`).join("\n") || "Sin registros.");
+    },
+  },
+  {
+    name: "get_problems",
+    description:
+      "Lo que está roto AHORA en la vista previa, sin duplicados: errores de compilación, errores no capturados del navegador (con su pila), llamadas a la API que fallaron (método, ruta, código HTTP y respuesta) y fallos de endpoints o tareas. Úsala primero ante un error, una pantalla en blanco o un 4xx/5xx, y otra vez al terminar para confirmar que no queda nada.",
+    input_schema: obj({ recheck: { type: "boolean", description: "Vuelve a compilar antes de responder (por defecto sí)." } }),
+    async run(i: { recheck?: boolean }, ctx) {
+      watchProblems(ctx.projectId);
+      if (i.recheck !== false) await recheckBuild(ctx.projectId);
+      return clip(formatProblems(listProblems(ctx.projectId), 20));
     },
   },
   {

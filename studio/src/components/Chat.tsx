@@ -1,12 +1,40 @@
 import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import { api, streamPost } from "../api";
 import { AgentLanes, type Lane, type TeamTurn } from "./AgentLanes";
+import { GithubCommitCard, type GithubCard } from "./GitHub";
+import { fixMessage, ProblemsBar, type Problem } from "./Problems";
+
+type Mode = "build" | "chat" | "plan";
+const MODES: Record<Mode, { label: string; hint: string; placeholder: string }> = {
+  build: { label: "Construir", hint: "Hace los cambios directamente", placeholder: "Pide un cambio o una función nueva…" },
+  chat: { label: "Chat", hint: "Pregunta, investiga errores o explora ideas sin cambiar nada (más barato)", placeholder: "Pregunta lo que quieras sobre tu app…" },
+  plan: { label: "Plan", hint: "Prepara un plan detallado para revisarlo antes de construir", placeholder: "Describe lo que quieres planificar…" },
+};
+
+/** The owner's text; pasted errors (```…```) render as code blocks. */
+function UserText({ text }: { text: string }) {
+  const parts = text.split(/```\n?/);
+  return (
+    <>
+      {parts.map((p, i) =>
+        i % 2 ? (
+          <pre key={i} className="user-code">
+            {p.trimEnd()}
+          </pre>
+        ) : (
+          <Fragment key={i}>{p}</Fragment>
+        ),
+      )}
+    </>
+  );
+}
 import { Check, Cross, Send } from "./Icons";
 
 type Block =
   | { type: "text"; text: string }
   | { type: "tool_use"; id: string; name: string; input: Record<string, unknown> }
-  | { type: "tool_result"; tool_use_id: string; content: string; is_error?: boolean };
+  | { type: "tool_result"; tool_use_id: string; content: string; is_error?: boolean }
+  | GithubCard;
 
 interface Message {
   role: "user" | "assistant";
@@ -63,7 +91,8 @@ type Item =
   | { kind: "user"; text: string; element?: string; attachments?: string[] }
   | { kind: "ai"; text: string }
   | { kind: "steps"; steps: Step[] }
-  | { kind: "team"; team: TeamTurn };
+  | { kind: "team"; team: TeamTurn }
+  | { kind: "github"; card: GithubCard };
 
 /** An element picked with the Select tool in the preview. */
 export interface SelectedElement {
@@ -154,6 +183,7 @@ function toItems(messages: Message[], tasks: TaskRow[] = []): Item[] {
       items.push({ kind: "team", team: teamOf(byTurn.get(m.turnId)!) });
     }
     for (const b of m.content) {
+      if (b.type === "github") items.push({ kind: "github", card: b });
       if (b.type === "text" && b.text.trim()) items.push(m.role === "user" ? userItem(b.text) : { kind: "ai", text: b.text });
       if (b.type === "tool_use") {
         const r = results.get(b.id);
@@ -232,14 +262,42 @@ export function Chat({
   onBuildingChange,
   selection = null,
   onClearSelection = () => {},
+  problems = [],
+  fixNonce = 0,
+  reloadKey = 0,
 }: {
   projectId: string;
   onTurnEnd: () => void;
   onBuildingChange: (b: boolean) => void;
   selection?: SelectedElement | null;
   onClearSelection?: () => void;
+  /** What is broken in the preview right now (live from the project's event feed). */
+  problems?: Problem[];
+  /** Bumped when the preview's "Intentar arreglar" button is pressed. */
+  fixNonce?: number;
+  /** Bumped when something outside a turn adds to the chat (a commit from GitHub). */
+  reloadKey?: number;
 }) {
   const [items, setItems] = useState<Item[]>([]);
+  const [mode, setModeState] = useState<Mode>(() => {
+    try {
+      const m = localStorage.getItem("forja:chat-mode");
+      return m === "chat" || m === "plan" ? m : "build";
+    } catch {
+      return "build";
+    }
+  });
+  const setMode = (m: Mode) => {
+    setModeState(m);
+    try {
+      localStorage.setItem("forja:chat-mode", m);
+    } catch {}
+  };
+  // Follow-ups typed while the builder works are sent, in order, when it finishes.
+  const [queue, setQueue] = useState<{ text: string; mode: Mode }[]>([]);
+  const queueRef = useRef(queue);
+  queueRef.current = queue;
+  const [planTurn, setPlanTurn] = useState<string | null>(null);
   const [live, setLive] = useState<Item[]>([]);
   const [input, setInput] = useState("");
   const [attachments, setAttachments] = useState<string[]>([]);
@@ -269,10 +327,22 @@ export function Chat({
   const started = useRef(false);
 
   const load = () =>
-    api<{ messages: Message[]; tasks?: TaskRow[]; building: boolean }>(`/projects/${projectId}/chat`).then((r) => {
+    api<{ messages: Message[]; tasks?: TaskRow[]; building: boolean; pendingPlanTurn?: string | null }>(`/projects/${projectId}/chat`).then((r) => {
       setItems(toItems(r.messages, r.tasks));
+      setPlanTurn(r.pendingPlanTurn ?? null);
       return r;
     });
+
+  useEffect(() => {
+    if (reloadKey > 0 && !building) void load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reloadKey]);
+
+  // The preview's own "Intentar arreglar" (on its build-error page).
+  useEffect(() => {
+    if (fixNonce > 0 && problems.length) void send(fixMessage(problems.filter((p) => p.kind === "build").length ? problems.filter((p) => p.kind === "build") : problems), { mode: "build" });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fixNonce]);
 
   useEffect(() => {
     void load().then((r) => {
@@ -296,9 +366,14 @@ export function Chat({
     onBuildingChange(b);
   };
 
-  async function send(text: string) {
-    if (!text.trim() || building) return;
+  async function send(text: string, opts: { mode?: Mode; implementPlan?: boolean } = {}) {
+    if (!text.trim()) return;
+    const turnMode = opts.mode ?? mode;
     setInput("");
+    if (building) {
+      setQueue((q) => [...q, { text, mode: turnMode }]);
+      return;
+    }
     setError("");
     setBusy(true);
     const message = withElement(text, selection);
@@ -319,16 +394,16 @@ export function Chat({
       return l;
     };
     try {
-      await streamPost(`/projects/${projectId}/chat`, { message, attachments: files }, (e) => {
+      await streamPost(`/projects/${projectId}/chat`, { message, attachments: files, mode: turnMode, implementPlan: !!opts.implementPlan }, (e) => {
         if (e.type === "route") {
           if (!e.fastPath) lane("plan", "planner").goal = "Planificar el trabajo del equipo";
         } else if (e.type === "plan") {
           for (const t of e.tasks as { id: string; role: string; goal: string; dependsOn: string[] }[]) Object.assign(lane(t.id, t.role), { goal: t.goal, dependsOn: t.dependsOn });
         } else if (e.type === "task_start") Object.assign(lane(e.taskId, e.role), { status: "running", model: e.model });
-        else if (e.type === "task_end") Object.assign(lane(e.taskId), { status: e.ok ? "done" : "failed", usd: e.usd, tokens: e.tokens, note: e.taskId === "fast" ? undefined : e.summary });
+        else if (e.type === "task_end") Object.assign(lane(e.taskId), { status: e.ok ? "done" : "failed", usd: e.usd, tokens: e.tokens, note: e.taskId === "fast" || e.taskId === "chat" ? undefined : e.summary });
         else if (e.type === "review" && team) team.review = { ok: e.ok, summary: e.summary, issues: e.issues };
         else if (e.type === "done" && team) team.metrics = { usd: e.usd, baselineUsd: e.baselineUsd, cachedTokens: e.cachedTokens };
-        else if (e.type === "text" && e.taskId && e.taskId !== "fast") lane(e.taskId).note = e.text;
+        else if (e.type === "text" && e.taskId && e.taskId !== "fast" && e.taskId !== "chat") lane(e.taskId).note = e.text;
         else if (e.type === "text") turn.push({ kind: "ai", text: e.text });
         else if (e.taskId && e.type === "tool_start") lane(e.taskId).steps.push({ id: e.id, name: e.name, summary: e.summary, state: "running" });
         else if (e.taskId && e.type === "tool_end") {
@@ -352,9 +427,15 @@ export function Chat({
       setBusy(false);
       onTurnEnd();
     }
+    const next = queueRef.current[0];
+    if (next) {
+      setQueue((q) => q.slice(1));
+      void send(next.text, { mode: next.mode });
+    }
   }
 
   const all = [...items, ...live];
+  const lastTurnIsPlan = !!planTurn && !building && items[items.length - 1]?.kind === "ai";
   return (
     <section className="chat">
       <div className="chat-log" ref={logRef}>
@@ -377,7 +458,7 @@ export function Chat({
                   ⌖ {it.element}
                 </div>
               )}
-              {it.text}
+              <UserText text={it.text} />
             </div>
           ) : it.kind === "ai" ? (
             <div key={i} className="msg-ai">
@@ -385,18 +466,37 @@ export function Chat({
             </div>
           ) : it.kind === "team" ? (
             <AgentLanes key={i} team={it.team} />
+          ) : it.kind === "github" ? (
+            <GithubCommitCard key={i} card={it.card} busy={false} onFix={(text) => void send(text, { mode: "build" })} />
           ) : (
             <Steps key={i} steps={it.steps} />
           ),
         )}
-        {building && (
-          <div className="row muted small">
-            <span className="spinner" /> Construyendo…
+        {lastTurnIsPlan && (
+          <div className="row" style={{ gap: 8 }}>
+            <button className="primary sm" onClick={() => send("Implementa el plan.", { mode: "build", implementPlan: true })}>
+              ▶ Implementar plan
+            </button>
+            <span className="small muted">o escribe qué cambiar y lo rehago</span>
           </div>
         )}
+        {building && (
+          <div className="row muted small">
+            <span className="spinner" /> {live.some((it) => it.kind === "team" && it.team.lanes.some((l) => l.role === "chat")) ? "Pensando…" : "Construyendo…"}
+          </div>
+        )}
+        {queue.map((q, i) => (
+          <div key={i} className="queued small">
+            <span className="muted">En cola{q.mode !== "build" ? ` · ${MODES[q.mode].label}` : ""}:</span> {q.text.slice(0, 160)}
+            <button className="ghost sm icon-btn" style={{ height: 20, width: 20 }} aria-label="Quitar de la cola" onClick={() => setQueue((x) => x.filter((_, j) => j !== i))}>
+              ×
+            </button>
+          </div>
+        ))}
         {error && <div className="error-box">{error}</div>}
       </div>
       <div className="composer">
+        <ProblemsBar problems={problems} disabled={false} onFix={(list) => void send(fixMessage(list), { mode: "build" })} />
         {attachments.length > 0 && (
           <div className="row" style={{ flexWrap: "wrap", gap: 6 }}>
             {attachments.map((a) => (
@@ -418,9 +518,8 @@ export function Chat({
           </div>
         )}
         <textarea
-          placeholder={building ? "Espera a que termine o detenlo…" : selection ? "¿Qué cambio en este elemento?" : "Pide un cambio o una función nueva…"}
+          placeholder={building ? "Envía un seguimiento: se manda al terminar…" : selection ? "¿Qué cambio en este elemento?" : MODES[mode].placeholder}
           value={input}
-          disabled={building}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey) {
@@ -430,11 +529,23 @@ export function Chat({
           }}
         />
         <div className="row">
-          <span className="small muted grow">Enter para enviar · Shift+Enter nueva línea</span>
+          <div className="segmented mode-switch" role="radiogroup" aria-label="Modo del chat">
+            {(Object.keys(MODES) as Mode[]).map((m) => (
+              <button key={m} role="radio" aria-checked={mode === m} className={mode === m ? "on" : ""} title={MODES[m].hint} onClick={() => setMode(m)}>
+                {MODES[m].label}
+              </button>
+            ))}
+          </div>
+          <span className="grow" />
           {building ? (
-            <button className="sm" onClick={() => api(`/projects/${projectId}/chat/stop`, { body: {} })}>
-              Detener
-            </button>
+            <>
+              <button className="sm" disabled={!input.trim()} onClick={() => send(input)}>
+                Poner en cola
+              </button>
+              <button className="sm" onClick={() => api(`/projects/${projectId}/chat/stop`, { body: {} })}>
+                Detener
+              </button>
+            </>
           ) : (
             <>
               <input ref={fileInput} type="file" multiple hidden accept="image/*,.pdf,.txt,.md,.csv,.json,.svg" onChange={(e) => void attach(e.target.files)} />

@@ -61,7 +61,7 @@ export { TALK, WORK };
 /** Tools each role may use; special tools (submit_plan, report_review) are added by the orchestrator. */
 export const ROLE_TOOLS: Record<"planner" | "data" | "backend" | "ui" | "qa", string[]> = {
   planner: ["project_map", "read_files", "find_symbol", "related_files", "search_code", "describe_database", "fetch_url", "write_file", "edit_file"],
-  data: ["project_map", "read_files", "find_symbol", "search_code", "describe_database", "execute_sql", "query_database", "write_file", "edit_file", "check_build", "run_tests"],
+  data: ["project_map", "read_files", "find_symbol", "search_code", "describe_database", "execute_sql", "query_database", "write_file", "edit_file", "check_build", "get_problems", "run_tests"],
   backend: [
     "project_map",
     "read_files",
@@ -75,6 +75,7 @@ export const ROLE_TOOLS: Record<"planner" | "data" | "backend" | "ui" | "qa", st
     "delete_file",
     "rename_file",
     "check_build",
+    "get_problems",
     "run_tests",
     "call_endpoint",
     "get_logs",
@@ -83,8 +84,8 @@ export const ROLE_TOOLS: Record<"planner" | "data" | "backend" | "ui" | "qa", st
     "setup_auth",
     "fetch_url",
   ],
-  ui: ["project_map", "read_files", "find_symbol", "related_files", "search_code", "write_file", "edit_file", "delete_file", "rename_file", "check_build", "get_logs", "call_endpoint"],
-  qa: ["project_map", "read_files", "find_symbol", "related_files", "search_code", "describe_database", "query_database", "check_build", "run_tests", "call_endpoint", "get_logs"],
+  ui: ["project_map", "read_files", "find_symbol", "related_files", "search_code", "write_file", "edit_file", "delete_file", "rename_file", "check_build", "get_problems", "get_logs", "call_endpoint"],
+  qa: ["project_map", "read_files", "find_symbol", "related_files", "search_code", "describe_database", "query_database", "check_build", "get_problems", "run_tests", "call_endpoint", "get_logs"],
 };
 
 /** Planner-owned files: the shared contract and the builder's notes. */
@@ -94,6 +95,7 @@ export const MAX_STEPS: Record<Role, number> = {
   router: 1,
   summarizer: 1,
   app: 1,
+  chat: 12,
   planner: 14,
   data: 16,
   backend: 30,

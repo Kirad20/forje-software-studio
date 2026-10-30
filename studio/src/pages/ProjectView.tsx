@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api, type Project } from "../api";
 import { UserMenu, type Me } from "../App";
 import { Chat, type SelectedElement } from "../components/Chat";
+import type { Problem } from "../components/Problems";
 import { External, Refresh } from "../components/Icons";
 import { AiPanel, CodePanel, EmailPanel, JobsPanel, LogsPanel, UsersPanel } from "../components/Panels";
 import { AnalyticsPanel, DataPanel, DocsPanel, IntegrationsPanel, PaymentsPanel, SeoPanel, StoragePanel } from "../components/ServicePanels";
@@ -55,6 +56,9 @@ export function ProjectView({ id, me, onCredits }: { id: string; me: Me; onCredi
   const [panel, setPanel] = useState<"checkpoints" | "publish" | null>(null);
   const [palette, setPalette] = useState(false);
   const [codeFile, setCodeFile] = useState<string | null>(null);
+  const [problems, setProblems] = useState<Problem[]>([]);
+  const [fixNonce, setFixNonce] = useState(0);
+  const [chatKey, setChatKey] = useState(0);
   const preview = useRef<PreviewHandle>(null);
   const closePanel = useCallback(() => setPanel(null), []);
   const checkpointRef = useDismiss<HTMLDivElement>(panel === "checkpoints", closePanel);
@@ -69,6 +73,7 @@ export function ProjectView({ id, me, onCredits }: { id: string; me: Me; onCredi
   useEffect(() => {
     void load();
     void loadUsed();
+    void api<{ problems: Problem[] }>(`/projects/${id}/problems`).then((r) => setProblems(r.problems)).catch(() => {});
     const es = new EventSource(`/api/projects/${id}/events`);
     let t: ReturnType<typeof setTimeout>;
     es.onmessage = (m) => {
@@ -78,6 +83,8 @@ export function ProjectView({ id, me, onCredits }: { id: string; me: Me; onCredi
         t = setTimeout(() => (setFilesKey((k) => k + 1), void load()), 400);
       } else if (e.type === "log") setLogLines((l) => [...l.slice(-300), e.entry]);
       else if (e.type === "published") void load();
+      else if (e.type === "problems") setProblems(e.problems);
+      else if (e.type === "github" && e.status === "pulled") setChatKey((k) => k + 1);
     };
     const onKey = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && (e.key === "k" || e.key === "p")) {
@@ -112,6 +119,10 @@ export function ProjectView({ id, me, onCredits }: { id: string; me: Me; onCredi
   };
   const onSelected = useCallback((el: SelectedElement) => setSelection(el), []);
   const onSelectEnded = useCallback(() => setSelecting(false), []);
+  const onFix = useCallback(() => {
+    setDrawer(true);
+    setFixNonce((n) => n + 1);
+  }, []);
   const openService = (key: ServiceKey) => {
     setService(key);
     setView("services");
@@ -286,6 +297,9 @@ export function ProjectView({ id, me, onCredits }: { id: string; me: Me; onCredi
               onBuildingChange={setBuilding}
               selection={selection}
               onClearSelection={() => setSelection(null)}
+              problems={problems}
+              fixNonce={fixNonce}
+              reloadKey={chatKey}
               onTurnEnd={() => {
                 void load();
                 void loadUsed();
@@ -299,7 +313,7 @@ export function ProjectView({ id, me, onCredits }: { id: string; me: Me; onCredi
         <section style={{ minWidth: 0, minHeight: 0, display: "grid" }}>
           {/* The preview stays mounted while other views are open, so it does not reload. */}
           <div style={{ display: view === "preview" ? "grid" : "none", minHeight: 0 }}>
-            <PreviewCanvas ref={preview} project={project} device={device} fullscreen={fullscreen} onPath={setPath} onSelected={onSelected} onSelectEnded={onSelectEnded} />
+            <PreviewCanvas ref={preview} project={project} device={device} fullscreen={fullscreen} onPath={setPath} onSelected={onSelected} onSelectEnded={onSelectEnded} onFix={onFix} />
           </div>
           {view === "services" && (
             <div className="services">

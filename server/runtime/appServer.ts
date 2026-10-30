@@ -11,6 +11,7 @@ import { runInSandbox, SandboxRunError, type SandboxError } from "./sandbox.js";
 import { appHeaders, rateLimit, RateLimitError, uploadHeaders } from "../lib/security.js";
 import { recordPageView } from "../baas/analytics.js";
 import { isDevFile } from "../platform/projects.js";
+import { watchProblems } from "../platform/problems.js";
 import { appUrl, previewOrigin } from "./urls.js";
 
 export interface AppTarget {
@@ -74,6 +75,7 @@ async function loadFiles(t: AppTarget): Promise<FileMap> {
 /** Handles every request under an app's base path. `rest` is the path after the base. */
 export async function serveApp(req: Request, t: AppTarget, rest: string): Promise<Response> {
   const started = Date.now();
+  if (t.env === "preview") watchProblems(t.project.id);
   try {
     const res = await route(req, t, rest);
     for (const [k, v] of Object.entries(appHeaders(t.env))) if (!res.headers.has(k)) res.headers.set(k, v);
@@ -198,7 +200,11 @@ async function html(t: AppTarget, files: FileMap): Promise<Response> {
   const description = escapeHtml((seo.siteDescription || t.project.description).slice(0, 160));
   const reporter = t.env === "preview" ? previewScripts(t.base) : analyticsBeacon(t.base);
   const body = problem
-    ? `<pre style="margin:24px;padding:16px;background:#fff1f0;color:#a8071a;border-radius:8px;white-space:pre-wrap;font:13px ui-monospace,monospace">La app no compila:\n\n${escapeHtml(problem)}</pre>`
+    ? `<pre style="margin:24px;padding:16px;background:#fff1f0;color:#a8071a;border-radius:8px;white-space:pre-wrap;font:13px ui-monospace,monospace">La app no compila:\n\n${escapeHtml(problem)}</pre>${
+        t.env === "preview"
+          ? `<button data-forja-fix style="margin:0 24px;padding:8px 14px;border:0;border-radius:8px;background:#4f46e5;color:#fff;font:600 13px system-ui;cursor:pointer">Intentar arreglar</button>`
+          : ""
+      }`
     : `<div id="root"></div><script type="module" src="${t.base}/_forja/app.js"></script>`;
   const doc = `<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${title}</title><meta name="description" content="${description}"><meta property="og:title" content="${title}"><meta property="og:description" content="${description}">
@@ -251,6 +257,10 @@ function previewScripts(base: string) {
 const send=(level,message)=>navigator.sendBeacon(b+"/_baas/log",JSON.stringify({level,message:String(message).slice(0,4000)}));
 addEventListener("error",e=>send("error",(e.error&&e.error.stack)||e.message));addEventListener("unhandledrejection",e=>send("error",(e.reason&&e.reason.stack)||e.reason));
 const ce=console.error;console.error=(...a)=>{send("error",a.map(x=>x&&x.stack||(typeof x==="string"?x:JSON.stringify(x))).join(" "));ce(...a)};
+const of=window.fetch;window.fetch=async function(input,init){const u=new URL(typeof input==="string"?input:input.url,location.href);const m=((init&&init.method)||(input&&input.method)||"GET").toUpperCase();
+const mine=u.origin===location.origin&&u.pathname.startsWith(b+"/_api/");try{const r=await of.apply(this,arguments);
+if(mine&&r.status>=400&&r.status!==401){r.clone().text().then(t=>send("error","NETWORK "+m+" "+u.pathname.slice(b.length)+" → "+r.status+": "+t.slice(0,1500))).catch(()=>{})}return r}
+catch(e){if(mine)send("error","NETWORK "+m+" "+u.pathname.slice(b.length)+" → ERR: "+(e&&e.message));throw e}};
 const es=new EventSource(b+"/_forja/live");es.onmessage=()=>location.reload();
 const parentOrigin=(location.ancestorOrigins&&location.ancestorOrigins[0])||"*";
 const tell=m=>{if(parent!==window)parent.postMessage(m,parentOrigin)};
@@ -268,6 +278,7 @@ addEventListener("keydown",e=>{if(selecting&&e.key==="Escape"){stop();tell({type
 addEventListener("message",e=>{if(!allowed.includes(e.origin))return;const m=e.data||{};
 if(m.type==="forja:select"){selecting=!!m.on;if(selecting)document.documentElement.style.cursor="crosshair";else stop()}
 if(m.type==="forja:navigate"&&typeof m.path==="string"){history.pushState(null,"",b+m.path);dispatchEvent(new PopStateEvent("popstate"))}});
+document.addEventListener("click",e=>{const t=e.target.closest&&e.target.closest("[data-forja-fix]");if(t){e.preventDefault();tell({type:"forja:fix"})}});
 })();</script>`;
 }
 

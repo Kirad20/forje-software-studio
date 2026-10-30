@@ -7,7 +7,7 @@ import { emitProject } from "./events.js";
 export type FileMap = Record<string, string>;
 
 /** Who made a change, shown in the checkpoint timeline. */
-export type Author = "builder" | "owner" | "mcp" | "system";
+export type Author = "builder" | "owner" | "mcp" | "system" | "github";
 
 export interface SeoSettings {
   siteName?: string;

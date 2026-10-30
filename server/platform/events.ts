@@ -3,7 +3,9 @@ import { EventEmitter } from "node:events";
 export type ProjectEvent =
   | { type: "files"; paths: string[] }
   | { type: "published"; slug: string }
-  | { type: "log"; entry: LogEntry };
+  | { type: "log"; entry: LogEntry }
+  | { type: "problems"; problems: import("./problems.js").Problem[] }
+  | { type: "github"; status: string; message?: string };
 
 export interface LogEntry {
   at: string;
