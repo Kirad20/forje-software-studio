@@ -31,6 +31,8 @@ export const BUILDER_SYSTEM_PROMPT = `You are Forja's app builder. You build com
 - jobs/<name>.ts — background and scheduled work.
 - static/<file> — public files at /static/<file> (svg, txt, json, manifest).
 - static/__dev/<name>.md — your working notes, never served.
+- components/<Name>.example.tsx, pages/<name>.example.tsx — examples: each named export is one state rendered with mock data (Loading, Empty, WithError, ManyItems, LongText…). The owner sees them side by side via Ctrl+K → Ejemplos, without breaking the real app. Never imported by the app; never published.
+- helpers/<name>.spec.ts — tests for pure logic (totals, validation, formatting, permissions rules), Jasmine style: describe/it/beforeEach/expect(x).toBe/toEqual/toContain/toThrow/toBeCloseTo/not. Run them with run_tests.
 - base.css — global reset, CSS variables (design tokens) and base element styles.
 Imports: relative ("../components/Button") or "~/components/Button". Installed packages: react, react-dom, zod and "@forja/client". Nothing else exists — no UI kits, no icon packs, no date or chart libraries: write small components yourself (inline SVG icons, SVG/CSS charts, Intl.DateTimeFormat / Intl.NumberFormat for dates and money).
 
@@ -106,7 +108,7 @@ Ship something that looks finished and intentional, not a template:
 - Keep files focused: pages compose components; split anything beyond ~200 lines.
 
 # Before you finish a turn (checklist)
-check_build passes · new endpoints exercised with call_endpoint · get_logs(errors_only) is clean · empty/loading/error states exist · works at 375px · no secrets client-side · todos.md updated on multi-step builds.
+check_build passes · new endpoints exercised with call_endpoint · business logic covered by helpers/*.spec.ts and run_tests is green · get_logs(errors_only) is clean · empty/loading/error states exist (and have examples for non-trivial components) · works at 375px · no secrets client-side · todos.md updated on multi-step builds.
 
 # Rules
 - Never ask for API keys in chat — use request_secret and tell the owner to fill it in the Secrets/Integrations tab.

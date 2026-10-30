@@ -101,7 +101,7 @@ class ProjectSandbox {
     });
   }
 
-  async run(kind: "endpoint" | "job", input: RunInput, ctx: ServiceContext): Promise<unknown> {
+  async run(kind: "endpoint" | "job" | "test", input: RunInput, ctx: ServiceContext): Promise<unknown> {
     if (!this.child) this.start();
     await this.ready;
     if (this.idle) clearTimeout(this.idle);
@@ -241,7 +241,7 @@ async function dispatch(projectId: string, run: Run, method: string, args: unkno
 
 const sandboxes = new Map<string, ProjectSandbox>();
 
-export async function runInSandbox(projectId: string, kind: "endpoint" | "job", input: Omit<RunInput, "env">, source: "endpoint" | "job") {
+export async function runInSandbox(projectId: string, kind: "endpoint" | "job" | "test", input: Omit<RunInput, "env">, source: "endpoint" | "job") {
   const ctx = await serviceContext(projectId, input.env_name, input.base, source);
   let box = sandboxes.get(projectId);
   if (!box) sandboxes.set(projectId, (box = new ProjectSandbox(projectId)));

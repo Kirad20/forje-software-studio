@@ -119,6 +119,10 @@ export async function buildClient(files: FileMap, opts: { minify?: boolean } = {
     `const routes = [${routes.map((r, i) => `{ pattern: ${JSON.stringify(r.pattern)}, component: P${i} }`).join(", ")}];`,
     `createRoot(document.getElementById("root")).render(createElement(ForjaApp, { routes${layout ? ", layout: Layout" : ""}${notFound ? ", notFound: NotFound" : ""} }));`,
   );
+  return bundleBrowser(files, lines.join("\n"), opts.minify);
+}
+
+async function bundleBrowser(files: FileMap, entry: string, minify = false): Promise<{ js: string; css: string }> {
   try {
     const result = await esbuild.build({
       entryPoints: ["forja:entry"],
@@ -129,17 +133,43 @@ export async function buildClient(files: FileMap, opts: { minify?: boolean } = {
       platform: "browser",
       target: "es2022",
       jsx: "automatic",
-      minify: opts.minify,
-      sourcemap: opts.minify ? false : "inline",
+      minify,
+      sourcemap: minify ? false : "inline",
       logLevel: "silent",
-      define: { "process.env.NODE_ENV": JSON.stringify(opts.minify ? "production" : "development") },
-      plugins: [vfsPlugin(files, { path: "__entry__.tsx", contents: lines.join("\n") })],
+      define: { "process.env.NODE_ENV": JSON.stringify(minify ? "production" : "development") },
+      plugins: [vfsPlugin(files, { path: "__entry__.tsx", contents: entry })],
     });
     const out = (ext: string) => result.outputFiles.find((f) => f.path.endsWith(ext))?.text ?? "";
     return { js: out(".js"), css: out(".css") };
   } catch (e) {
     throw new BuildError(toProblems(e));
   }
+}
+
+// --- Examples: every state of a component or page, side by side ----------------------------
+
+/** components/Card.example.tsx, pages/orders.example.tsx: each named export is one example. */
+export const exampleFiles = (files: FileMap) => Object.keys(files).filter((f) => /^(components|pages)\/.+\.example\.tsx$/.test(f)).sort();
+
+export async function buildExamples(files: FileMap, file: string): Promise<{ js: string; css: string }> {
+  if (!exampleFiles(files).includes(file)) throw new BuildError([{ file, text: "No existe ese archivo de ejemplos" }]);
+  const entry = [
+    `import { createElement as h, Component } from "react";`,
+    `import { createRoot } from "react-dom/client";`,
+    "base.css" in files ? `import "./base.css";` : "",
+    `import * as examples from "./${file}";`,
+    // One failing example must not hide the others.
+    `class Boundary extends Component { constructor(p) { super(p); this.state = { error: null }; }
+      static getDerivedStateFromError(error) { return { error }; }
+      render() { return this.state.error ? h("pre", { style: { color: "#b91c1c", whiteSpace: "pre-wrap", font: "12px ui-monospace, monospace" } }, String(this.state.error.stack || this.state.error)) : this.props.children; } }`,
+    `const items = Object.entries(examples).filter(([, v]) => typeof v === "function");`,
+    `const label = { font: "600 11px system-ui", color: "#64748b", textTransform: "uppercase", letterSpacing: ".06em", margin: "0 0 8px" };`,
+    `createRoot(document.getElementById("root")).render(h("main", { style: { padding: 24, display: "grid", gap: 28 } },
+      items.length ? items.map(([name, C]) => h("section", { key: name }, h("p", { style: label }, name),
+        h("div", { style: { border: "1px dashed #cbd5e1", borderRadius: 12, padding: 16 } }, h(Boundary, null, h(C)))))
+      : h("p", { style: label }, "Este archivo no exporta ejemplos")));`,
+  ].join("\n");
+  return bundleBrowser(files, entry);
 }
 
 // --- Server modules (endpoints & jobs) ---------------------------------------------
@@ -259,6 +289,13 @@ export async function checkProject(files: FileMap): Promise<BuildProblem[]> {
     } catch (e) {
       if (e instanceof BuildError) problems.push(...e.problems);
       else problems.push({ file: f, text: `Error al compilar: ${(e as Error).message}` });
+    }
+  }
+  for (const f of exampleFiles(files)) {
+    try {
+      await buildExamples(files, f);
+    } catch (e) {
+      if (e instanceof BuildError) problems.push(...e.problems);
     }
   }
   for (const j of jobFiles(files)) {

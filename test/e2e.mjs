@@ -349,6 +349,35 @@ jar.localhost = ownerCookie;
 let limited = 0;
 for (let i = 0; i < 7; i++) if ((await req("POST", "/api/auth/request", { body: { email: "spam@example.com" } })).status === 429) limited++;
 ok(limited >= 2, "login code requests are rate limited");
+// Examples: each named export rendered side by side, preview only.
+await req("PUT", `/api/projects/${project.id}/file`, {
+  body: {
+    path: "components/Card.example.tsx",
+    content: `import { Card } from "./Card";\nexport const Empty = () => <Card title="Vacía">Sin tareas</Card>;\nexport const Many = () => <Card title="Muchas">{Array.from({ length: 3 }, (_, i) => <p key={i}>Tarea {i}</p>)}</Card>;\n`,
+  },
+});
+const exPage = await req("GET", "/__examples/components/Card.example", { host: pv });
+ok(exPage.status === 200 && exPage.text.includes("examples.js?file=components%2FCard.example.tsx"), "examples page renders", exPage.text.slice(0, 300));
+const exJs = await req("GET", "/_forja/examples.js?file=components%2FCard.example.tsx", { host: pv });
+ok(exJs.status === 200 && exJs.text.includes("Muchas"), "examples bundle includes every export");
+ok((await req("GET", "/_forja/examples.js?file=..%2F..%2Fserver%2Fconfig.ts", { host: pv })).status >= 400, "examples bundle refuses files outside the examples list");
+
+// Spec tests run in the sandbox through the builder tool.
+await req("PUT", `/api/projects/${project.id}/file`, { body: { path: "helpers/money.ts", content: `export const cents = (n: number) => Math.round(n * 100);\n` } });
+await req("PUT", `/api/projects/${project.id}/file`, {
+  body: {
+    path: "helpers/money.spec.ts",
+    content: `import { cents } from "./money";\ndescribe("cents", () => {\n  it("rounds", () => expect(cents(1.25)).toBe(125));\n  it("fails on purpose", () => expect(cents(2)).toEqual(201));\n  it("throws check", () => expect(() => { throw new Error("nope"); }).toThrow("no"));\n});\n`,
+  },
+});
+const tokForTests = (await req("POST", "/api/tokens", { body: { name: "tests" } })).json.token;
+const tests = await req("POST", "/mcp", {
+  headers: { authorization: `Bearer ${tokForTests}`, accept: "application/json, text/event-stream" },
+  body: { jsonrpc: "2.0", id: 9, method: "tools/call", params: { name: "run_tests", arguments: { projectId: project.id } } },
+});
+const testOut = tests.json?.result?.content?.[0]?.text ?? "";
+ok(/1 fallo/.test(testOut) && /✓ .*rounds/.test(testOut) && /✗ .*fails on purpose — .*201/.test(testOut) && /✓ .*throws check/.test(testOut), "run_tests reports passes and failures", testOut);
+
 // Chat attachments and app icon / installable manifest.
 const png1x1 = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
 const att = await req("POST", `/api/projects/${project.id}/attachments`, { body: { filename: "Logo Café.png", dataUrl: png1x1 } });

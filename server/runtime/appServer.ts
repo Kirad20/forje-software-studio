@@ -6,7 +6,7 @@ import { HttpError, serviceContext, type AppEnv, type EndpointContext } from "..
 import { getObject, putObject } from "../baas/storage.js";
 import { log, projectEvents, type ProjectEvent } from "../platform/events.js";
 import { publishedFiles, readAllFiles, type FileMap, type Project } from "../platform/projects.js";
-import { BuildError, buildClient, compileServerModule, endpointRoutes, formatProblem, pageRoutes } from "./bundler.js";
+import { BuildError, buildClient, buildExamples, compileServerModule, endpointRoutes, formatProblem, pageRoutes } from "./bundler.js";
 import { runInSandbox, SandboxRunError, type SandboxError } from "./sandbox.js";
 import { appHeaders, rateLimit, RateLimitError, uploadHeaders } from "../lib/security.js";
 import { recordPageView } from "../baas/analytics.js";
@@ -145,6 +145,15 @@ async function route(req: Request, t: AppTarget, rest: string): Promise<Response
       : new Response(b.css, { headers: { "content-type": "text/css; charset=utf-8", "cache-control": "no-cache" } });
   }
   if (rest === "/_forja/live" && t.env === "preview") return liveReload(pid);
+  // Examples render only in the preview: they are a building aid, never part of the app.
+  if (t.env === "preview" && (rest === "/_forja/examples.js" || rest === "/_forja/examples.css")) {
+    const file = new URL(req.url).searchParams.get("file") ?? "";
+    const b = await buildExamples(files, file);
+    return new Response(rest.endsWith(".js") ? b.js : b.css, {
+      headers: { "content-type": rest.endsWith(".js") ? "text/javascript; charset=utf-8" : "text/css; charset=utf-8", "cache-control": "no-cache" },
+    });
+  }
+  if (t.env === "preview" && rest.startsWith("/__examples/")) return examplesHtml(t, files, decodeURIComponent(rest.slice("/__examples/".length)) + ".tsx");
   if (req.method !== "GET") return new Response("Method not allowed", { status: 405 });
   return html(t, files);
 }
@@ -196,6 +205,21 @@ async function html(t: AppTarget, files: FileMap): Promise<Response> {
 ${iconLinks(t, files)}
 <link rel="stylesheet" href="${t.base}/_forja/app.css"><script>window.__FORJA__=${runtime}</script>${reporter}</head>
 <body>${body}${t.env === "published" ? badge() : ""}</body></html>`;
+  return new Response(doc, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-cache" } });
+}
+
+async function examplesHtml(t: AppTarget, files: FileMap, file: string): Promise<Response> {
+  let problem = "";
+  try {
+    await buildExamples(files, file);
+  } catch (e) {
+    problem = e instanceof BuildError ? e.problems.map(formatProblem).join("\n") : (e as Error).message;
+  }
+  const q = `?file=${encodeURIComponent(file)}`;
+  const doc = `<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ejemplos · ${escapeHtml(file)}</title><link rel="stylesheet" href="${t.base}/_forja/examples.css${q}">
+<script>window.__FORJA__=${JSON.stringify({ base: t.base, projectId: t.project.id, env: t.env })}</script>${previewScripts(t.base)}</head>
+<body>${problem ? `<pre style="margin:24px;padding:16px;background:#fff1f0;color:#a8071a;border-radius:8px;white-space:pre-wrap;font:13px ui-monospace,monospace">${escapeHtml(problem)}</pre>` : `<div id="root"></div><script type="module" src="${t.base}/_forja/examples.js${q}"></script>`}</body></html>`;
   return new Response(doc, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-cache" } });
 }
 

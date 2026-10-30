@@ -7,7 +7,8 @@ import { listSecrets, requestSecret } from "../baas/secrets.js";
 import type { Account } from "../platform/accounts.js";
 import { readLogs } from "../platform/events.js";
 import * as projects from "../platform/projects.js";
-import { checkProject, endpointRoutes, formatProblem, jobFiles, pageRoutes } from "../runtime/bundler.js";
+import { checkProject, compileServerModule, endpointRoutes, formatProblem, jobFiles, pageRoutes } from "../runtime/bundler.js";
+import { runInSandbox } from "../runtime/sandbox.js";
 import { publishProject } from "../runtime/publish.js";
 import { previewOrigin, previewUrl } from "../runtime/urls.js";
 
@@ -232,6 +233,36 @@ export const builderTools: BuilderTool[] = [
     async run(_i, ctx) {
       const problems = await checkProject(await projects.readAllFiles(ctx.projectId));
       return problems.length ? `${problems.length} problema(s):\n${problems.map(formatProblem).join("\n")}` : "Compila sin errores.";
+    },
+  },
+  {
+    name: "run_tests",
+    description:
+      "Ejecuta las pruebas helpers/**/*.spec.ts en el entorno aislado (describe/it/beforeEach/expect, estilo Jasmine; toBe, toEqual, toContain, toThrow, toBeCloseTo, not…). Úsalo para lógica de negocio: cálculos, validaciones, formatos.",
+    input_schema: obj({ path: str("Solo este archivo .spec.ts (opcional)") }),
+    async run(i: { path?: string }, ctx) {
+      const files = await projects.readAllFiles(ctx.projectId);
+      const specs = Object.keys(files).filter((f) => /^helpers\/.+\.spec\.tsx?$/.test(f) && (!i.path || f === i.path));
+      if (!specs.length) return "No hay pruebas. Crea helpers/<nombre>.spec.ts que importe el helper y use describe/it/expect.";
+      const lines: string[] = [];
+      let failed = 0;
+      for (const spec of specs) {
+        try {
+          const mod = await compileServerModule(files, spec);
+          const out = (await runInSandbox(ctx.projectId, "test", { env_name: "preview", file: mod.file, base: "" }, "job")) as {
+            results: { name: string; ok: boolean; ms: number; error?: string }[];
+          };
+          for (const r of out.results) {
+            if (!r.ok) failed++;
+            lines.push(`${r.ok ? "✓" : "✗"} ${spec} › ${r.name}${r.ok ? "" : ` — ${r.error}`}`);
+          }
+          if (!out.results.length) lines.push(`? ${spec}: no define ninguna prueba con it(...)`);
+        } catch (e) {
+          failed++;
+          lines.push(`✗ ${spec}: ${(e as Error).message}`);
+        }
+      }
+      return `${failed ? `${failed} fallo(s)` : "Todo en verde"}\n${lines.join("\n")}`;
     },
   },
   {

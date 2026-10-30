@@ -154,6 +154,95 @@ async function runJob(run, input) {
   return { kind: "done" };
 }
 
+// --- Spec tests: a small Jasmine-style runner for helpers/*.spec.ts -----------------------
+
+function deepEqual(a, b) {
+  if (Object.is(a, b)) return true;
+  if (typeof a !== "object" || typeof b !== "object" || !a || !b) return false;
+  if (Array.isArray(a) !== Array.isArray(b)) return false;
+  if (a instanceof Date && b instanceof Date) return a.getTime() === b.getTime();
+  const ka = Object.keys(a);
+  const kb = Object.keys(b);
+  return ka.length === kb.length && ka.every((k) => deepEqual(a[k], b[k]));
+}
+
+const show = (v) => {
+  try {
+    return typeof v === "string" ? JSON.stringify(v) : (JSON.stringify(v) ?? String(v));
+  } catch {
+    return String(v);
+  }
+};
+
+function expect(actual) {
+  const make = (negate) => {
+    const check = (pass, message) => {
+      if (pass === negate) throw new Error(negate ? `No se esperaba: ${message}` : message);
+    };
+    return {
+      toBe: (e) => check(Object.is(actual, e), `se esperaba ${show(e)} y llegó ${show(actual)}`),
+      toEqual: (e) => check(deepEqual(actual, e), `se esperaba ${show(e)} y llegó ${show(actual)}`),
+      toBeTruthy: () => check(!!actual, `se esperaba un valor verdadero y llegó ${show(actual)}`),
+      toBeFalsy: () => check(!actual, `se esperaba un valor falso y llegó ${show(actual)}`),
+      toBeNull: () => check(actual === null, `se esperaba null y llegó ${show(actual)}`),
+      toBeUndefined: () => check(actual === undefined, `se esperaba undefined y llegó ${show(actual)}`),
+      toBeDefined: () => check(actual !== undefined, "se esperaba un valor definido"),
+      toContain: (e) => check(actual?.includes?.(e), `se esperaba que ${show(actual)} contuviera ${show(e)}`),
+      toMatch: (re) => check(new RegExp(re).test(actual), `${show(actual)} no coincide con ${re}`),
+      toBeGreaterThan: (n) => check(actual > n, `se esperaba > ${n} y llegó ${show(actual)}`),
+      toBeLessThan: (n) => check(actual < n, `se esperaba < ${n} y llegó ${show(actual)}`),
+      toBeCloseTo: (n, digits = 2) => check(Math.abs(actual - n) < 10 ** -digits / 2, `se esperaba ≈ ${n} y llegó ${show(actual)}`),
+      toHaveLength: (n) => check(actual?.length === n, `se esperaba longitud ${n} y llegó ${actual?.length}`),
+      toThrow: (match) => {
+        let threw = false;
+        let error;
+        try {
+          actual();
+        } catch (e) {
+          threw = true;
+          error = e;
+        }
+        const ok = threw && (!match || String(error?.message).includes(match));
+        check(ok, threw ? `el error «${error?.message}» no contiene «${match}»` : "se esperaba que lanzara un error");
+      },
+    };
+  };
+  return Object.assign(make(false), { not: make(true) });
+}
+
+async function runTests(input) {
+  const suites = [];
+  const stack = [];
+  const tests = [];
+  const g = globalThis;
+  g.describe = (name, fn) => {
+    const suite = { name, before: [] };
+    stack.push(suite);
+    try {
+      fn();
+    } finally {
+      stack.pop();
+    }
+    suites.push(suite);
+  };
+  g.it = g.test = (name, fn) => tests.push({ name: [...stack.map((s) => s.name), name].join(" › "), fn, before: stack.flatMap((s) => s.before) });
+  g.beforeEach = (fn) => stack.at(-1)?.before.push(fn);
+  g.expect = expect;
+  await import(pathToFileURL(input.file).href + `?t=${Date.now()}`);
+  const results = [];
+  for (const t of tests) {
+    const started = Date.now();
+    try {
+      for (const b of t.before) await b();
+      await Promise.race([t.fn(), new Promise((_, rej) => setTimeout(() => rej(new Error("Tiempo agotado (5 s)")), 5000))]);
+      results.push({ name: t.name, ok: true, ms: Date.now() - started });
+    } catch (e) {
+      results.push({ name: t.name, ok: false, ms: Date.now() - started, error: String(e?.message ?? e) });
+    }
+  }
+  return { kind: "tests", results };
+}
+
 process.on("message", async (msg) => {
   if (msg.t === "rpcResult") {
     const c = calls.get(msg.call);
@@ -166,7 +255,8 @@ process.on("message", async (msg) => {
   if (msg.t === "run") {
     currentEnv = msg.input.env_name;
     try {
-      const value = msg.kind === "job" ? await runJob(msg.run, msg.input) : await runEndpoint(msg.run, msg.input);
+      const value =
+        msg.kind === "job" ? await runJob(msg.run, msg.input) : msg.kind === "test" ? await runTests(msg.input) : await runEndpoint(msg.run, msg.input);
       process.send({ t: "done", run: msg.run, ok: true, value });
     } catch (e) {
       process.send({ t: "done", run: msg.run, ok: false, error: serializeError(e) });

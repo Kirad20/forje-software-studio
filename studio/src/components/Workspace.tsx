@@ -249,11 +249,18 @@ export function PagePalette({ projectId, onPage, onComponent, onClose }: { proje
     const pages = files
       .filter((f) => /^pages\/[^/]+\.tsx$/.test(f) && !/\.(module|example)/.test(f) && (!f.includes("/_") || f.endsWith("/_index.tsx")))
       .map((f) => ({ kind: "page" as const, file: f, label: f === "pages/_index.tsx" ? "Inicio" : pagePattern(f), path: pagePattern(f) }));
-    const comps = files.filter((f) => /^components\/.+\.tsx$/.test(f)).map((f) => ({ kind: "component" as const, file: f, label: f.replace(/^components\/|\.tsx$/g, ""), path: "" }));
-    return [...pages, ...comps].filter((i) => !q || `${i.label} ${i.file}`.toLowerCase().includes(q.toLowerCase()));
+    // Examples render each state of a component or page side by side in the preview.
+    const examples = files
+      .filter((f) => /^(components|pages)\/.+\.example\.tsx$/.test(f))
+      .map((f) => ({ kind: "example" as const, file: f, label: f.replace(/^(components|pages)\/|\.example\.tsx$/g, ""), path: `/__examples/${f.replace(/\.tsx$/, "")}` }));
+    const comps = files
+      .filter((f) => /^components\/.+\.tsx$/.test(f) && !f.includes(".example."))
+      .map((f) => ({ kind: "component" as const, file: f, label: f.replace(/^components\/|\.tsx$/g, ""), path: "" }));
+    return [...pages, ...examples, ...comps].filter((i) => !q || `${i.label} ${i.file}`.toLowerCase().includes(q.toLowerCase()));
   }, [files, q]);
   const choose = (i: (typeof items)[number]) => {
-    if (i.kind === "page") {
+    if (i.kind === "example") onPage(i.path);
+    else if (i.kind === "page") {
       // Pages with params need a real value; ask for it once.
       let path = i.path;
       if (path.includes(":")) {
@@ -280,15 +287,15 @@ export function PagePalette({ projectId, onPage, onComponent, onClose }: { proje
       />
       <div className="results">
         {items.length === 0 && <div className="empty">Sin resultados</div>}
-        {(["page", "component"] as const).map((kind) => {
+        {(["page", "example", "component"] as const).map((kind) => {
           const group = items.filter((i) => i.kind === kind);
           if (!group.length) return null;
           return (
             <div key={kind}>
-              <div className="menu-label">{kind === "page" ? "Páginas" : "Componentes · abre el código"}</div>
+              <div className="menu-label">{kind === "page" ? "Páginas" : kind === "example" ? "Ejemplos · cada estado lado a lado" : "Componentes · abre el código"}</div>
               {group.map((i) => (
                 <button key={i.file} className={`item ${items.indexOf(i) === active ? "on" : ""}`} onMouseEnter={() => setActive(items.indexOf(i))} onClick={() => choose(i)}>
-                  <span style={{ width: 16, textAlign: "center" }}>{kind === "page" ? "▭" : "⬡"}</span>
+                  <span style={{ width: 16, textAlign: "center" }}>{kind === "page" ? "▭" : kind === "example" ? "◫" : "⬡"}</span>
                   {i.label}
                   <span className="small muted" style={{ marginLeft: "auto", fontFamily: "var(--mono)" }}>
                     {i.file}
