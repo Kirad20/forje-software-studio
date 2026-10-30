@@ -1,0 +1,43 @@
+{
+  "name": "forja",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "concurrently -n server,studio -c blue,magenta \"npm:dev:server\" \"npm:dev:studio\"",
+    "dev:server": "tsx watch --env-file-if-exists=.env server/index.ts",
+    "dev:studio": "vite --config studio/vite.config.ts",
+    "build": "vite build --config studio/vite.config.ts",
+    "start": "tsx --env-file-if-exists=.env server/index.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test:e2e": "node test/e2e.mjs"
+  },
+  "dependencies": {
+    "@electric-sql/pglite": "^0.5.13",
+    "@hono/node-server": "^2.1.5",
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "croner": "^11.0.0",
+    "esbuild": "^0.28.2",
+    "hono": "^4.13.14",
+    "nodemailer": "^10.3.1",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "ws": "^8.22.0",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "@types/nodemailer": "^8.0.2",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@types/ws": "^8.18.2",
+    "@vitejs/plugin-react": "^6.1.2",
+    "concurrently": "^10.0.6",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.5",
+    "vitest": "^5.0.5"
+  }
+}

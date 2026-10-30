@@ -1,0 +1,165 @@
+import { mkdirSync } from "node:fs";
+import { PGlite } from "@electric-sql/pglite";
+import { paths } from "../config.js";
+
+/**
+ * The platform's own database: accounts, projects, their source files, checkpoints,
+ * publish snapshots, chat history, secrets and every service log. Each project's
+ * app data lives in a separate database (see baas/projectDb.ts).
+ */
+let db: PGlite | undefined;
+
+const SCHEMA = /* sql */ `
+create table if not exists accounts (
+  id text primary key,
+  email text not null unique,
+  name text,
+  credits integer not null default 0,
+  created_at timestamptz not null default now()
+);
+create table if not exists account_sessions (
+  token_hash text primary key,
+  account_id text not null references accounts(id) on delete cascade,
+  expires_at timestamptz not null
+);
+create table if not exists login_codes (
+  email text primary key,
+  code_hash text not null,
+  attempts integer not null default 0,
+  expires_at timestamptz not null
+);
+create table if not exists api_tokens (
+  id text primary key,
+  account_id text not null references accounts(id) on delete cascade,
+  name text not null,
+  token_hash text not null unique,
+  last_used_at timestamptz,
+  created_at timestamptz not null default now()
+);
+create table if not exists projects (
+  id text primary key,
+  owner_id text not null references accounts(id) on delete cascade,
+  name text not null,
+  description text not null default '',
+  slug text unique,
+  visibility text not null default 'public',
+  ai_enabled boolean not null default true,
+  email_domain text,
+  email_domain_verified boolean not null default false,
+  published_version_id text,
+  published_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create table if not exists project_files (
+  project_id text not null references projects(id) on delete cascade,
+  path text not null,
+  content text not null,
+  updated_at timestamptz not null default now(),
+  primary key (project_id, path)
+);
+create table if not exists checkpoints (
+  id text primary key,
+  project_id text not null references projects(id) on delete cascade,
+  label text not null,
+  files jsonb not null,
+  created_at timestamptz not null default now()
+);
+create table if not exists published_versions (
+  id text primary key,
+  project_id text not null references projects(id) on delete cascade,
+  files jsonb not null,
+  created_at timestamptz not null default now()
+);
+create table if not exists chat_messages (
+  id serial primary key,
+  project_id text not null references projects(id) on delete cascade,
+  role text not null,
+  content jsonb not null,
+  created_at timestamptz not null default now()
+);
+create table if not exists project_secrets (
+  project_id text not null references projects(id) on delete cascade,
+  name text not null,
+  value_enc text,
+  description text not null default '',
+  created_at timestamptz not null default now(),
+  primary key (project_id, name)
+);
+create table if not exists emails (
+  id serial primary key,
+  project_id text not null references projects(id) on delete cascade,
+  direction text not null default 'out',
+  to_address text not null,
+  intended_to text,
+  from_address text not null,
+  subject text not null,
+  html text not null,
+  status text not null,
+  created_at timestamptz not null default now()
+);
+create table if not exists ai_usage (
+  id serial primary key,
+  project_id text references projects(id) on delete cascade,
+  account_id text not null,
+  source text not null,
+  model text not null,
+  input_tokens integer not null,
+  output_tokens integer not null,
+  credits integer not null,
+  created_at timestamptz not null default now()
+);
+create table if not exists job_timers (
+  id text primary key,
+  project_id text not null references projects(id) on delete cascade,
+  env text not null,
+  job text not null,
+  payload jsonb not null,
+  run_at timestamptz not null,
+  status text not null default 'pending',
+  created_at timestamptz not null default now()
+);
+create table if not exists job_runs (
+  id serial primary key,
+  project_id text not null references projects(id) on delete cascade,
+  job text not null,
+  trigger text not null,
+  status text not null,
+  error text,
+  started_at timestamptz not null default now(),
+  finished_at timestamptz
+);
+create table if not exists job_settings (
+  project_id text not null references projects(id) on delete cascade,
+  job text not null,
+  enabled boolean not null default true,
+  primary key (project_id, job)
+);
+create table if not exists storage_objects (
+  project_id text not null references projects(id) on delete cascade,
+  key text not null,
+  filename text not null,
+  content_type text not null,
+  size integer not null,
+  created_at timestamptz not null default now(),
+  primary key (project_id, key)
+);
+`;
+
+export async function platformDb(): Promise<PGlite> {
+  if (!db) {
+    mkdirSync(paths.platformDb, { recursive: true });
+    db = await PGlite.create(paths.platformDb);
+    await db.exec(SCHEMA);
+  }
+  return db;
+}
+
+export async function q<T = Record<string, unknown>>(sql: string, params: unknown[] = []): Promise<T[]> {
+  const res = await (await platformDb()).query<T>(sql, params);
+  return res.rows;
+}
+
+export async function one<T = Record<string, unknown>>(sql: string, params: unknown[] = []): Promise<T | undefined> {
+  return (await q<T>(sql, params))[0];
+}
