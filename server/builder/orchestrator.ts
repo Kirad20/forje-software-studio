@@ -1,0 +1,609 @@
+import { newId } from "../lib/crypto.js";
+import { allowedModels, costUsd, type ModelInfo } from "../llm/catalog.js";
+import { analyzeRequest, callModel, recordOutcome, taskClassOf, useFastPath, type Billing, type Features, type Role } from "../llm/router.js";
+import { emptyUsage, addUsage, textOf, type Block, type LlmMessage, type Usage } from "../llm/types.js";
+import { describeSchema } from "../baas/projectDb.js";
+import { getAccount, type Account } from "../platform/accounts.js";
+import { one, q } from "../platform/db.js";
+import { createCheckpoint, getProject, readAllFiles, type Project } from "../platform/projects.js";
+import { imageBlocks, runAgent, save, UPLOADS, type AgentEvent, type AgentResult } from "./agent.js";
+import { projectMap, selectContext } from "./index.js";
+import { MAX_STEPS, PLANNER_FILES, ROLE_PROMPTS, ROLE_TOOLS } from "./roles.js";
+import { builderTools, toolByName, type BuilderTool, type ToolContext } from "./tools.js";
+
+/**
+ * One builder turn. A request is analysed and routed:
+ *  - small or single-domain → one "fast" agent with the full manual and every tool;
+ *  - larger → planner → specialists (data, backend, ui) in parallel along the plan's
+ *    dependency graph, each with its own model, tools and files → QA → fix rounds.
+ * Every model choice goes through the router, and every outcome feeds its bandit.
+ */
+const active = new Map<string, AbortController>();
+export const isBuilding = (projectId: string) => active.has(projectId);
+export const stopBuilding = (projectId: string) => active.get(projectId)?.abort();
+
+type SpecialistRole = "data" | "backend" | "ui";
+interface PlanTask {
+  id: string;
+  role: SpecialistRole;
+  goal: string;
+  files: string[];
+  dependsOn: string[];
+}
+interface Plan {
+  summary: string;
+  contract: string;
+  tasks: PlanTask[];
+}
+interface Review {
+  ok: boolean;
+  summary: string;
+  issues: { role: SpecialistRole; files: string[]; problem: string; fix: string }[];
+}
+
+const RECENT_TURNS = 4;
+const tools = (names: string[]) => names.map((n) => toolByName.get(n)).filter((t): t is BuilderTool => !!t);
+
+// --- Context per turn: a rolling summary + the last few exchanges (text only) -----------------------
+
+function cleanText(blocks: Block[]) {
+  return textOf(blocks)
+    .replace(/\[\[adjunto:([^\]]+)\]\]/g, "(adjunto $1)")
+    .replace(/\n\n\[Elemento seleccionado[\s\S]*$/, " (sobre un elemento seleccionado)")
+    .trim();
+}
+
+/** Each turn starts a fresh conversation from this, instead of replaying (and editing) the whole thread. */
+async function turnContext(projectId: string, turnId: string): Promise<string> {
+  const summary = await one<{ summary: string }>(`select summary from conversation_summaries where project_id = $1`, [projectId]);
+  const rows = await q<{ role: "user" | "assistant"; content: Block[]; turn_id: string | null }>(
+    `select role, content, turn_id from chat_messages where project_id = $1 and coalesce(turn_id, '') <> $2 order by id desc limit 200`,
+    [projectId, turnId],
+  );
+  // Per turn: the owner's message and the builder's last text.
+  const turns: { owner: string; reply: string }[] = [];
+  const byTurn = new Map<string, { owner: string; reply: string }>();
+  for (const r of rows.reverse()) {
+    const key = r.turn_id ?? `legacy-${turns.length}`;
+    const text = cleanText(r.content);
+    if (!text) continue;
+    let t = byTurn.get(key);
+    if (!t) byTurn.set(key, (t = { owner: "", reply: "" })) && turns.push(t);
+    if (r.role === "user") t.owner ||= text;
+    else t.reply = text;
+  }
+  const recent = turns.slice(-RECENT_TURNS);
+  const parts = [];
+  if (summary?.summary) parts.push(`## Lo hablado antes (resumen)\n${summary.summary}`);
+  if (recent.length) {
+    parts.push(
+      `## Últimos mensajes\n${recent.map((t) => `Dueño: ${t.owner.slice(0, 1500)}\nForja: ${t.reply.slice(0, 1500) || "(sin respuesta)"}`).join("\n\n")}`,
+    );
+  }
+  return parts.join("\n\n");
+}
+
+/** Folds turns that left the recent window into the rolling summary, with the cheapest model. */
+async function updateSummary(projectId: string, billing: Billing, scope: { accountId: string; projectId: string }) {
+  const turns = await q<{ turn_id: string; max_id: number }>(
+    `select turn_id, max(id) as max_id from chat_messages where project_id = $1 and turn_id is not null group by turn_id order by max(id)`,
+    [projectId],
+  );
+  if (turns.length <= RECENT_TURNS) return;
+  const cutoff = turns[turns.length - RECENT_TURNS - 1]!.max_id;
+  const prev = await one<{ summary: string; upto_message_id: number }>(`select summary, upto_message_id from conversation_summaries where project_id = $1`, [projectId]);
+  if (prev && prev.upto_message_id >= cutoff) return;
+  const rows = await q<{ role: string; content: Block[] }>(
+    `select role, content from chat_messages where project_id = $1 and id > $2 and id <= $3 order by id`,
+    [projectId, prev?.upto_message_id ?? 0, cutoff],
+  );
+  const transcript = rows
+    .map((r) => `${r.role === "user" ? "Dueño" : "Forja"}: ${cleanText(r.content).slice(0, 2000)}`)
+    .filter((l) => !l.endsWith(": "))
+    .join("\n");
+  if (!transcript) return;
+  const res = await callModel(
+    scope,
+    "summarizer",
+    { complexity: 1, domains: [], needsVision: false },
+    {
+      system:
+        "Mantienes el resumen de una conversación entre el dueño de una app y su constructor. Escribe en el idioma del dueño, máximo 250 palabras: qué app es, qué se construyó y decidió, preferencias del dueño y pendientes. Solo hechos.",
+      messages: [{ role: "user", content: `Resumen actual:\n${prev?.summary ?? "(vacío)"}\n\nMensajes nuevos:\n${transcript}` }],
+      maxTokens: 800,
+    },
+    { billing },
+  );
+  const summary = textOf(res.response.content).trim();
+  if (!summary) return;
+  await q(
+    `insert into conversation_summaries (project_id, upto_message_id, summary) values ($1, $2, $3)
+     on conflict (project_id) do update set upto_message_id = excluded.upto_message_id, summary = excluded.summary, updated_at = now()`,
+    [projectId, cutoff, summary],
+  );
+}
+
+// --- Plan validation -------------------------------------------------------------------------------
+
+const ROLE_FOLDERS: Record<SpecialistRole, RegExp> = {
+  data: /^(helpers\/|static\/__dev\/)/,
+  backend: /^(endpoints\/|jobs\/|helpers\/|static\/)/,
+  ui: /^(pages\/|components\/|base\.css$|static\/|helpers\/)/,
+};
+
+function validatePlan(raw: unknown): Plan | null {
+  const p = raw as { summary?: string; contract?: string; tasks?: { id?: string; role?: string; goal?: string; files?: string[]; depends_on?: string[] }[] };
+  if (!p || !Array.isArray(p.tasks) || !p.tasks.length) return null;
+  const claimed = new Set<string>();
+  const tasks: PlanTask[] = [];
+  for (const [i, t] of p.tasks.slice(0, 6).entries()) {
+    const role = t.role as SpecialistRole;
+    if (!(role in ROLE_FOLDERS) || !t.goal) continue;
+    const id = String(t.id || `${role}-${i + 1}`).replace(/[^a-z0-9_-]/gi, "").slice(0, 30) || `${role}-${i + 1}`;
+    // A file belongs to one task; paths outside the role's folders are dropped.
+    const files = [...new Set((t.files ?? []).map(String))].filter((f) => ROLE_FOLDERS[role].test(f) && !claimed.has(f));
+    files.forEach((f) => claimed.add(f));
+    if (role === "data" && !files.length) files.push("helpers/types.ts");
+    tasks.push({ id, role, goal: String(t.goal).slice(0, 4000), files, dependsOn: (t.depends_on ?? []).map(String) });
+  }
+  const ids = new Set(tasks.map((t) => t.id));
+  for (const t of tasks) t.dependsOn = t.dependsOn.filter((d) => ids.has(d) && d !== t.id);
+  // Break cycles: drop dependencies on tasks that come later in the list.
+  const order = new Map(tasks.map((t, i) => [t.id, i]));
+  for (const t of tasks) t.dependsOn = t.dependsOn.filter((d) => order.get(d)! < order.get(t.id)!);
+  if (!tasks.length) return null;
+  return { summary: String(p.summary ?? "").slice(0, 2000), contract: String(p.contract ?? "").slice(0, 12_000), tasks };
+}
+
+// --- Scheduler -----------------------------------------------------------------------------------
+
+/** Runs tasks as soon as their dependencies finish, at most `limit` at a time. */
+async function schedule<T>(tasks: PlanTask[], limit: number, signal: AbortSignal, run: (t: PlanTask) => Promise<T>): Promise<Map<string, T | Error>> {
+  const results = new Map<string, T | Error>();
+  const running = new Map<string, Promise<void>>();
+  while (results.size < tasks.length) {
+    if (signal.aborted) throw new Error("Detenido.");
+    const ready = tasks.filter((t) => !results.has(t.id) && !running.has(t.id) && t.dependsOn.every((d) => results.has(d)));
+    for (const t of ready.slice(0, Math.max(0, limit - running.size))) {
+      running.set(
+        t.id,
+        run(t)
+          .then((r) => void results.set(t.id, r))
+          .catch((e) => void results.set(t.id, e as Error))
+          .finally(() => running.delete(t.id)),
+      );
+    }
+    if (!running.size) break;
+    await Promise.race(running.values());
+  }
+  return results;
+}
+
+// --- Turn ----------------------------------------------------------------------------------------
+
+interface TurnState {
+  account: Account;
+  project: Project;
+  turnId: string;
+  scope: { accountId: string; projectId: string };
+  billing: Billing;
+  features: Features;
+  request: string;
+  images: Block[];
+  context: string;
+  signal: AbortSignal;
+  emit: (e: AgentEvent) => void;
+  wrote: boolean;
+  usage: Usage;
+  usd: number;
+  credits: number;
+}
+
+function projectSection(p: Project, account: Account) {
+  return [
+    `# This project\nName: ${p.name}\nDescription: ${p.description || "(none)"}\nOwner email: ${account.email}`,
+    p.systemPrompt ? `# Owner's project instructions\n${p.systemPrompt}` : "",
+    p.designPrompt ? `# Owner's design guidelines\n${p.designPrompt}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+function track(s: TurnState, r: AgentResult) {
+  s.usage = addUsage(s.usage, r.usage);
+  s.usd += r.usd;
+  s.credits += r.credits;
+}
+
+/** Reward in [0, 1] for one agent run, from what can be observed without a human. */
+function rewardOf(r: AgentResult, reviewOk: boolean | null): number {
+  let reward = reviewOk === false ? 0.4 : reviewOk === true ? 1 : 0.7;
+  if (r.buildOk === false) reward = Math.min(reward, 0.2);
+  if (r.testsOk === false) reward -= 0.2;
+  if (r.hitStepLimit) reward -= 0.3;
+  reward -= Math.min(0.3, r.toolErrors * 0.05);
+  return Math.max(0, Math.min(1, reward));
+}
+
+async function insertTask(s: TurnState, t: { id: string; role: string; goal: string; files: string[]; dependsOn: string[] }) {
+  await q(`insert into agent_tasks (id, project_id, turn_id, role, goal, files, depends_on) values ($1, $2, $3, $4, $5, $6, $7)`, [
+    `${s.turnId}:${t.id}`,
+    s.project.id,
+    s.turnId,
+    t.role,
+    t.goal,
+    JSON.stringify(t.files),
+    JSON.stringify(t.dependsOn),
+  ]);
+}
+
+async function finishTask(s: TurnState, taskId: string, r: AgentResult | Error) {
+  const ok = !(r instanceof Error);
+  await q(
+    `update agent_tasks set status = $2, summary = $3, steps = $4, input_tokens = $5, output_tokens = $6, cache_read_tokens = $7, usd = $8, finished_at = now()
+     where id = $1`,
+    [
+      `${s.turnId}:${taskId}`,
+      ok ? "done" : "failed",
+      ok ? r.text.slice(0, 3000) : r.message,
+      JSON.stringify(ok ? r.steps : []),
+      ok ? r.usage.input + r.usage.cacheWrite : 0,
+      ok ? r.usage.output : 0,
+      ok ? r.usage.cacheRead : 0,
+      ok ? r.usd : 0,
+    ],
+  );
+}
+
+/** Runs one role as a lane in the chat, recording its model, steps, tokens and cost. */
+async function runLane(
+  s: TurnState,
+  task: { id: string; role: Role; goal: string; files: string[]; dependsOn: string[] },
+  spec: { system: string; messages: LlmMessage[]; tools: BuilderTool[]; ctx: ToolContext; routing: { complexity: number; domains: string[]; needsVision: boolean } },
+): Promise<AgentResult> {
+  await insertTask(s, task);
+  try {
+    const r = await runAgent({
+      scope: s.scope,
+      billing: s.billing,
+      role: task.role,
+      routing: spec.routing,
+      system: spec.system,
+      messages: spec.messages,
+      tools: spec.tools,
+      ctx: spec.ctx,
+      maxSteps: MAX_STEPS[task.role],
+      signal: s.signal,
+      emit: s.emit,
+      taskId: task.id,
+      turnId: s.turnId,
+      onModel: (m, why) => {
+        void q(`update agent_tasks set model_id = $2, status = 'running', started_at = coalesce(started_at, now()) where id = $1`, [`${s.turnId}:${task.id}`, m.id]);
+        s.emit({ type: "task_start", taskId: task.id, role: task.role, model: m.label, reason: why });
+      },
+    });
+    track(s, r);
+    s.wrote ||= !!spec.ctx.wrote;
+    await finishTask(s, task.id, r);
+    s.emit({ type: "task_end", taskId: task.id, ok: true, summary: r.text.slice(0, 600), usd: r.usd, tokens: r.usage.input + r.usage.cacheRead + r.usage.cacheWrite + r.usage.output });
+    return r;
+  } catch (e) {
+    s.wrote ||= !!spec.ctx.wrote;
+    await finishTask(s, task.id, e as Error);
+    s.emit({ type: "task_end", taskId: task.id, ok: false, summary: (e as Error).message, usd: 0, tokens: 0 });
+    throw e;
+  }
+}
+
+async function runFast(s: TurnState): Promise<void> {
+  const ctx: ToolContext = { account: s.account, projectId: s.project.id, author: "builder" };
+  const r = await runLane(
+    s,
+    { id: "fast", role: "fast", goal: s.request.slice(0, 500), files: [], dependsOn: [] },
+    {
+      system: `${ROLE_PROMPTS.fast}\n\n${projectSection(s.project, s.account)}`,
+      messages: [{ role: "user", content: [{ type: "text", text: [s.context, `## Petición\n${s.request}`].filter(Boolean).join("\n\n") }, ...s.images] }],
+      tools: builderTools,
+      ctx,
+      routing: { complexity: s.features.complexity, domains: s.features.domains, needsVision: s.features.needsVision },
+    },
+  );
+  if (r.model) await recordOutcome(taskClassOf("fast", s.features), r.model, rewardOf(r, null), r.usd);
+  const reply = r.text || "Listo.";
+  await save(s.project.id, { role: "assistant", content: [{ type: "text", text: reply }] }, s.turnId);
+}
+
+async function runTeam(s: TurnState): Promise<boolean> {
+  const files = await readAllFiles(s.project.id);
+  const map = projectMap(files, await describeSchema(s.project.id, true));
+  const head = projectSection(s.project, s.account);
+
+  // 1. Plan.
+  let plan: Plan | null = null;
+  const submitPlan: BuilderTool = {
+    name: "submit_plan",
+    description: "Entrega el plan final (una sola vez). tasks: 1–6 tareas con id, role (data|backend|ui), goal, files (rutas exactas o carpetas terminadas en /) y depends_on.",
+    input_schema: {
+      type: "object",
+      properties: {
+        summary: { type: "string", description: "Para el dueño, en su idioma: qué se va a construir (2–4 frases)." },
+        contract: { type: "string", description: "Contrato compartido: endpoints (método, ruta, entrada, salida), tablas y columnas, tipos." },
+        tasks: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              id: { type: "string" },
+              role: { type: "string", enum: ["data", "backend", "ui"] },
+              goal: { type: "string" },
+              files: { type: "array", items: { type: "string" } },
+              depends_on: { type: "array", items: { type: "string" } },
+            },
+            required: ["id", "role", "goal", "files"],
+          },
+        },
+      },
+      required: ["summary", "contract", "tasks"],
+    },
+    async run(input) {
+      plan = validatePlan(input);
+      if (!plan) throw new Error("Plan no válido: hace falta al menos una tarea con role data|backend|ui y goal.");
+      return `Plan aceptado: ${plan.tasks.length} tareas. Termina ahora con un mensaje corto.`;
+    },
+  };
+  const plannerCtx: ToolContext = { account: s.account, projectId: s.project.id, author: "builder", owned: PLANNER_FILES };
+  await runLane(
+    s,
+    { id: "plan", role: "planner", goal: "Planificar el trabajo del equipo", files: PLANNER_FILES, dependsOn: [] },
+    {
+      system: `${ROLE_PROMPTS.planner}\n\n${head}`,
+      messages: [
+        {
+          role: "user",
+          content: [{ type: "text", text: [s.context, `## Petición del dueño\n${s.request}`, map, "Planifica y llama a submit_plan."].filter(Boolean).join("\n\n") }, ...s.images],
+        },
+      ],
+      tools: [...tools(ROLE_TOOLS.planner), submitPlan],
+      ctx: plannerCtx,
+      routing: { complexity: s.features.complexity, domains: s.features.domains, needsVision: s.features.needsVision },
+    },
+  );
+  const finalPlan = plan as Plan | null;
+  if (!finalPlan) return false;
+  s.emit({ type: "plan", summary: finalPlan.summary, tasks: finalPlan.tasks.map((t) => ({ id: t.id, role: t.role, goal: t.goal, files: t.files, dependsOn: t.dependsOn })) });
+  if (finalPlan.summary) s.emit({ type: "text", text: finalPlan.summary });
+
+  // 2. Specialists in parallel along the dependency graph.
+  const overview = finalPlan.tasks.map((t) => `- ${t.id} (${t.role}): ${t.goal.split("\n")[0]!.slice(0, 160)} · archivos: ${t.files.join(", ") || "—"}`).join("\n");
+  const runSpecialist = async (t: PlanTask, extra = ""): Promise<AgentResult> => {
+    const current = await readAllFiles(s.project.id);
+    const preload = selectContext(current, `${t.goal}\n${finalPlan.contract}`, t.files, 30_000);
+    const ctx: ToolContext = { account: s.account, projectId: s.project.id, author: "builder", owned: t.files };
+    const text = [
+      `# Tu tarea (${t.role}, id ${t.id})\n${t.goal}`,
+      `# Tus archivos (solo puedes escribir estos)\n${t.files.join("\n") || "(ninguno)"}`,
+      finalPlan.contract && `# Contrato compartido\n${finalPlan.contract}`,
+      `# Plan del equipo\n${overview}`,
+      extra,
+      `# Petición original del dueño\n${s.request}`,
+      projectMap(current, await describeSchema(s.project.id, true)),
+      preload.length ? `# Archivos relevantes (ya leídos; no hace falta volver a pedirlos)\n${preload.map((p) => `### ${p}\n\`\`\`\n${current[p]}\n\`\`\``).join("\n\n")}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+    return runLane(s, t, {
+      system: `${ROLE_PROMPTS[t.role]}\n\n${head}`,
+      messages: [{ role: "user", content: [{ type: "text", text }, ...(t.role === "ui" ? s.images : [])] }],
+      tools: tools(ROLE_TOOLS[t.role]),
+      ctx,
+      routing: { complexity: s.features.complexity, domains: [t.role === "ui" ? "ui" : t.role === "data" ? "data" : (s.features.domains.find((d) => d !== "ui") ?? "data")], needsVision: s.features.needsVision && t.role === "ui" },
+    });
+  };
+  const project = await one<{ agent_concurrency: number }>(`select agent_concurrency from projects where id = $1`, [s.project.id]);
+  const limit = Math.min(5, Math.max(1, project?.agent_concurrency ?? 3));
+  const results = await schedule(finalPlan.tasks, limit, s.signal, (t) => runSpecialist(t));
+
+  // 3. Review, then up to two rounds of fixes routed to the owning roles.
+  let review: Review | null = null;
+  const fixResults: { task: PlanTask; result: AgentResult | Error }[] = [];
+  for (let round = 1; round <= 3; round++) {
+    let got: Review | null = null;
+    const reportReview: BuilderTool = {
+      name: "report_review",
+      description: "Entrega el veredicto (una sola vez): ok, summary y issues (role data|backend|ui, files, problem, fix).",
+      input_schema: {
+        type: "object",
+        properties: {
+          ok: { type: "boolean" },
+          summary: { type: "string" },
+          issues: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: { role: { type: "string", enum: ["data", "backend", "ui"] }, files: { type: "array", items: { type: "string" } }, problem: { type: "string" }, fix: { type: "string" } },
+              required: ["role", "problem"],
+            },
+          },
+        },
+        required: ["ok", "summary"],
+      },
+      async run(input) {
+        const i = input as Review;
+        got = {
+          ok: !!i.ok,
+          summary: String(i.summary ?? ""),
+          issues: (Array.isArray(i.issues) ? i.issues : []).filter((x) => x.role in ROLE_FOLDERS).map((x) => ({ role: x.role, files: (x.files ?? []).map(String), problem: String(x.problem), fix: String(x.fix ?? "") })),
+        };
+        return "Veredicto recibido. Termina ahora.";
+      },
+    };
+    const reports = [...results.entries(), ...fixResults.map((f) => [f.task.id, f.result] as const)]
+      .map(([id, r]) => `## ${id}\n${r instanceof Error ? `FALLÓ: ${r.message}` : r.text.slice(0, 2500)}`)
+      .join("\n\n");
+    await runLane(
+      s,
+      { id: `qa${round}`, role: "qa", goal: "Revisar el resultado", files: [], dependsOn: [] },
+      {
+        system: `${ROLE_PROMPTS.qa}\n\n${head}`,
+        messages: [
+          {
+            role: "user",
+            content: `# Petición del dueño\n${s.request}\n\n# Plan\n${overview}\n\n# Contrato\n${finalPlan.contract}\n\n# Informes de los especialistas\n${reports}\n\nRevisa y llama a report_review.`,
+          },
+        ],
+        tools: [...tools(ROLE_TOOLS.qa), reportReview],
+        ctx: { account: s.account, projectId: s.project.id, author: "builder", owned: [] },
+        routing: { complexity: s.features.complexity, domains: s.features.domains, needsVision: false },
+      },
+    ).catch(() => null);
+    // Assigned inside report_review's closure, which TypeScript cannot see.
+    review = got as Review | null;
+    if (review) s.emit({ type: "review", ok: review.ok, summary: review.summary, issues: review.issues.map((i) => ({ role: i.role, problem: i.problem })) });
+    if (!review || review.ok || !review.issues.length || round === 3) break;
+
+    // Each file is fixed by one task; roles with issues run in parallel.
+    const claimed = new Set<string>();
+    const fixTasks: PlanTask[] = [];
+    for (const role of ["data", "backend", "ui"] as const) {
+      const issues = review.issues.filter((i) => i.role === role);
+      if (!issues.length) continue;
+      const original = finalPlan.tasks.filter((t) => t.role === role).flatMap((t) => t.files);
+      const fixFiles = [...new Set([...issues.flatMap((i) => i.files), ...original])].filter((f) => ROLE_FOLDERS[role].test(f) && !claimed.has(f));
+      fixFiles.forEach((f) => claimed.add(f));
+      fixTasks.push({
+        id: `${role}-fix${round}`,
+        role,
+        goal: `Corrige lo que encontró la revisión:\n${issues.map((i) => `- ${i.problem}${i.fix ? ` → ${i.fix}` : ""}${i.files.length ? ` (${i.files.join(", ")})` : ""}`).join("\n")}`,
+        files: fixFiles,
+        dependsOn: [],
+      });
+    }
+    const fixed = await schedule(fixTasks, limit, s.signal, (t) => runSpecialist(t, "# Contexto\nEs una ronda de correcciones tras la revisión."));
+    for (const t of fixTasks) fixResults.push({ task: t, result: fixed.get(t.id)! });
+  }
+
+  // 4. Learning: each model gets the outcome of its own task.
+  const finalReview = review as Review | null;
+  const reviewOk = finalReview ? finalReview.ok : null;
+  for (const t of finalPlan.tasks) {
+    const r = results.get(t.id);
+    const row = await one<{ model_id: string | null }>(`select model_id from agent_tasks where id = $1`, [`${s.turnId}:${t.id}`]);
+    const model = row?.model_id ? (await allowedModels(s.scope)).find((m) => m.id === row.model_id) : undefined;
+    if (!model) continue;
+    const routing = { complexity: s.features.complexity, domains: [t.role === "ui" ? "ui" : t.role === "data" ? "data" : (s.features.domains.find((d) => d !== "ui") ?? "data")], needsVision: false };
+    const needsFix = fixResults.some((f) => f.task.role === t.role);
+    const reward = r instanceof Error || !r ? 0 : rewardOf(r, needsFix ? false : reviewOk);
+    await recordOutcome(taskClassOf(t.role, routing), model, reward, r instanceof Error || !r ? 0 : r.usd);
+  }
+
+  // 5. One reply for the owner, written by the cheapest capable model.
+  const reports = [...results.entries()].map(([id, r]) => `${id}: ${r instanceof Error ? `falló (${r.message})` : r.text.slice(0, 1200)}`).join("\n");
+  let reply = "";
+  try {
+    const res = await callModel(
+      s.scope,
+      "summarizer",
+      { complexity: 1, domains: [], needsVision: false },
+      {
+        system:
+          "Eres Forja. Escribe la respuesta final al dueño en su idioma (el de su petición): qué se construyó, qué probar en la vista previa y qué tiene que hacer él (secretos, contraseña). Breve, en viñetas, sin código.",
+        messages: [
+          {
+            role: "user",
+            content: `Petición: ${s.request}\n\nPlan: ${finalPlan.summary}\n\nInformes:\n${reports}\n\nRevisión: ${finalReview ? `${finalReview.ok ? "aprobada" : "con problemas"} — ${finalReview.summary}` : "sin revisión"}`,
+          },
+        ],
+        maxTokens: 1200,
+      },
+      { billing: s.billing },
+    );
+    s.usage = addUsage(s.usage, res.response.usage);
+    s.usd += res.usd;
+    s.credits += res.credits;
+    reply = textOf(res.response.content).trim();
+  } catch {
+    // Fall back to the plan and the review, verbatim.
+  }
+  reply ||= [finalPlan.summary, finalReview?.summary].filter(Boolean).join("\n\n") || "Listo.";
+  s.emit({ type: "text", text: reply });
+  await save(s.project.id, { role: "assistant", content: [{ type: "text", text: reply }] }, s.turnId);
+  return true;
+}
+
+export async function runBuilderTurn(account: Account, projectId: string, userText: string, emit: (e: AgentEvent) => void, attachments: string[] = []) {
+  if (active.has(projectId)) throw new Error("El constructor ya está trabajando en este proyecto.");
+  const abort = new AbortController();
+  active.set(projectId, abort);
+  const turnId = newId();
+  const project = (await getProject(projectId))!;
+  const payer = project.ownerId;
+  const scope = { accountId: payer, projectId };
+  const billing: Billing = { payerId: payer, projectId, source: "builder" };
+  const s: TurnState = {
+    account,
+    project,
+    turnId,
+    scope,
+    billing,
+    features: { intent: "feature", complexity: 3, domains: [], needsVision: false, targeted: false, source: "heuristic" },
+    request: userText,
+    images: [],
+    context: "",
+    signal: abort.signal,
+    emit,
+    wrote: false,
+    usage: emptyUsage(),
+    usd: 0,
+    credits: 0,
+  };
+  try {
+    // Credits are the project owner's, whoever is chatting (collaborators included).
+    if (((await getAccount(payer))?.credits ?? 0) <= 0) throw new Error("La cuenta dueña del proyecto no tiene créditos para el constructor.");
+    const files = attachments.filter((p) => p.startsWith(UPLOADS)).slice(0, 6);
+    const text = userText + (files.length ? `\n\n${files.map((p) => `[[adjunto:${p}]]`).join("\n")}` : "");
+    s.request = text;
+    await save(projectId, { role: "user", content: [{ type: "text", text }] }, turnId);
+    s.images = await imageBlocks(projectId, text);
+    s.context = await turnContext(projectId, turnId);
+    const fileCount = Object.keys(await readAllFiles(projectId)).length;
+    s.features = await analyzeRequest(scope, userText, { images: s.images.length, targeted: userText.includes("[Elemento seleccionado"), fileCount });
+    const fast = useFastPath(s.features);
+    emit({ type: "route", fastPath: fast, features: s.features });
+
+    if (fast) await runFast(s);
+    else if (!(await runTeam(s))) {
+      emit({ type: "text", text: "No pude repartir el trabajo; lo hago con un solo agente." });
+      await runFast(s);
+    }
+
+    // What the same tokens would have cost on the strongest allowed model, without caching.
+    const models = await allowedModels(scope);
+    const strongest = [...models].sort((a, b) => b.tier - a.tier || b.inPrice - a.inPrice)[0] as ModelInfo | undefined;
+    const u = s.usage;
+    const baselineUsd = strongest ? costUsd(strongest, { input: u.input + u.cacheRead + u.cacheWrite, output: u.output, cacheRead: 0, cacheWrite: 0 }) : s.usd;
+    emit({ type: "done", credits: s.credits, usd: s.usd, baselineUsd, cachedTokens: u.cacheRead });
+  } catch (e) {
+    emit({ type: "error", message: abort.signal.aborted ? "Detenido. Escribe qué quieres cambiar o «continúa»." : (e as Error).message });
+    if (abort.signal.aborted) await penalizeTurn(projectId, turnId, 0.5).catch(() => {});
+  } finally {
+    active.delete(projectId);
+    // A named point per turn, labelled with the request, on top of the per-file change log.
+    if (s.wrote) await createCheckpoint(projectId, userText.slice(0, 80), "builder").catch(() => {});
+    void updateSummary(projectId, billing, scope).catch(() => {});
+  }
+}
+
+/**
+ * Negative feedback for the models of a turn: the owner stopped it, or restored the code
+ * to before it within ten minutes. `weight` softens it, since the reason is not certain.
+ */
+export async function penalizeTurn(projectId: string, turnId: string | null, weight: number) {
+  const rows = await q<{ task_class: string; model_id: string }>(
+    turnId
+      ? `select distinct task_class, model_id from router_decisions where project_id = $1 and turn_id = $2`
+      : `select distinct task_class, model_id from router_decisions where project_id = $1 and created_at > now() - interval '10 minutes'`,
+    turnId ? [projectId, turnId] : [projectId],
+  );
+  const tiers = new Map((await q<{ id: string; tier: number }>(`select id, tier from model_catalog`)).map((r) => [r.id, r.tier]));
+  for (const r of rows) await recordOutcome(r.task_class, { id: r.model_id, tier: tiers.get(r.model_id) ?? 3 }, 0, 0, weight);
+}

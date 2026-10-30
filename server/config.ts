@@ -22,6 +22,17 @@ export const config = {
   anthropicKey: env.ANTHROPIC_API_KEY ?? "",
   openaiBaseUrl: (env.OPENAI_BASE_URL ?? "https://api.openai.com/v1").replace(/\/$/, ""),
   openaiKey: env.OPENAI_API_KEY ?? "",
+  /** True when OPENAI_BASE_URL was set: that endpoint (Ollama, vLLM…) becomes the "openai" provider. */
+  openaiConfigured: !!env.OPENAI_BASE_URL || !!env.OPENAI_API_KEY,
+  openrouterKey: env.OPENROUTER_API_KEY ?? "",
+  /** Extra OpenAI-compatible providers: [{"id":"lab","baseUrl":"https://…/v1","apiKeyEnv":"LAB_KEY"}]. */
+  extraProviders: env.FORJA_PROVIDERS ?? "",
+  /** Extra models: [{"provider":"lab","model":"qwen3.8:latest","tier":3,"inPrice":0,"outPrice":0}]. */
+  extraModels: env.FORJA_MODELS ?? "",
+  /** Platform whitelist: comma-separated globs over "provider:model" ids. Empty = the defaults in llm/catalog.ts. */
+  modelsAllow: env.FORJA_MODELS_ALLOW ?? "",
+  /** 1 credit = $0.001 of model usage. */
+  creditsPerUsd: Number(env.CREDITS_PER_USD ?? 1000),
   freeCredits: Number(env.FREE_CREDITS ?? 3000),
   smtpUrl: env.SMTP_URL ?? "",
   emailFrom: env.EMAIL_FROM ?? "noreply@forja.local",

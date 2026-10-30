@@ -7,7 +7,8 @@ import { describeSchema, dumpDatabase, execSql, isAwake, projectDb } from "../ba
 import { realtimeStats } from "../baas/realtime.js";
 import { deleteSecret, listSecrets, setSecret } from "../baas/secrets.js";
 import { deleteObject, listObjects, storageUsage } from "../baas/storage.js";
-import { isBuilding, loadHistory, runBuilderTurn, stopBuilding, type AgentEvent } from "../builder/agent.js";
+import { loadHistory, type AgentEvent } from "../builder/agent.js";
+import { isBuilding, penalizeTurn, runBuilderTurn, stopBuilding } from "../builder/orchestrator.js";
 import * as accounts from "../platform/accounts.js";
 import { projectEvents, readLogs, type ProjectEvent } from "../platform/events.js";
 import * as projects from "../platform/projects.js";
@@ -18,7 +19,7 @@ import path from "node:path";
 import { config } from "../config.js";
 import { analyticsSummary } from "../baas/analytics.js";
 import { zip } from "../lib/zip.js";
-import { one } from "../platform/db.js";
+import { one, q } from "../platform/db.js";
 import {
   INTEGRATION_TYPES,
   connectIntegration,
@@ -30,6 +31,19 @@ import {
   updateIntegrationValue,
 } from "../platform/integrations.js";
 import { usageSummary } from "../platform/usage.js";
+import {
+  allowedModels,
+  availableModels,
+  lastSync,
+  platformAllows,
+  providers,
+  setAccountModels,
+  setProjectModels,
+  syncOpenRouter,
+  type ModelInfo,
+} from "../llm/catalog.js";
+import { meanOf, posteriors } from "../llm/bandit.js";
+import { taskClassOf, type Role } from "../llm/router.js";
 import { accessOf, inviteMember, listMembers, removeMember, sharedProjectIds, type Access } from "../platform/members.js";
 import { isHttps, rateLimit, RateLimitError, studioOrigins } from "../lib/security.js";
 
@@ -165,6 +179,48 @@ studioApi.delete("/me", async (c) => {
 });
 
 studioApi.get("/usage", async (c) => c.json(await usageSummary(c.get("account").id)));
+
+// --- Models: catalog, account whitelist, OpenRouter sync ---------------------------------------
+const modelView = (m: ModelInfo, allowed: Set<string>, platform: boolean) => ({
+  id: m.id,
+  label: m.label,
+  provider: m.provider,
+  inPrice: m.inPrice,
+  outPrice: m.outPrice,
+  context: m.context,
+  tools: m.tools,
+  vision: m.vision,
+  tier: m.tier,
+  speed: m.speed,
+  source: m.source,
+  platformAllowed: platform,
+  enabled: allowed.has(m.id),
+});
+
+studioApi.get("/models", async (c) => {
+  const me = c.get("account");
+  const all = await availableModels();
+  const allowed = new Set((await allowedModels({ accountId: me.id })).map((m) => m.id));
+  const acc = await one<{ models_customized: boolean }>(`select models_customized from accounts where id = $1`, [me.id]);
+  // The platform list can be long (OpenRouter has hundreds): only platform-allowed models are offered.
+  const models = all.filter(platformAllows).map((m) => modelView(m, allowed, true));
+  return c.json({
+    models,
+    customized: !!acc?.models_customized,
+    providers: providers().map((p) => ({ id: p.id, kind: p.kind })),
+    openrouter: { configured: !!config.openrouterKey, lastSync: await lastSync(), total: all.filter((m) => m.provider === "openrouter").length },
+  });
+});
+studioApi.put("/models/account", async (c) => {
+  const { enabled } = await c.req.json<{ enabled: string[] | null }>();
+  await setAccountModels(c.get("account").id, Array.isArray(enabled) ? enabled.map(String) : null);
+  return c.json({ ok: true });
+});
+studioApi.post("/models/sync", async (c) => {
+  if (!config.openrouterKey) return c.json({ error: "Configura OPENROUTER_API_KEY para sincronizar el catálogo." }, 400);
+  rateLimit(`sync:${c.get("account").id}`, 3, 60 * 60_000);
+  return c.json({ synced: await syncOpenRouter() });
+});
 
 // Folders
 studioApi.get("/folders", async (c) => c.json({ folders: await projects.listFolders(c.get("account").id) }));
@@ -336,6 +392,58 @@ studioApi.post("/projects/:id/share-links/revoke", async (c) => {
   return c.json({ project: await projectView((await projects.getProject(pid(c)))!) });
 });
 
+// Models for this project: cost/quality mode, its own whitelist, how many agents run at once.
+studioApi.get("/projects/:id/models", async (c) => {
+  const p = await one<{ model_mode: string; agent_concurrency: number }>(`select model_mode, agent_concurrency from projects where id = $1`, [pid(c)]);
+  const owner = c.get("project").ownerId;
+  const accountAllowed = await allowedModels({ accountId: owner });
+  const projectList = (await q<{ model_id: string }>(`select model_id from project_models where project_id = $1`, [pid(c)])).map((r) => r.model_id);
+  const effective = new Set((await allowedModels({ accountId: owner, projectId: pid(c) })).map((m) => m.id));
+  return c.json({
+    mode: p?.model_mode ?? "balanced",
+    concurrency: p?.agent_concurrency ?? 3,
+    restricted: projectList.length > 0,
+    models: accountAllowed.map((m) => modelView(m, effective, true)),
+  });
+});
+studioApi.put("/projects/:id/models", async (c) => {
+  const denied = ownerOnly(c);
+  if (denied) return denied;
+  const { mode, concurrency, enabled } = await c.req.json<{ mode?: string; concurrency?: number; enabled?: string[] }>();
+  if (mode && !["saving", "balanced", "quality"].includes(mode)) return c.json({ error: "Modo no válido" }, 400);
+  await q(`update projects set model_mode = coalesce($2, model_mode), agent_concurrency = coalesce($3, agent_concurrency) where id = $1`, [
+    pid(c),
+    mode ?? null,
+    concurrency ? Math.min(5, Math.max(1, Math.round(concurrency))) : null,
+  ]);
+  if (Array.isArray(enabled)) await setProjectModels(pid(c), enabled.map(String));
+  return c.json({ ok: true });
+});
+
+/** Why the router picked what it picked, and what it has learnt for the models in play. */
+studioApi.get("/projects/:id/router", async (c) => {
+  const decisions = await q(
+    `select role, task_class as "taskClass", model_id as "modelId", reason, candidates, created_at as "createdAt"
+     from router_decisions where project_id = $1 order by id desc limit 40`,
+    [pid(c)],
+  );
+  const models = await allowedModels({ accountId: c.get("project").ownerId, projectId: pid(c) });
+  const roles: Role[] = ["planner", "data", "backend", "ui", "qa", "fast"];
+  const learnt = [];
+  for (const role of roles) {
+    const taskClass = taskClassOf(role, { complexity: 3, domains: [role === "ui" ? "ui" : "data"], needsVision: false });
+    const post = await posteriors(taskClass, models);
+    learnt.push({ role, taskClass, models: models.map((m) => ({ id: m.id, label: m.label, mean: meanOf(post.get(m.id)!), uses: post.get(m.id)!.uses })).sort((a, b) => b.mean - a.mean).slice(0, 5) });
+  }
+  const spend = await q(
+    `select model, role, count(*)::int as calls, sum(input_tokens + cache_write_tokens)::int as "inputTokens", sum(cache_read_tokens)::int as "cachedTokens",
+       sum(output_tokens)::int as "outputTokens", round(sum(usd)::numeric, 4)::float as usd
+     from ai_usage where project_id = $1 and source = 'builder' group by model, role order by sum(usd) desc`,
+    [pid(c)],
+  );
+  return c.json({ decisions, learnt, spend });
+});
+
 // Collaborators
 studioApi.get("/projects/:id/members", async (c) => {
   const owner = await accounts.getAccount(c.get("project").ownerId);
@@ -397,7 +505,18 @@ studioApi.put("/projects/:id/file", async (c) => {
 });
 
 // Chat with the builder
-studioApi.get("/projects/:id/chat", async (c) => c.json({ messages: await loadHistory(pid(c)), building: isBuilding(pid(c)) }));
+studioApi.get("/projects/:id/chat", async (c) => {
+  // Agent lanes per turn: which role ran on which model, with steps, tokens and cost.
+  const tasks = await q(
+    `select t.id, t.turn_id as "turnId", t.role, t.goal, t.model_id as "modelId", coalesce(m.label, t.model_id) as "model", t.status, t.summary,
+       t.steps, t.files, t.depends_on as "dependsOn", t.input_tokens as "inputTokens", t.output_tokens as "outputTokens",
+       t.cache_read_tokens as "cacheReadTokens", t.usd, t.started_at as "startedAt", t.finished_at as "finishedAt"
+     from agent_tasks t left join model_catalog m on m.id = t.model_id
+     where t.project_id = $1 order by t.created_at desc limit 300`,
+    [pid(c)],
+  );
+  return c.json({ messages: await loadHistory(pid(c)), tasks, building: isBuilding(pid(c)) });
+});
 studioApi.post("/projects/:id/chat", async (c) => {
   const { message, attachments } = await c.req.json<{ message: string; attachments?: string[] }>();
   if (!message?.trim()) return c.json({ error: "Mensaje vacío" }, 400);
@@ -611,6 +730,8 @@ studioApi.post("/projects/:id/checkpoints", async (c) => {
 });
 studioApi.post("/projects/:id/changes/:cid/restore", async (c) => {
   await projects.restoreToChange(pid(c), Number(c.req.param("cid")), "owner", c.get("account").email);
+  // Undoing the builder's work within minutes is a (soft) signal against the models that did it.
+  void penalizeTurn(pid(c), null, 0.5).catch(() => {});
   return c.json({ ok: true });
 });
 

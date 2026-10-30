@@ -11,6 +11,7 @@ import { checkProject, compileServerModule, endpointRoutes, formatProblem, jobFi
 import { runInSandbox } from "../runtime/sandbox.js";
 import { publishProject } from "../runtime/publish.js";
 import { previewOrigin, previewUrl } from "../runtime/urls.js";
+import { findSymbol, projectMap, relatedFiles } from "./index.js";
 
 export { previewUrl };
 
@@ -21,7 +22,32 @@ export interface ToolContext {
   author: "builder" | "mcp";
   /** Set when a tool changed project files, so the caller can checkpoint. */
   wrote?: boolean;
+  /**
+   * Paths (or folder prefixes ending in "/") this agent may write. Set for specialists
+   * running in parallel so two agents never edit the same file; unset means anything.
+   */
+  owned?: string[];
+  /** Shown in the change timeline, e.g. "ui@claude-sonnet-5-5". */
+  actor?: string;
+  /** Files written in this task (for the QA hand-off). */
+  written?: Set<string>;
 }
+
+/** Refuses writes outside the files the planner gave this agent. */
+function assertOwned(ctx: ToolContext, p: string) {
+  if (!ctx.owned) return;
+  const ok = ctx.owned.some((o) => p === o || (o.endsWith("/") && p.startsWith(o)));
+  if (!ok) {
+    throw new Error(
+      `Este archivo no es tuyo en esta tarea: ${p}. Tus archivos: ${ctx.owned.join(", ")}. Si de verdad hace falta cambiarlo, dilo en tu resumen final y el planificador lo asignará.`,
+    );
+  }
+}
+
+const noteWrite = (ctx: ToolContext, ...paths: string[]) => {
+  ctx.wrote = true;
+  for (const p of paths) (ctx.written ??= new Set()).add(p);
+};
 
 export interface BuilderTool {
   name: string;
@@ -60,25 +86,64 @@ export const builderTools: BuilderTool[] = [
     },
   },
   {
+    name: "project_map",
+    description:
+      "Mapa compacto del proyecto: rutas, endpoints y sus tablas, componentes y quién los usa, helpers, tareas, notas y el esquema de la base de datos. Empieza por aquí en vez de leer todo.",
+    input_schema: obj({}),
+    async run(_i, ctx) {
+      return clip(projectMap(await projects.readAllFiles(ctx.projectId), await describeSchema(ctx.projectId, true)));
+    },
+  },
+  {
+    name: "find_symbol",
+    description: "Dónde se define y se usa un nombre (componente, función, tabla, ruta).",
+    input_schema: obj({ name: str("Nombre exacto") }, ["name"]),
+    async run(i: { name: string }, ctx) {
+      return clip(findSymbol(await projects.readAllFiles(ctx.projectId), i.name));
+    },
+  },
+  {
+    name: "related_files",
+    description: "Archivos conectados con uno: lo que importa, quién lo importa, y la página ↔ endpoint que se llaman.",
+    input_schema: obj({ path: str("Ruta") }, ["path"]),
+    async run(i: { path: string }, ctx) {
+      return relatedFiles(await projects.readAllFiles(ctx.projectId), i.path).join("\n") || "Sin conexiones.";
+    },
+  },
+  {
     name: "read_files",
-    description: "Lee uno o varios archivos (hasta 20) con números de línea.",
-    input_schema: obj({ paths: { type: "array", items: { type: "string" }, description: "Rutas a leer" } }, ["paths"]),
+    description: 'Lee hasta 20 archivos con números de línea. Para archivos grandes pide solo un rango: "pages/_index.tsx:40-120".',
+    input_schema: obj({ paths: { type: "array", items: { type: "string" }, description: 'Rutas, opcionalmente con rango "ruta:inicio-fin"' } }, ["paths"]),
     async run(i: { paths: string[] }, ctx) {
       const out: string[] = [];
-      for (const p of i.paths.slice(0, 20)) {
+      for (const raw of i.paths.slice(0, 20)) {
+        const m = /^(.*?):(\d+)-(\d+)$/.exec(raw);
+        const p = m ? m[1]! : raw;
         const c = await projects.readFile(ctx.projectId, p);
-        out.push(c === undefined ? `### ${p}\n(no existe)` : `### ${p}\n${numbered(c)}`);
+        if (c === undefined) {
+          out.push(`### ${p}\n(no existe)`);
+          continue;
+        }
+        if (!m) {
+          out.push(`### ${p}\n${numbered(c)}`);
+          continue;
+        }
+        const lines = c.split("\n");
+        const from = Math.max(1, Number(m[2]));
+        const to = Math.min(lines.length, Number(m[3]));
+        out.push(`### ${p} (líneas ${from}-${to} de ${lines.length})\n${lines.slice(from - 1, to).map((l, k) => `${String(from + k).padStart(4)}\t${l}`).join("\n")}`);
       }
       return clip(out.join("\n\n"));
     },
   },
   {
     name: "write_file",
-    description: "Crea o reemplaza un archivo completo. La vista previa se actualiza sola.",
+    description: "Crea o reemplaza un archivo completo. Para cambios en un archivo existente usa edit_file (gasta muchos menos tokens).",
     input_schema: obj({ path: str("Ruta, p. ej. pages/_index.tsx"), content: str("Contenido completo") }, ["path", "content"]),
     async run(i: { path: string; content: string }, ctx) {
-      await projects.writeFile(ctx.projectId, i.path, i.content, ctx.author);
-      ctx.wrote = true;
+      assertOwned(ctx, i.path);
+      await projects.writeFile(ctx.projectId, i.path, i.content, ctx.author, ctx.actor);
+      noteWrite(ctx, i.path);
       return `Escrito ${i.path} (${i.content.length} B)`;
     },
   },
@@ -91,13 +156,14 @@ export const builderTools: BuilderTool[] = [
       ["path", "old_text", "new_text"],
     ),
     async run(i: { path: string; old_text: string; new_text: string; replace_all?: boolean }, ctx) {
+      assertOwned(ctx, i.path);
       const c = await projects.readFile(ctx.projectId, i.path);
       if (c === undefined) throw new Error(`No existe ${i.path}`);
       const count = c.split(i.old_text).length - 1;
       if (count === 0) throw new Error("old_text no aparece en el archivo. Lee el archivo y vuelve a intentarlo con el texto exacto.");
       if (count > 1 && !i.replace_all) throw new Error(`old_text aparece ${count} veces; añade contexto o usa replace_all.`);
-      await projects.writeFile(ctx.projectId, i.path, i.replace_all ? c.split(i.old_text).join(i.new_text) : c.replace(i.old_text, () => i.new_text), ctx.author);
-      ctx.wrote = true;
+      await projects.writeFile(ctx.projectId, i.path, i.replace_all ? c.split(i.old_text).join(i.new_text) : c.replace(i.old_text, () => i.new_text), ctx.author, ctx.actor);
+      noteWrite(ctx, i.path);
       return `Editado ${i.path} (${count} reemplazo${count > 1 ? "s" : ""})`;
     },
   },
@@ -106,8 +172,9 @@ export const builderTools: BuilderTool[] = [
     description: "Borra un archivo.",
     input_schema: obj({ path: str("Ruta") }, ["path"]),
     async run(i: { path: string }, ctx) {
+      assertOwned(ctx, i.path);
       await projects.deleteFile(ctx.projectId, i.path, ctx.author);
-      ctx.wrote = true;
+      noteWrite(ctx, i.path);
       return `Borrado ${i.path}`;
     },
   },
@@ -116,8 +183,10 @@ export const builderTools: BuilderTool[] = [
     description: "Mueve o renombra un archivo.",
     input_schema: obj({ from: str("Ruta actual"), to: str("Ruta nueva") }, ["from", "to"]),
     async run(i: { from: string; to: string }, ctx) {
+      assertOwned(ctx, i.from);
+      assertOwned(ctx, i.to);
       await projects.renameFile(ctx.projectId, i.from, i.to, ctx.author);
-      ctx.wrote = true;
+      noteWrite(ctx, i.from, i.to);
       return `Movido ${i.from} → ${i.to}`;
     },
   },

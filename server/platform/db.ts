@@ -212,6 +212,97 @@ create table if not exists storage_objects (
   created_at timestamptz not null default now(),
   primary key (project_id, key)
 );
+
+-- Models: catalog synced from providers, and the account/project whitelists.
+create table if not exists model_catalog (
+  id text primary key,
+  provider text not null,
+  model text not null,
+  label text not null,
+  in_price double precision not null,
+  out_price double precision not null,
+  cache_read_price double precision,
+  context integer not null,
+  tools boolean not null,
+  vision boolean not null,
+  tier integer not null,
+  speed integer not null,
+  synced_at timestamptz not null default now()
+);
+create table if not exists account_models (
+  account_id text not null references accounts(id) on delete cascade,
+  model_id text not null,
+  primary key (account_id, model_id)
+);
+alter table accounts add column if not exists models_customized boolean not null default false;
+create table if not exists project_models (
+  project_id text not null references projects(id) on delete cascade,
+  model_id text not null,
+  primary key (project_id, model_id)
+);
+alter table projects add column if not exists model_mode text not null default 'balanced';
+alter table projects add column if not exists agent_concurrency integer not null default 3;
+
+-- Router learning: Beta posterior per (task class, model), shared across the platform.
+create table if not exists router_stats (
+  task_class text not null,
+  model_id text not null,
+  alpha double precision not null,
+  beta double precision not null,
+  uses integer not null default 0,
+  usd double precision not null default 0,
+  primary key (task_class, model_id)
+);
+create table if not exists router_decisions (
+  id serial primary key,
+  project_id text references projects(id) on delete cascade,
+  turn_id text,
+  task_id text,
+  role text not null,
+  task_class text not null,
+  model_id text not null,
+  reason text not null,
+  candidates jsonb not null,
+  created_at timestamptz not null default now()
+);
+create index if not exists router_decisions_project on router_decisions (project_id, id desc);
+
+-- One row per agent task in a builder turn: what the lanes in the chat show.
+create table if not exists agent_tasks (
+  id text primary key,
+  project_id text not null references projects(id) on delete cascade,
+  turn_id text not null,
+  role text not null,
+  goal text not null,
+  model_id text,
+  status text not null default 'pending',
+  depends_on jsonb not null default '[]',
+  files jsonb not null default '[]',
+  steps jsonb not null default '[]',
+  summary text,
+  input_tokens integer not null default 0,
+  output_tokens integer not null default 0,
+  cache_read_tokens integer not null default 0,
+  usd double precision not null default 0,
+  started_at timestamptz,
+  finished_at timestamptz,
+  created_at timestamptz not null default now()
+);
+create index if not exists agent_tasks_turn on agent_tasks (project_id, turn_id);
+alter table chat_messages add column if not exists turn_id text;
+
+-- Rolling summary of older chat turns, so each turn sends a short context.
+create table if not exists conversation_summaries (
+  project_id text primary key references projects(id) on delete cascade,
+  upto_message_id integer not null,
+  summary text not null,
+  updated_at timestamptz not null default now()
+);
+
+alter table ai_usage add column if not exists cache_read_tokens integer not null default 0;
+alter table ai_usage add column if not exists cache_write_tokens integer not null default 0;
+alter table ai_usage add column if not exists usd double precision not null default 0;
+alter table ai_usage add column if not exists role text;
 `;
 
 export async function platformDb(): Promise<PGlite> {

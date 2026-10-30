@@ -1,0 +1,116 @@
+// A scripted OpenAI-compatible model server for tests: answers as planner, specialists,
+// reviewer, summarizer or fast agent depending on the request, with tool calls, delays
+// (so parallel lanes overlap) and a model that always fails (to test fallback).
+import http from "node:http";
+
+let n = 0;
+const call = (name, args) => ({ id: `call_${++n}`, type: "function", function: { name, arguments: JSON.stringify(args) } });
+const reply = (content, toolCalls) => ({
+  choices: [{ message: { role: "assistant", content: content ?? null, tool_calls: toolCalls }, finish_reason: toolCalls ? "tool_calls" : "stop" }],
+  usage: { prompt_tokens: 3000, completion_tokens: 400, prompt_tokens_details: { cached_tokens: 2000 } },
+});
+
+export const log = [];
+
+function script(body) {
+  const sys = body.messages.find((m) => m.role === "system")?.content ?? "";
+  const firstUser = body.messages.find((m) => m.role === "user");
+  const userText = typeof firstUser?.content === "string" ? firstUser.content : (firstUser?.content ?? []).map((p) => p.text ?? "").join("\n");
+  const step = body.messages.filter((m) => m.role === "assistant").length;
+  const lastTool = [...body.messages].reverse().find((m) => m.role === "tool")?.content ?? "";
+
+  if (sys.startsWith("Classify an app-builder request")) return { role: "router", res: reply('{"intent":"feature","complexity":2,"domains":["ui"]}') };
+  if (sys.startsWith("Mantienes el resumen")) return { role: "summary", res: reply("El dueño pidió una app de notas.") };
+  if (sys.startsWith("Eres Forja. Escribe la respuesta final")) return { role: "final", res: reply("- Hice la app de notas.\n- Prueba /notes en la vista previa.") };
+
+  if (sys.includes("# Your role: planner")) {
+    if (step === 0)
+      return {
+        role: "planner",
+        res: reply(null, [
+          call("submit_plan", {
+            summary: "Haré una app de notas con su tabla, su API y su página.",
+            contract: "GET notes/list → { notes: {id:number, body:string}[] }. Tabla notes(id serial, body text).",
+            tasks: [
+              { id: "db", role: "data", goal: "Crea la tabla notes", files: ["helpers/types.ts"], depends_on: [] },
+              { id: "api", role: "backend", goal: "Endpoint GET notes/list", files: ["endpoints/notes/"], depends_on: ["db"] },
+              { id: "page", role: "ui", goal: "Página /notes que lista las notas", files: ["pages/notes.tsx"], depends_on: ["db"] },
+            ],
+          }),
+        ]),
+      };
+    return { role: "planner", res: reply("Plan entregado.") };
+  }
+  if (sys.includes("# Your role: reviewer")) {
+    if (step === 0) return { role: "qa", res: reply(null, [call("check_build", {})]) };
+    if (step === 1) return { role: "qa", res: reply(null, [call("report_review", { ok: lastTool.startsWith("Compila"), summary: "Compila y el endpoint responde.", issues: [] })]) };
+    return { role: "qa", res: reply("Revisión terminada.") };
+  }
+  const task = /# Tu tarea \((\w+)/.exec(userText)?.[1];
+  if (task === "data") {
+    if (step === 0)
+      return {
+        role: "data",
+        res: reply(null, [
+          call("execute_sql", { sql: "create table if not exists notes (id serial primary key, body text not null); insert into notes (body) values ('hola');" }),
+          call("write_file", { path: "helpers/types.ts", content: "export type Note = { id: number; body: string };\n" }),
+        ]),
+      };
+    return { role: "data", res: reply("Tabla notes creada y tipo Note en helpers/types.ts.") };
+  }
+  if (task === "backend") {
+    if (step === 0)
+      return {
+        role: "backend",
+        res: reply(null, [
+          call("write_file", { path: "endpoints/notes/list_GET.ts", content: 'export default async (ctx: any) => ({ notes: await ctx.db.query("select * from notes order by id") });\n' }),
+          // Not this agent's file: must be refused.
+          call("write_file", { path: "pages/hack.tsx", content: "export default () => null;\n" }),
+        ]),
+      };
+    return { role: "backend", res: reply("Endpoint notes/list listo.") };
+  }
+  if (task === "ui") {
+    if (step === 0)
+      return {
+        role: "ui",
+        res: reply(null, [
+          call("write_file", {
+            path: "pages/notes.tsx",
+            content: 'import { useApi } from "@forja/client";\nexport default function Notes() { const { data } = useApi<any>("notes/list"); return <ul>{data?.notes.map((n: any) => <li key={n.id}>{n.body}</li>)}</ul>; }\n',
+          }),
+        ]),
+      };
+    return { role: "ui", res: reply("Página /notes lista.") };
+  }
+  // Fast agent: the full manual, a single opening message with "## Petición".
+  if (userText.includes("## Petición")) {
+    if (step === 0) return { role: "fast", res: reply(null, [call("write_file", { path: "base.css", content: ":root { --primary: #16a34a; }\n" })]) };
+    return { role: "fast", res: reply("Cambié el color principal a verde.") };
+  }
+  return { role: "unknown", res: reply("…") };
+}
+
+export function startFakeLlm() {
+  const server = http.createServer((req, res) => {
+    let raw = "";
+    req.on("data", (c) => (raw += c));
+    req.on("end", () => {
+      const body = JSON.parse(raw || "{}");
+      if (body.model === "fake-flaky") {
+        log.push({ model: body.model, role: "flaky", at: Date.now() });
+        res.writeHead(503, { "content-type": "application/json" });
+        return res.end(JSON.stringify({ error: { message: "overloaded" } }));
+      }
+      const { role, res: out } = script(body);
+      log.push({ model: body.model, role, at: Date.now() });
+      // Specialists take a while, so parallel lanes visibly overlap.
+      const delay = ["data", "backend", "ui"].includes(role) ? 400 : 30;
+      setTimeout(() => {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ ...out, model: body.model }));
+      }, delay);
+    });
+  });
+  return new Promise((resolve) => server.listen(0, "127.0.0.1", () => resolve({ server, port: server.address().port })));
+}

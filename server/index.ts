@@ -15,6 +15,7 @@ import { platformDb } from "./platform/db.js";
 import { getProject, getProjectBySlug, type Project } from "./platform/projects.js";
 import { cookie, parseCookies, serveApp } from "./runtime/appServer.js";
 import { stopAllSandboxes } from "./runtime/sandbox.js";
+import { startCatalogSync } from "./llm/catalog.js";
 import { rateLimit, STUDIO_HEADERS } from "./lib/security.js";
 import { checkShareToken, parseAppHost } from "./runtime/urls.js";
 
@@ -105,6 +106,7 @@ function page(title: string, body: string) {
 
 await platformDb();
 await startJobRunner();
+startCatalogSync();
 
 const server = serve({ fetch: app.fetch, port: config.port }, (info) => {
   console.log(`[forja] plataforma en ${config.publicUrl} (puerto ${info.port})`);

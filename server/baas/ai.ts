@@ -1,5 +1,6 @@
-import { config } from "../config.js";
-import { chat, creditsFor, textOf, type LlmMessage, type LlmTool } from "../lib/llm.js";
+import { allowedModels, type ModelInfo } from "../llm/catalog.js";
+import { callModel } from "../llm/router.js";
+import { textOf, type LlmMessage, type LlmTool } from "../llm/types.js";
 import { one, q } from "../platform/db.js";
 import { log } from "../platform/events.js";
 
@@ -29,41 +30,34 @@ export async function appAiChat(projectId: string, input: AppAiInput) {
   if (!project.ai_enabled) throw new AiUnavailableError("La IA está desactivada para este proyecto.");
   if (project.credits <= 0) throw new AiUnavailableError("Sin créditos: el dueño del proyecto debe añadir créditos.");
 
-  const model = input.model ?? config.appAi.model;
-  const res = await chat({
-    provider: config.appAi.provider,
-    model,
-    system: input.system,
-    messages: input.messages,
-    tools: input.tools,
-    maxTokens: input.maxTokens ?? 2048,
-  });
-  const credits = await charge(project.owner_id, projectId, "app", model, res.usage);
-  log(projectId, { env: "preview", level: "info", source: "ai", message: `IA ${model}: ${res.usage.input}+${res.usage.output} tokens, ${credits} créditos` });
-  return { text: textOf(res.content), content: res.content, stopReason: res.stopReason, credits };
-}
-
-export async function charge(
-  accountId: string,
-  projectId: string | null,
-  source: "app" | "builder",
-  model: string,
-  usage: { input: number; output: number },
-) {
-  const credits = creditsFor(usage);
-  await q(
-    `insert into ai_usage (project_id, account_id, source, model, input_tokens, output_tokens, credits) values ($1, $2, $3, $4, $5, $6, $7)`,
-    [projectId, accountId, source, model, usage.input, usage.output, credits],
+  // The app may name a model; it must be on the project's whitelist. Otherwise the router
+  // picks the cheapest model that fits (vision when images are sent, tools when given).
+  const scope = { accountId: project.owner_id, projectId };
+  const needsVision = input.messages.some((m) => typeof m.content !== "string" && m.content.some((b) => b.type === "image"));
+  let pinned: ModelInfo | undefined;
+  if (input.model) {
+    const allowed = await allowedModels(scope);
+    pinned = allowed.find((m) => m.id === input.model || m.model === input.model);
+    if (!pinned) throw new AiUnavailableError(`El modelo «${input.model}» no está permitido en este proyecto.`);
+  }
+  const { response, model, credits } = await callModel(
+    scope,
+    "app",
+    { complexity: input.tools?.length ? 2 : 1, domains: ["ai"], needsVision },
+    { system: input.system, messages: input.messages, tools: input.tools, maxTokens: input.maxTokens ?? 2048 },
+    { billing: { payerId: project.owner_id, projectId, source: "app" }, pinned },
   );
-  await q(`update accounts set credits = greatest(credits - $2, 0) where id = $1`, [accountId, credits]);
-  return credits;
+  const u = response.usage;
+  log(projectId, { env: "preview", level: "info", source: "ai", message: `IA ${model.label}: ${u.input + u.cacheRead}+${u.output} tokens, ${credits} créditos` });
+  return { text: textOf(response.content), content: response.content, stopReason: response.stopReason, credits, model: model.id };
 }
 
 export async function aiUsage(projectId: string) {
   return q(
-    `select source, model, sum(input_tokens)::int as "inputTokens", sum(output_tokens)::int as "outputTokens",
+    `select source, model, sum(input_tokens + cache_read_tokens + cache_write_tokens)::int as "inputTokens", sum(output_tokens)::int as "outputTokens",
+       sum(cache_read_tokens)::int as "cachedTokens", round(sum(usd)::numeric, 4)::float as usd,
        sum(credits)::int as credits, count(*)::int as calls
-     from ai_usage where project_id = $1 group by source, model order by credits desc`,
+     from ai_usage where project_id = $1 group by source, model order by sum(usd) desc`,
     [projectId],
   );
 }

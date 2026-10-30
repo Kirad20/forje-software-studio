@@ -1,119 +1,52 @@
-import { config } from "../config.js";
-import { charge } from "../baas/ai.js";
-import { chat, type Block, type LlmMessage } from "../lib/llm.js";
-import { getAccount, type Account } from "../platform/accounts.js";
+import { callModel, type Billing, type PickInput, type Role } from "../llm/router.js";
+import type { ModelInfo, ModelScope } from "../llm/catalog.js";
+import { addUsage, emptyUsage, type Block, type LlmMessage, type LlmTool, type Usage } from "../llm/types.js";
 import { q } from "../platform/db.js";
-import { createCheckpoint, getProject, readFile } from "../platform/projects.js";
+import { readFile } from "../platform/projects.js";
 import { countAction } from "../platform/usage.js";
-import { BUILDER_SYSTEM_PROMPT } from "./prompt.js";
-import { builderTools, toolByName, type ToolContext } from "./tools.js";
+import type { BuilderTool, ToolContext } from "./tools.js";
 
+/** Events streamed to the studio. `taskId` says which agent lane they belong to. */
 export type AgentEvent =
-  | { type: "text"; text: string }
-  | { type: "tool_start"; id: string; name: string; summary: string }
-  | { type: "tool_end"; id: string; ok: boolean; output: string }
-  | { type: "done"; credits: number }
+  | { type: "route"; fastPath: boolean; features: unknown }
+  | { type: "plan"; summary: string; tasks: { id: string; role: string; goal: string; files: string[]; dependsOn: string[] }[] }
+  | { type: "task_start"; taskId: string; role: string; model: string; reason: string }
+  | { type: "task_end"; taskId: string; ok: boolean; summary: string; usd: number; tokens: number }
+  | { type: "review"; ok: boolean; summary: string; issues: { role: string; problem: string }[] }
+  | { type: "text"; text: string; taskId?: string }
+  | { type: "tool_start"; id: string; name: string; summary: string; taskId?: string }
+  | { type: "tool_end"; id: string; ok: boolean; output: string; taskId?: string }
+  | { type: "done"; credits: number; usd: number; baselineUsd: number; cachedTokens: number }
   | { type: "error"; message: string };
 
-const MAX_STEPS = 40;
-/** Older tool results are shortened so long conversations stay within the context window. */
-const KEEP_FULL_RESULTS = 12;
+// --- Chat history ------------------------------------------------------------------------------
 
-const active = new Map<string, AbortController>();
+export async function save(projectId: string, msg: LlmMessage, turnId: string) {
+  const content = typeof msg.content === "string" ? [{ type: "text", text: msg.content }] : msg.content;
+  await q(`insert into chat_messages (project_id, role, content, turn_id) values ($1, $2, $3, $4)`, [projectId, msg.role, JSON.stringify(content), turnId]);
+}
 
-export const isBuilding = (projectId: string) => active.has(projectId);
-export const stopBuilding = (projectId: string) => active.get(projectId)?.abort();
-
-export async function loadHistory(projectId: string): Promise<LlmMessage[]> {
-  const rows = await q<{ role: "user" | "assistant"; content: Block[] }>(
-    `select role, content from chat_messages where project_id = $1 order by id`,
+/** Raw history, for the chat UI. The model never gets this verbatim (see orchestrator.turnContext). */
+export async function loadHistory(projectId: string): Promise<(LlmMessage & { turnId: string | null })[]> {
+  const rows = await q<{ role: "user" | "assistant"; content: Block[]; turn_id: string | null }>(
+    `select role, content, turn_id from chat_messages where project_id = $1 order by id`,
     [projectId],
   );
-  return repair(rows.map((r) => ({ role: r.role, content: r.content })));
-}
-
-/**
- * A turn stopped mid-tool leaves tool calls without results, which providers reject.
- * Answer them with a placeholder, and merge consecutive user messages.
- */
-function repair(history: LlmMessage[]): LlmMessage[] {
-  const out: LlmMessage[] = [];
-  for (let i = 0; i < history.length; i++) {
-    const m = history[i]!;
-    const prev = out[out.length - 1];
-    if (prev && typeof prev.content !== "string" && prev.role === "assistant") {
-      const pending = prev.content.filter((b) => b.type === "tool_use").map((b) => (b as { id: string }).id);
-      const answered = new Set(
-        m.role === "user" && typeof m.content !== "string"
-          ? m.content.filter((b) => b.type === "tool_result").map((b) => (b as { tool_use_id: string }).tool_use_id)
-          : [],
-      );
-      const missing = pending.filter((id) => !answered.has(id));
-      if (missing.length) {
-        const fill: Block[] = missing.map((id) => ({ type: "tool_result", tool_use_id: id, content: "Interrumpido por el usuario.", is_error: true }));
-        if (m.role === "user" && typeof m.content !== "string") {
-          out.push({ role: "user", content: [...fill, ...m.content] });
-          continue;
-        }
-        out.push({ role: "user", content: fill });
-      }
-    }
-    const last = out[out.length - 1];
-    if (last && last.role === m.role && m.role === "user" && typeof last.content !== "string" && typeof m.content !== "string") {
-      last.content = [...last.content, ...m.content];
-      continue;
-    }
-    out.push(m);
-  }
-  return out;
-}
-
-async function save(projectId: string, msg: LlmMessage) {
-  const content = typeof msg.content === "string" ? [{ type: "text", text: msg.content }] : msg.content;
-  await q(`insert into chat_messages (project_id, role, content) values ($1, $2, $3)`, [projectId, msg.role, JSON.stringify(content)]);
-}
-
-function compact(history: LlmMessage[]): LlmMessage[] {
-  let seen = 0;
-  return [...history]
-    .reverse()
-    .map((m) => {
-      if (typeof m.content === "string" || !m.content.some((b) => b.type === "tool_result")) return m;
-      seen++;
-      if (seen <= KEEP_FULL_RESULTS) return m;
-      return {
-        ...m,
-        content: m.content.map((b) =>
-          b.type === "tool_result" && b.content.length > 400 ? { ...b, content: `${b.content.slice(0, 400)}… (resultado antiguo recortado)` } : b,
-        ),
-      };
-    })
-    .reverse();
+  return rows.map((r) => ({ role: r.role, content: r.content, turnId: r.turn_id }));
 }
 
 export const UPLOADS = "static/uploads/";
 const IMAGE_TYPES: Record<string, string> = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp" };
 
-/**
- * Attachments are kept in history as [[adjunto:path]] markers. Only the latest user turn
- * gets its images inlined for the model, so long conversations don't resend them.
- */
-async function withImages(projectId: string, history: LlmMessage[]): Promise<LlmMessage[]> {
-  // The owner's latest message: the last user turn that has text (tool results have none).
-  const idx = history.findLastIndex((m) => m.role === "user" && typeof m.content !== "string" && m.content.some((b) => b.type === "text"));
-  const m = history[idx];
-  if (!m || typeof m.content === "string") return history;
-  const text = m.content.map((b) => (b.type === "text" ? b.text : "")).join("\n");
-  const images: Block[] = [];
+/** Image blocks for the [[adjunto:…]] markers in a message. */
+export async function imageBlocks(projectId: string, text: string): Promise<Block[]> {
+  const out: Block[] = [];
   for (const [, path] of text.matchAll(/\[\[adjunto:([^\]]+)\]\]/g)) {
     const type = IMAGE_TYPES[path!.split(".").pop()!.toLowerCase()];
     const content = type ? await readFile(projectId, path!) : undefined;
-    if (type && content?.startsWith("base64:")) images.push({ type: "image", source: { type: "base64", media_type: type, data: content.slice(7) } });
+    if (type && content?.startsWith("base64:")) out.push({ type: "image", source: { type: "base64", media_type: type, data: content.slice(7) } });
   }
-  if (!images.length) return history;
-  const copy = [...history];
-  copy[idx] = { ...m, content: [...m.content, ...images] };
-  return copy;
+  return out;
 }
 
 /** One-line description of a tool call for the chat UI. */
@@ -121,86 +54,112 @@ function summarize(name: string, input: Record<string, unknown>): string {
   if (typeof input.path === "string") return input.path;
   if (Array.isArray(input.paths)) return (input.paths as string[]).join(", ");
   if (typeof input.sql === "string") return input.sql.replace(/\s+/g, " ").slice(0, 80);
+  if (typeof input.route === "string") return `${input.method ?? ""} ${input.route}`.trim();
   if (typeof input.name === "string") return input.name;
   if (typeof input.label === "string") return input.label;
   return name;
 }
 
-export async function runBuilderTurn(account: Account, projectId: string, userText: string, emit: (e: AgentEvent) => void, attachments: string[] = []) {
-  if (active.has(projectId)) throw new Error("El constructor ya está trabajando en este proyecto.");
-  const abort = new AbortController();
-  active.set(projectId, abort);
-  let credits = 0;
-  const ctx: ToolContext = { account, projectId, author: "builder" };
-  try {
-    const project = await getProject(projectId);
-    // Credits are the project owner's, whoever is chatting (collaborators included).
-    const payer = project?.ownerId ?? account.id;
-    const fresh = await getAccount(payer);
-    if ((fresh?.credits ?? 0) <= 0) throw new Error("La cuenta dueña del proyecto no tiene créditos para el constructor.");
+// --- The agent loop --------------------------------------------------------------------------------
 
-    const files = attachments.filter((p) => p.startsWith(UPLOADS)).slice(0, 6);
-    const note = files.length ? `\n\n${files.map((p) => `[[adjunto:${p}]]`).join("\n")}` : "";
-    const userMsg: LlmMessage = { role: "user", content: [{ type: "text", text: userText + note }] };
-    await save(projectId, userMsg);
-    const history = [...(await loadHistory(projectId))];
-    const system = [
-      BUILDER_SYSTEM_PROMPT,
-      `# This project\nName: ${project?.name}\nDescription: ${project?.description || "(none)"}\nOwner email: ${account.email}`,
-      project?.systemPrompt ? `# Owner's project instructions\n${project.systemPrompt}` : "",
-      project?.designPrompt ? `# Owner's design guidelines\n${project.designPrompt}` : "",
-    ]
-      .filter(Boolean)
-      .join("\n\n");
+export interface AgentSpec {
+  scope: ModelScope;
+  billing: Billing;
+  role: Role;
+  routing: PickInput;
+  system: string;
+  /** The opening user message(s). The run only appends after this: thinking blocks stay valid. */
+  messages: LlmMessage[];
+  tools: BuilderTool[];
+  ctx: ToolContext;
+  maxSteps: number;
+  signal: AbortSignal;
+  emit: (e: AgentEvent) => void;
+  taskId?: string;
+  turnId: string;
+  /** Persist the transcript to chat_messages (the fast agent's turn is the chat itself). */
+  persist?: { projectId: string };
+  /** Called once the router chose the model, before the first step runs. */
+  onModel?: (m: ModelInfo, reason: string) => void;
+}
 
-    for (let step = 0; step < MAX_STEPS; step++) {
-      if (abort.signal.aborted) throw new Error("Detenido.");
-      const res = await chat({
-        provider: config.builder.provider,
-        model: config.builder.model,
-        system,
-        messages: await withImages(projectId, compact(history)),
-        tools: builderTools.map(({ name, description, input_schema }) => ({ name, description, input_schema })),
-        maxTokens: 16000,
-        signal: abort.signal,
-      });
-      credits += await charge(payer, projectId, "builder", config.builder.model, res.usage);
-      const assistant: LlmMessage = { role: "assistant", content: res.content };
-      history.push(assistant);
-      await save(projectId, assistant);
-      for (const b of res.content) if (b.type === "text" && b.text.trim()) emit({ type: "text", text: b.text });
+export interface AgentResult {
+  text: string;
+  model: ModelInfo | null;
+  usage: Usage;
+  usd: number;
+  credits: number;
+  steps: { tool: string; summary: string; ok: boolean }[];
+  /** null when the agent never ran the check. */
+  buildOk: boolean | null;
+  testsOk: boolean | null;
+  toolErrors: number;
+  hitStepLimit: boolean;
+}
 
-      const calls = res.content.filter((b): b is Extract<Block, { type: "tool_use" }> => b.type === "tool_use");
-      if (!calls.length) break;
+export async function runAgent(spec: AgentSpec): Promise<AgentResult> {
+  const history: LlmMessage[] = [...spec.messages];
+  const tools: LlmTool[] = spec.tools.map(({ name, description, input_schema }) => ({ name, description, input_schema }));
+  const byName = new Map(spec.tools.map((t) => [t.name, t]));
+  const result: AgentResult = { text: "", model: null, usage: emptyUsage(), usd: 0, credits: 0, steps: [], buildOk: null, testsOk: null, toolErrors: 0, hitStepLimit: false };
+  const emit = (e: AgentEvent) => spec.emit(spec.taskId && "type" in e && ["text", "tool_start", "tool_end"].includes(e.type) ? ({ ...e, taskId: spec.taskId } as AgentEvent) : e);
 
-      const results: Block[] = [];
-      for (const call of calls) {
-        emit({ type: "tool_start", id: call.id, name: call.name, summary: summarize(call.name, call.input) });
-        const tool = toolByName.get(call.name);
-        await countAction(account.id);
+  for (let step = 0; step < spec.maxSteps; step++) {
+    if (spec.signal.aborted) throw new Error("Detenido.");
+    const call = await callModel(
+      spec.scope,
+      spec.role,
+      spec.routing,
+      { system: spec.system, messages: history, tools: tools.length ? tools : undefined, maxTokens: 16000, signal: spec.signal },
+      { billing: spec.billing, pinned: result.model ?? undefined, log: { turnId: spec.turnId, taskId: spec.taskId } },
+    );
+    if (!result.model || result.model.id !== call.model.id) {
+      result.model = call.model;
+      spec.ctx.actor = `${spec.role}@${call.model.model}`;
+      spec.onModel?.(call.model, call.failed.length ? `tras fallar ${call.failed.join("; ")}` : "");
+    }
+    result.usage = addUsage(result.usage, call.response.usage);
+    result.usd += call.usd;
+    result.credits += call.credits;
+
+    const assistant: LlmMessage = { role: "assistant", content: call.response.content };
+    history.push(assistant);
+    if (spec.persist) await save(spec.persist.projectId, assistant, spec.turnId);
+    for (const b of call.response.content) if (b.type === "text" && b.text.trim()) emit({ type: "text", text: b.text });
+    const texts = call.response.content.filter((b): b is Extract<Block, { type: "text" }> => b.type === "text").map((b) => b.text.trim()).filter(Boolean);
+    if (texts.length) result.text = texts.join("\n");
+
+    const calls = call.response.content.filter((b): b is Extract<Block, { type: "tool_use" }> => b.type === "tool_use");
+    if (!calls.length) break;
+
+    // Independent tool calls of one step run concurrently; results go back in one message.
+    const results = await Promise.all(
+      calls.map(async (c): Promise<Block> => {
+        const summary = summarize(c.name, c.input);
+        emit({ type: "tool_start", id: c.id, name: c.name, summary });
+        await countAction(spec.ctx.account.id);
         let output: string;
         let ok = true;
         try {
-          if (!tool) throw new Error(`Herramienta desconocida: ${call.name}`);
-          output = await tool.run(call.input, ctx);
+          const tool = byName.get(c.name);
+          if (!tool) throw new Error(`Herramienta no disponible para este agente: ${c.name}`);
+          output = await tool.run(c.input, spec.ctx);
         } catch (e) {
           ok = false;
           output = `Error: ${(e as Error).message}`;
         }
-        emit({ type: "tool_end", id: call.id, ok, output: output.slice(0, 2000) });
-        results.push({ type: "tool_result", tool_use_id: call.id, content: output, is_error: !ok || undefined });
-      }
-      const toolMsg: LlmMessage = { role: "user", content: results };
-      history.push(toolMsg);
-      await save(projectId, toolMsg);
-      if (step === MAX_STEPS - 1) emit({ type: "text", text: "Me detuve tras muchos pasos. Escríbeme «continúa» para seguir." });
-    }
-    emit({ type: "done", credits });
-  } catch (e) {
-    emit({ type: "error", message: abort.signal.aborted ? "Detenido. Escribe qué quieres cambiar o «continúa»." : (e as Error).message });
-  } finally {
-    active.delete(projectId);
-    // A named point per turn, labelled with the request, on top of the per-file change log.
-    if (ctx.wrote) await createCheckpoint(projectId, userText.slice(0, 80), "builder").catch(() => {});
+        if (c.name === "check_build") result.buildOk = ok && output.startsWith("Compila sin errores");
+        if (c.name === "run_tests") result.testsOk = ok && output.startsWith("Todo en verde");
+        if (!ok) result.toolErrors++;
+        result.steps.push({ tool: c.name, summary, ok });
+        emit({ type: "tool_end", id: c.id, ok, output: output.slice(0, 2000) });
+        return { type: "tool_result", tool_use_id: c.id, content: output, is_error: !ok || undefined };
+      }),
+    );
+    const toolMsg: LlmMessage = { role: "user", content: results };
+    history.push(toolMsg);
+    if (spec.persist) await save(spec.persist.projectId, toolMsg, spec.turnId);
+    if (step === spec.maxSteps - 1) result.hitStepLimit = true;
   }
+  return result;
 }
