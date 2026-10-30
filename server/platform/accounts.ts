@@ -1,5 +1,6 @@
 import { config } from "../config.js";
 import { newId, newToken, numericCode, sha256 } from "../lib/crypto.js";
+import { sendPlatformEmail } from "../baas/email.js";
 import { one, q } from "./db.js";
 
 export interface Account {
@@ -15,15 +16,22 @@ const SESSION_DAYS = 30;
  * Studio sign-in has no password: a 6-digit code is sent to the email. Without SMTP
  * the code is printed to the server log, which is enough for local use.
  */
-export async function requestLoginCode(email: string): Promise<string> {
+/** Returns true when the code went out by email. */
+export async function requestLoginCode(email: string): Promise<boolean> {
   const code = numericCode(6);
   await q(
     `insert into login_codes (email, code_hash, attempts, expires_at) values ($1, $2, 0, now() + interval '15 minutes')
      on conflict (email) do update set code_hash = excluded.code_hash, attempts = 0, expires_at = excluded.expires_at`,
     [email.toLowerCase(), sha256(code)],
   );
-  console.log(`[forja] código de acceso para ${email}: ${code}`);
-  return code;
+  const sent = await sendPlatformEmail(
+    email,
+    `Tu código de acceso a Forja: ${code}`,
+    `<p>Tu código para entrar en Forja es:</p><p style="font-size:28px;letter-spacing:4px"><b>${code}</b></p><p>Caduca en 15 minutos. Si no lo pediste, ignora este correo.</p>`,
+  );
+  // Without SMTP (local use) the console is the delivery channel.
+  if (!sent) console.log(`[forja] código de acceso para ${email}: ${code}`);
+  return sent;
 }
 
 export async function verifyLoginCode(email: string, code: string): Promise<string | null> {

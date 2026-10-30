@@ -63,6 +63,19 @@ export async function sendEmail(projectId: string, input: EmailInput) {
   return results;
 }
 
+/** Mail from Forja itself (sign-in codes). Returns false when no SMTP is configured. */
+export async function sendPlatformEmail(to: string, subject: string, html: string): Promise<boolean> {
+  const t = getTransport();
+  if (!t) return false;
+  try {
+    await t.sendMail({ from: `Forja <${config.emailFrom}>`, to, subject, html });
+    return true;
+  } catch (e) {
+    console.error("[forja] no se pudo enviar el correo de acceso:", (e as Error).message);
+    return false;
+  }
+}
+
 /** Records an inbound email (posted by a mail gateway or the Email tab's test form). */
 export async function receiveEmail(projectId: string, input: { from: string; to: string; subject: string; html: string }) {
   await q(

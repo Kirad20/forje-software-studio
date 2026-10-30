@@ -8,6 +8,7 @@ import { log, projectEvents, type ProjectEvent } from "../platform/events.js";
 import { publishedFiles, readAllFiles, type FileMap, type Project } from "../platform/projects.js";
 import { BuildError, buildClient, compileServerModule, endpointRoutes, formatProblem, pageRoutes } from "./bundler.js";
 import { runInSandbox, SandboxRunError, type SandboxError } from "./sandbox.js";
+import { appHeaders, rateLimit, RateLimitError, uploadHeaders } from "../lib/security.js";
 import { recordPageView } from "../baas/analytics.js";
 import { isDevFile } from "../platform/projects.js";
 import { appUrl, previewOrigin } from "./urls.js";
@@ -75,6 +76,7 @@ export async function serveApp(req: Request, t: AppTarget, rest: string): Promis
   const started = Date.now();
   try {
     const res = await route(req, t, rest);
+    for (const [k, v] of Object.entries(appHeaders(t.env))) if (!res.headers.has(k)) res.headers.set(k, v);
     if (rest.startsWith("/_api/") || rest.startsWith("/_baas/")) {
       log(t.project.id, {
         env: t.env,
@@ -325,9 +327,28 @@ async function baasRoute(req: Request, t: AppTarget, p: string): Promise<Respons
   const token = parseCookies(req.headers.get("cookie"))[cookieName];
   const sessionCookie = (value: string, maxAge: number) => ({ "set-cookie": cookie(cookieName, value, t.base || "/", maxAge, t.env) });
   const body = async () => (await req.json().catch(() => ({}))) as Record<string, string>;
+  const ip = t.clientIp ?? "unknown";
 
   try {
-    switch (`${req.method} ${p}`) {
+    // Abuse limits, per visitor IP and app. Counts are in memory (one process).
+    const limits: Record<string, [number, number]> = {
+      "POST auth/signup": [10, 10 * 60_000],
+      "POST auth/login": [20, 10 * 60_000],
+      "POST auth/reset/request": [5, 15 * 60_000],
+      "POST auth/reset/confirm": [20, 15 * 60_000],
+      "POST storage/upload": [60, 10 * 60_000],
+      "POST ai/chat": [30, 60_000],
+      "POST pv": [120, 60_000],
+      "POST log": [120, 60_000],
+    };
+    const key = `${req.method} ${p}`;
+    if (limits[key]) rateLimit(`app:${pid}:${key}:${ip}`, ...limits[key]!);
+    // Auth and AI calls must be JSON: a cross-site form cannot send that without a preflight.
+    if ((p.startsWith("auth/") || p === "ai/chat") && req.method === "POST" && !(req.headers.get("content-type") ?? "").includes("application/json")) {
+      return json({ error: "Se espera JSON" }, 415);
+    }
+
+    switch (key) {
       case "GET auth/me":
         return json({ user: await auth.userFromSession(pid, token) });
       case "POST auth/signup": {
@@ -383,12 +404,11 @@ async function baasRoute(req: Request, t: AppTarget, p: string): Promise<Respons
     if (req.method === "GET" && p.startsWith("storage/files/")) {
       const obj = await getObject(pid, decodeURIComponent(p.slice("storage/files/".length)));
       if (!obj) return new Response("Not found", { status: 404 });
-      return new Response(new Uint8Array(obj.data), {
-        headers: { "content-type": obj.contentType, "cache-control": "public, max-age=31536000, immutable" },
-      });
+      return new Response(new Uint8Array(obj.data), { headers: uploadHeaders(obj.contentType, obj.filename) });
     }
     return json({ error: "No encontrado" }, 404);
   } catch (e) {
+    if (e instanceof RateLimitError) return json({ error: e.message }, 429, { "retry-after": String(e.retryAfterSec) });
     if (e instanceof auth.AuthError) return json({ error: e.message }, e.status);
     if (e instanceof AiUnavailableError) return json({ error: e.message }, 402);
     throw e;

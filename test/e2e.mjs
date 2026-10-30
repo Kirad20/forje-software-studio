@@ -143,6 +143,23 @@ const up = await req("POST", "/_baas/storage/upload", { host: pv, body: mp, head
 ok(up.status === 200 && up.json.key, "storage upload", up.text);
 const dl = await req("GET", up.json.url, { host: pv });
 ok(dl.text === "hola mundo", "storage download");
+const evil = Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="x.html"\r\nContent-Type: text/html\r\n\r\n<script>alert(1)</script>\r\n--${boundary}--\r\n`);
+const evilUp = await req("POST", "/_baas/storage/upload", { host: pv, body: evil, headers: { "content-type": `multipart/form-data; boundary=${boundary}` } });
+const evilDl = await req("GET", evilUp.json.url, { host: pv });
+ok(
+  evilDl.headers["content-type"] === "application/octet-stream" && /attachment/.test(evilDl.headers["content-disposition"]) && /sandbox/.test(evilDl.headers["content-security-policy"]),
+  "uploaded HTML is sandboxed and downloaded, never rendered",
+  JSON.stringify(evilDl.headers),
+);
+
+// Studio CSRF defence and headers
+const foreign = await req("POST", "/api/projects", { body: { prompt: "x" }, headers: { origin: "https://evil.example" } });
+ok(foreign.status === 403, "studio rejects writes from foreign origins");
+const formPost = await req("POST", "/api/projects", { body: "prompt=x", headers: { "content-type": "application/x-www-form-urlencoded" } });
+ok(formPost.status === 415, "studio rejects non-JSON writes");
+const studioHome = await req("GET", "/api/me");
+ok(studioHome.headers["x-frame-options"] === "DENY", "studio cannot be framed");
+ok(/frame-ancestors http:\/\/localhost/.test(html.headers["content-security-policy"] ?? ""), "preview can only be framed by the studio", html.headers["content-security-policy"]);
 
 // Background job → email redirected to owner (no verified domain)
 await new Promise((r) => setTimeout(r, 1500));
@@ -298,6 +315,11 @@ const call = await req("POST", "/mcp", { headers: mcpH, body: { jsonrpc: "2.0", 
 ok(call.json?.result?.content?.[0]?.text?.includes("Compila"), "mcp check_build", call.text.slice(0, 300));
 const noauth = await req("POST", "/mcp", { headers: { accept: "application/json, text/event-stream" }, body: { jsonrpc: "2.0", id: 1, method: "tools/list" } });
 ok(noauth.status === 401, "mcp requires token");
+
+// Sign-in codes are rate limited per email.
+let limited = 0;
+for (let i = 0; i < 7; i++) if ((await req("POST", "/api/auth/request", { body: { email: "spam@example.com" } })).status === 429) limited++;
+ok(limited >= 2, "login code requests are rate limited");
 console.log(process.exitCode ? "\nSOME CHECKS FAILED" : "\nALL CHECKS PASSED");
 if (process.exitCode) console.log("\n--- server log ---\n" + serverLog.slice(-4000));
 finish();

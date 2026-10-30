@@ -15,6 +15,7 @@ import { platformDb } from "./platform/db.js";
 import { getProject, getProjectBySlug, type Project } from "./platform/projects.js";
 import { cookie, parseCookies, serveApp } from "./runtime/appServer.js";
 import { stopAllSandboxes } from "./runtime/sandbox.js";
+import { rateLimit, STUDIO_HEADERS } from "./lib/security.js";
 import { checkShareToken, parseAppHost } from "./runtime/urls.js";
 
 const SHARE_COOKIE = "forja_share";
@@ -64,12 +65,25 @@ app.use("*", async (c, next) => {
   return serveApp(c.req.raw, { project: resolved.project, env: resolved.env, base: "", clientIp }, url.pathname);
 });
 
+// The studio itself: never framed, no sniffing. Apps returned above set their own headers.
+app.use("*", async (c, next) => {
+  await next();
+  for (const [k, v] of Object.entries(STUDIO_HEADERS)) if (!c.res.headers.has(k)) c.res.headers.set(k, v);
+});
+
 app.route("/api", studioApi);
 
 app.all("/mcp", async (c) => {
   const bearer = c.req.header("authorization")?.replace(/^Bearer\s+/i, "");
   // Tokens only: a cookie fallback would let any page the owner visits drive the builder.
   const account = await accountFromApiToken(bearer);
+  if (account) {
+    try {
+      rateLimit(`mcp:${account.id}`, 240, 60_000);
+    } catch (e) {
+      return c.json({ error: (e as Error).message }, 429);
+    }
+  }
   if (!account) return c.json({ error: "Crea un token en el studio (Cuenta → Tokens MCP) y envíalo como Authorization: Bearer" }, 401);
   return handleMcp(c.req.raw, account);
 });

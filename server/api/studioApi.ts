@@ -30,6 +30,7 @@ import {
   updateIntegrationValue,
 } from "../platform/integrations.js";
 import { usageSummary } from "../platform/usage.js";
+import { isHttps, rateLimit, RateLimitError, studioOrigins } from "../lib/security.js";
 
 const quoteIdent = (name: string) => `"${name.replace(/"/g, '""')}"`;
 
@@ -59,7 +60,10 @@ export const SESSION_COOKIE = "forja_session";
 
 export const studioApi = new Hono<Env>();
 
-studioApi.onError((err, c) => c.json({ error: err.message }, 400));
+studioApi.onError((err, c) => {
+  if (err instanceof RateLimitError) return c.json({ error: err.message }, 429, { "retry-after": String(err.retryAfterSec) });
+  return c.json({ error: err.message }, 400);
+});
 
 const sse = (start: (send: (data: unknown) => void, close: () => void) => () => void) => {
   let cleanup = () => {};
@@ -83,20 +87,41 @@ const sse = (start: (send: (data: unknown) => void, close: () => void) => () => 
   return new Response(stream, { headers: { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" } });
 };
 
+export const ipOf = (c: Context) =>
+  (c.env as { incoming?: { socket?: { remoteAddress?: string } } })?.incoming?.socket?.remoteAddress ?? "unknown";
+
+/**
+ * CSRF defence for the studio API. State-changing requests must come from the studio's
+ * own origin (when the browser says where it comes from) and carry JSON, which a
+ * cross-site form or beacon cannot send without a CORS preflight that we never grant.
+ */
+studioApi.use("*", async (c, next) => {
+  if (["POST", "PUT", "PATCH", "DELETE"].includes(c.req.method)) {
+    const origin = c.req.header("origin");
+    if (origin && !studioOrigins().includes(origin)) return c.json({ error: "Origen no permitido" }, 403);
+    const hasBody = Number(c.req.header("content-length") ?? 0) > 0 || !!c.req.header("transfer-encoding");
+    if (hasBody && !(c.req.header("content-type") ?? "").includes("application/json")) return c.json({ error: "Se espera JSON" }, 415);
+  }
+  await next();
+});
+
 // --- Auth -------------------------------------------------------------------------
 
 studioApi.post("/auth/request", async (c) => {
   const { email } = await c.req.json<{ email: string }>();
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email ?? "")) return c.json({ error: "Correo no válido" }, 400);
-  await accounts.requestLoginCode(email);
-  return c.json({ ok: true, hint: "Revisa la consola del servidor si no hay SMTP configurado." });
+  rateLimit(`login-ip:${ipOf(c)}`, 20, 15 * 60_000);
+  rateLimit(`login-email:${email.toLowerCase()}`, 5, 15 * 60_000);
+  const sent = await accounts.requestLoginCode(email);
+  return c.json({ ok: true, hint: sent ? "Te enviamos un código por correo." : "Sin SMTP configurado: el código está en la consola del servidor." });
 });
 
 studioApi.post("/auth/verify", async (c) => {
   const { email, code } = await c.req.json<{ email: string; code: string }>();
+  rateLimit(`verify-ip:${ipOf(c)}`, 30, 15 * 60_000);
   const token = await accounts.verifyLoginCode(email, code);
   if (!token) return c.json({ error: "Código incorrecto o caducado" }, 401);
-  setCookie(c, SESSION_COOKIE, token, { httpOnly: true, sameSite: "Lax", path: "/", maxAge: 3600 * 24 * 30 });
+  setCookie(c, SESSION_COOKIE, token, { httpOnly: true, sameSite: "Lax", secure: isHttps(), path: "/", maxAge: 3600 * 24 * 30 });
   return c.json({ ok: true });
 });
 
