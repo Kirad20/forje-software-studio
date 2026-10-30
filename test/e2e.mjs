@@ -215,6 +215,54 @@ await req("POST", `/api/projects/${project.id}/integrations/${integ.json.id}`, {
 await req("PUT", `/api/projects/${project.id}/file`, { body: { path: "endpoints/env_GET.ts", content: `export default async (ctx: any) => ({ has: ctx.env.WEATHER_KEY === "w-123" });` } });
 ok((await req("GET", "/_api/env", { host: pv })).json?.has === true, "connected integration injected into ctx.env");
 
+// Sandbox: project code cannot read files, spawn processes or see platform secrets.
+await req("PUT", `/api/projects/${project.id}/file`, {
+  body: {
+    path: "endpoints/escape_GET.ts",
+    content: `import fs from "node:fs";
+import cp from "node:child_process";
+export default async () => {
+  const out: Record<string, string> = {};
+  try { fs.readFileSync("server/config.ts"); out.read = "LEAK"; } catch (e: any) { out.read = e.code; }
+  try { fs.writeFileSync("pwned.txt", "x"); out.write = "LEAK"; } catch (e: any) { out.write = e.code; }
+  try { cp.execSync("echo hi"); out.spawn = "LEAK"; } catch (e: any) { out.spawn = e.code; }
+  out.secret = process.env.SECRETS_KEY ? "LEAK" : "none";
+  return out;
+};`,
+  },
+});
+const escape = await req("GET", "/_api/escape", { host: pv });
+ok(
+  escape.json?.read === "ERR_ACCESS_DENIED" && escape.json?.write === "ERR_ACCESS_DENIED" && escape.json?.spawn === "ERR_ACCESS_DENIED" && escape.json?.secret === "none",
+  "sandbox blocks files, processes and platform env",
+  escape.text,
+);
+// Transactions over the sandbox RPC: rollback on error, commit on success.
+await req("PUT", `/api/projects/${project.id}/file`, {
+  body: {
+    path: "endpoints/tx_POST.ts",
+    content: `export default async (ctx: any) => {
+  try {
+    await ctx.db.transaction(async (tx: any) => {
+      await tx.query("insert into todos (title) values ('tx-rollback')");
+      throw new Error("boom");
+    });
+  } catch {}
+  await ctx.db.transaction(async (tx: any) => { await tx.query("insert into todos (title) values ('tx-commit')"); });
+  return ctx.db.query("select title from todos where title like 'tx-%' order by title");
+};`,
+  },
+});
+const tx = await req("POST", "/_api/tx", { host: pv, body: {} });
+ok(JSON.stringify(tx.json) === JSON.stringify([{ title: "tx-commit" }]), "transactions commit and roll back", tx.text);
+await req("POST", `/api/projects/${project.id}/db/sql`, { body: { sql: "delete from todos where title like 'tx-%'" } });
+// Apps cannot set the platform's own cookies.
+await req("PUT", `/api/projects/${project.id}/file`, {
+  body: { path: "endpoints/cookie_GET.ts", content: `export default async (ctx: any) => { ctx.setCookie("forja_share", "x"); ctx.setCookie("theme", "dark"); return {}; };` },
+});
+const ck = await req("GET", "/_api/cookie", { host: pv });
+ok((ck.headers["set-cookie"] ?? []).every((c) => !c.startsWith("forja_")) && (ck.headers["set-cookie"] ?? []).some((c) => c.startsWith("theme=")), "app cookies cannot shadow platform cookies");
+
 // Change timeline: per-file changes with authors, and restore to any point
 const changes = (await req("GET", `/api/projects/${project.id}/changes`)).json.changes;
 ok(changes.some((c) => c.kind === "publish") && changes.some((c) => c.kind === "create" && c.author === "owner"), "timeline lists writes and publishes");

@@ -6,7 +6,8 @@ import { HttpError, serviceContext, type AppEnv, type EndpointContext } from "..
 import { getObject, putObject } from "../baas/storage.js";
 import { log, projectEvents, type ProjectEvent } from "../platform/events.js";
 import { publishedFiles, readAllFiles, type FileMap, type Project } from "../platform/projects.js";
-import { BuildError, buildClient, endpointRoutes, formatProblem, loadServerModule, pageRoutes } from "./bundler.js";
+import { BuildError, buildClient, compileServerModule, endpointRoutes, formatProblem, pageRoutes } from "./bundler.js";
+import { runInSandbox, SandboxRunError, type SandboxError } from "./sandbox.js";
 import { recordPageView } from "../baas/analytics.js";
 import { isDevFile } from "../platform/projects.js";
 import { appUrl, previewOrigin } from "./urls.js";
@@ -260,51 +261,61 @@ async function callEndpoint(req: Request, t: AppTarget, routePath: string): Prom
   const url = new URL(req.url);
   const cookies = parseCookies(req.headers.get("cookie"));
   const user = await auth.userFromSession(t.project.id, cookies[auth.sessionCookie(t.project.id)]);
-  let body: unknown = undefined;
-  if (method === "POST") {
-    const type = req.headers.get("content-type") ?? "";
-    if (type.includes("application/json")) body = await req.json().catch(() => ({}));
-    else if (type.includes("form")) body = await req.formData();
-    else body = await req.text();
-  }
-  const setCookies: string[] = [];
-  const ctx: EndpointContext = {
-    ...(await serviceContext(t.project.id, t.env, t.base, "endpoint")),
-    req,
-    method,
-    query: Object.fromEntries(url.searchParams),
-    body,
-    user,
-    requireUser(role?: string) {
-      if (!user) throw new HttpError(401, "Inicia sesión para continuar.");
-      if (role && user.role !== role && user.role !== "admin") throw new HttpError(403, "No tienes permiso.");
-      return user;
-    },
-    setCookie(name, value, opts) {
-      setCookies.push(cookie(name, value, t.base || "/", opts?.maxAge ?? 3600 * 24 * 30, t.env));
-    },
-  };
+  if (method === "POST" && Number(req.headers.get("content-length") ?? 0) > MAX_BODY_BYTES) return json({ error: "Petición demasiado grande" }, 413);
+  const rawBody = method === "POST" ? new Uint8Array(await req.arrayBuffer()) : undefined;
+  if (rawBody && rawBody.byteLength > MAX_BODY_BYTES) return json({ error: "Petición demasiado grande" }, 413);
 
   try {
-    const mod = await loadServerModule(files, ep.file);
-    const handler = mod.default as (ctx: EndpointContext) => unknown;
-    if (typeof handler !== "function") throw new Error(`${ep.file} no exporta una función por defecto`);
-    const result = await handler(ctx);
-    const res = result instanceof Response ? result : json(result ?? null);
-    for (const c of setCookies) res.headers.append("set-cookie", c);
+    const mod = await compileServerModule(files, ep.file);
+    // Project code runs in the project's sandbox process, never in the platform.
+    const out = (await runInSandbox(
+      t.project.id,
+      "endpoint",
+      {
+        env_name: t.env,
+        file: mod.file,
+        base: t.base,
+        method,
+        url: req.url,
+        headers: [...req.headers.entries()].filter(([k]) => k !== "cookie"),
+        rawBody,
+        query: Object.fromEntries(url.searchParams),
+        user,
+      },
+      "endpoint",
+    )) as SandboxResult;
+    const res =
+      out.kind === "response"
+        ? new Response(out.body.byteLength ? Buffer.from(out.body) : null, { status: out.status, headers: out.headers })
+        : json(out.data ?? null);
+    for (const c of out.setCookies) {
+      // Apps cannot overwrite the platform's own session cookies.
+      if (c.name.startsWith("forja_")) continue;
+      res.headers.append("set-cookie", cookie(c.name, c.value, t.base || "/", c.maxAge ?? 3600 * 24 * 30, t.env));
+    }
     return res;
   } catch (e) {
-    if (e instanceof HttpError) return json({ error: e.message }, e.status);
-    if (e instanceof auth.AuthError) return json({ error: e.message }, e.status);
-    if (e instanceof AiUnavailableError) return json({ error: e.message }, 402);
     if (e instanceof BuildError) {
       log(t.project.id, { env: t.env, level: "error", source: "build", message: e.message });
       return json({ error: `No compila: ${e.message}` }, 500);
     }
-    log(t.project.id, { env: t.env, level: "error", source: "endpoint", message: `${ep.file}: ${(e as Error).stack ?? e}` });
-    return json({ error: t.env === "preview" ? (e as Error).message : "Error interno" }, 500);
+    const d: SandboxError = e instanceof SandboxRunError ? e.detail : { name: (e as Error).name, message: (e as Error).message, stack: (e as Error).stack };
+    if (d.status) return json({ error: d.message }, d.status);
+    if (d.name === "AiUnavailableError") return json({ error: d.message }, 402);
+    if (d.name === "ZodError" && d.issues) {
+      const error = d.issues.map((i) => (i.path?.length ? `${i.path.join(".")}: ${i.message}` : i.message)).join("; ");
+      return json({ error, issues: d.issues }, 400);
+    }
+    log(t.project.id, { env: t.env, level: "error", source: "endpoint", message: `${ep.file}: ${d.stack ?? d.message}` });
+    return json({ error: t.env === "preview" ? d.message : "Error interno" }, 500);
   }
 }
+
+type SandboxResult =
+  | { kind: "json"; data: unknown; setCookies: { name: string; value: string; maxAge?: number }[] }
+  | { kind: "response"; status: number; headers: [string, string][]; body: Uint8Array; setCookies: { name: string; value: string; maxAge?: number }[] };
+
+const MAX_BODY_BYTES = 10 * 1024 * 1024;
 
 // --- Built-in services --------------------------------------------------------------
 

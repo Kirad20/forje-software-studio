@@ -1,12 +1,12 @@
 import { Cron } from "croner";
-import { config } from "../config.js";
 import { newId } from "../lib/crypto.js";
 import { q } from "../platform/db.js";
 import { log } from "../platform/events.js";
 import { publishedFiles, readAllFiles } from "../platform/projects.js";
-import { jobFiles, loadServerModule } from "../runtime/bundler.js";
+import { compileServerModule, jobFiles, readJobSettings } from "../runtime/bundler.js";
+import { runInSandbox } from "../runtime/sandbox.js";
 import { appUrl, previewOrigin } from "../runtime/urls.js";
-import { bindJobs, serviceContext, type AppEnv, type JobContext } from "./context.js";
+import { bindJobs, type AppEnv } from "./context.js";
 
 /**
  * Three kinds of work outside a request, as in the product:
@@ -48,10 +48,9 @@ export async function runJob(projectId: string, env: AppEnv, name: string, paylo
     trigger,
   ]);
   try {
-    const mod = await loadServerModule(files, job.file);
-    const handler = mod.default as (ctx: JobContext) => Promise<unknown>;
-    const ctx: JobContext = { ...(await serviceContext(projectId, env, await baseFor(projectId, env), "job")), payload, job: name };
-    await withTimeout(handler(ctx), config.maxRunMs);
+    const mod = await compileServerModule(files, job.file);
+    // Runs in the project's sandbox, which enforces the 15-minute limit.
+    await runInSandbox(projectId, "job", { env_name: env, file: mod.file, base: await baseFor(projectId, env), payload, job: name }, "job");
     await q(`update job_runs set status = 'ok', finished_at = now() where id = $1`, [run!.id]);
     log(projectId, { env, level: "info", source: "job", message: `Tarea ${name} (${trigger}) terminada` });
   } catch (e) {
@@ -61,12 +60,6 @@ export async function runJob(projectId: string, env: AppEnv, name: string, paylo
   }
 }
 
-async function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
-  let t: NodeJS.Timeout;
-  return Promise.race([p, new Promise<never>((_, rej) => (t = setTimeout(() => rej(new Error("Tiempo máximo de 15 minutos")), ms)))]).finally(
-    () => clearTimeout(t),
-  );
-}
 
 async function addTimer(projectId: string, env: AppEnv, name: string, payload: unknown, runAt: Date) {
   const delay = runAt.getTime() - Date.now();
@@ -113,22 +106,22 @@ export async function scheduleProject(projectId: string) {
   );
   const list: Cron[] = [];
   for (const job of jobFiles(files).slice(0, LIMITS.scheduledPerProject)) {
-    let mod: Record<string, unknown>;
-    try {
-      mod = await loadServerModule(files, job.file);
-    } catch {
-      continue;
-    }
-    const schedule = mod.schedule as string | undefined;
+    const { schedule, timezone } = readJobSettings(files[job.file]!);
     if (!schedule || disabled.has(job.name)) continue;
-    const cron = new Cron(schedule, { timezone: (mod.timezone as string) ?? "UTC", protect: true }, () => {
+    let cron: Cron;
+    try {
+      cron = new Cron(schedule, { timezone: timezone ?? "UTC", protect: true }, () => {
       const key = `${projectId}:${job.name}`;
       // One run at a time: skip when the previous run is still going.
       if (running.has(key)) return;
       const p = runJob(projectId, "published", job.name, null, "schedule").catch(() => {});
       running.set(key, p);
       void p.finally(() => running.delete(key));
-    });
+      });
+    } catch (e) {
+      log(projectId, { env: "published", level: "error", source: "job", message: `jobs/${job.name}: horario no válido (${(e as Error).message})` });
+      continue;
+    }
     const [a, b] = cron.nextRuns(2);
     if (a && b && b.getTime() - a.getTime() < LIMITS.minIntervalMinutes * 60_000) {
       cron.stop();
@@ -148,15 +141,7 @@ export async function listJobs(projectId: string) {
   const active = new Map((crons.get(projectId) ?? []).map((c) => [c.getPattern(), c]));
   const jobs = [];
   for (const j of jobFiles(files)) {
-    let schedule: string | null = null;
-    let timezone: string | null = null;
-    try {
-      const mod = await loadServerModule(files, j.file);
-      schedule = (mod.schedule as string) ?? null;
-      timezone = (mod.timezone as string) ?? null;
-    } catch {
-      /* reported by the build check */
-    }
+    const { schedule, timezone } = readJobSettings(files[j.file]!);
     jobs.push({
       name: j.name,
       schedule,

@@ -8,6 +8,7 @@ import { log } from "../platform/events.js";
  * project owner's credits, and the owner can switch it off per project.
  */
 export class AiUnavailableError extends Error {
+  name = "AiUnavailableError";
   status = 402;
 }
 

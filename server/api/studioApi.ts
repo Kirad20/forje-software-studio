@@ -47,6 +47,8 @@ async function primaryKeyOf(projectId: string, table: string): Promise<string | 
 /** Removes a deleted project's database and uploaded files from disk. */
 async function removeProjectData(projectId: string) {
   const { closeProject } = await import("../baas/projectDb.js");
+  const { stopSandbox } = await import("../runtime/sandbox.js");
+  stopSandbox(projectId);
   await closeProject(projectId);
   await rm(path.join(config.dataDir, "projects", projectId), { recursive: true, force: true }).catch(() => {});
 }

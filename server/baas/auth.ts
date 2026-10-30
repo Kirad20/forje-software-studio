@@ -151,6 +151,23 @@ export async function ensureOwnerAdmin(projectId: string, ownerEmail: string) {
   return true;
 }
 
+/**
+ * A 5-minute session for an existing user, so the builder can test endpoints as that
+ * user. Only reachable from builder tools, never from an app's own routes.
+ */
+export async function testSession(projectId: string, email: string): Promise<{ token: string; user: AppUser }> {
+  const db = projectDb(projectId);
+  const user = await db.one<AppUser>(`select ${USER_COLS} from _forja_users where email = $1`, [normalizeEmail(email)]);
+  if (!user) throw new AuthError(`No existe el usuario ${email} en esta app.`, 404);
+  const token = newToken();
+  await db.query(`insert into _forja_sessions (token_hash, user_id, expires_at) values ($1, $2, now() + interval '5 minutes')`, [sha256(token), user.id]);
+  return { token, user };
+}
+
+export async function endSession(projectId: string, token: string) {
+  await projectDb(projectId).query(`delete from _forja_sessions where token_hash = $1`, [sha256(token)]);
+}
+
 export async function setTemporaryPassword(projectId: string, email: string, password: string) {
   const db = projectDb(projectId);
   const r = await db.query(`update _forja_users set password_hash = $2, failed_logins = 0, locked_until = null where email = $1 returning id`, [

@@ -1,4 +1,6 @@
-import { ensureOwnerAdmin, setTemporaryPassword } from "../baas/auth.js";
+import { endSession as endTestSession, ensureOwnerAdmin, sessionCookie, setTemporaryPassword, testSession } from "../baas/auth.js";
+import { fetchPublicText } from "../lib/safeFetch.js";
+import { serveApp } from "../runtime/appServer.js";
 import { runJob } from "../baas/jobs.js";
 import { describeSchema, execSql } from "../baas/projectDb.js";
 import { listSecrets, requestSecret } from "../baas/secrets.js";
@@ -7,7 +9,7 @@ import { readLogs } from "../platform/events.js";
 import * as projects from "../platform/projects.js";
 import { checkProject, endpointRoutes, formatProblem, jobFiles, pageRoutes } from "../runtime/bundler.js";
 import { publishProject } from "../runtime/publish.js";
-import { previewUrl } from "../runtime/urls.js";
+import { previewOrigin, previewUrl } from "../runtime/urls.js";
 
 export { previewUrl };
 
@@ -116,6 +118,75 @@ export const builderTools: BuilderTool[] = [
       await projects.renameFile(ctx.projectId, i.from, i.to, ctx.author);
       ctx.wrote = true;
       return `Movido ${i.from} → ${i.to}`;
+    },
+  },
+  {
+    name: "search_code",
+    description: "Busca un texto o expresión regular en todos los archivos del proyecto y devuelve las líneas que coinciden (archivo:línea).",
+    input_schema: obj(
+      { pattern: str("Texto o regex (sin barras)"), path_prefix: str("Limitar a rutas que empiecen así, p. ej. endpoints/"), ignore_case: { type: "boolean" } },
+      ["pattern"],
+    ),
+    async run(i: { pattern: string; path_prefix?: string; ignore_case?: boolean }, ctx) {
+      let re: RegExp;
+      try {
+        re = new RegExp(i.pattern, i.ignore_case ? "i" : "");
+      } catch {
+        re = new RegExp(i.pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), i.ignore_case ? "i" : "");
+      }
+      const hits: string[] = [];
+      for (const [path, content] of Object.entries(await projects.readAllFiles(ctx.projectId))) {
+        if (i.path_prefix && !path.startsWith(i.path_prefix)) continue;
+        content.split("\n").forEach((line, n) => {
+          if (hits.length < 200 && re.test(line)) hits.push(`${path}:${n + 1}: ${line.trim().slice(0, 200)}`);
+        });
+      }
+      return hits.join("\n") || "Sin coincidencias.";
+    },
+  },
+  {
+    name: "call_endpoint",
+    description:
+      "Llama a un endpoint de la vista previa para comprobar que funciona, como visitante anónimo o como un usuario existente (as_user_email). Devuelve el estado HTTP y el cuerpo. Usa datos reales: no lo uses para borrar datos del dueño.",
+    input_schema: obj(
+      {
+        method: { type: "string", enum: ["GET", "POST"] },
+        route: str("Ruta del endpoint sin /_api/, p. ej. todos/list"),
+        query: { type: "object", description: "Parámetros de la URL (GET)" },
+        body: { type: "object", description: "Cuerpo JSON (POST)" },
+        as_user_email: str("Correo de un usuario de la app para llamar con su sesión"),
+      },
+      ["method", "route"],
+    ),
+    async run(i: { method: "GET" | "POST"; route: string; query?: Record<string, unknown>; body?: unknown; as_user_email?: string }, ctx) {
+      const project = (await projects.getProject(ctx.projectId))!;
+      const qs = i.query ? "?" + new URLSearchParams(Object.entries(i.query).map(([k, v]) => [k, String(v)])) : "";
+      const route = i.route.replace(/^\/?(_api\/)?/, "");
+      const session = i.as_user_email ? await testSession(ctx.projectId, i.as_user_email) : null;
+      try {
+        const req = new Request(`${previewOrigin(ctx.projectId)}/_api/${route}${qs}`, {
+          method: i.method,
+          headers: {
+            "content-type": "application/json",
+            ...(session ? { cookie: `${sessionCookie(ctx.projectId)}=${session.token}` } : {}),
+          },
+          body: i.method === "POST" ? JSON.stringify(i.body ?? {}) : undefined,
+        });
+        const res = await serveApp(req, { project, env: "preview", base: "" }, `/_api/${route}`);
+        const text = await res.text();
+        return clip(`${i.method} /_api/${route}${qs}${session ? ` (como ${session.user.email})` : " (anónimo)"} → ${res.status}\n${text}`);
+      } finally {
+        if (session) await endTestSession(ctx.projectId, session.token);
+      }
+    },
+  },
+  {
+    name: "fetch_url",
+    description:
+      "Lee una página pública por HTTPS (documentación de una API, un JSON de ejemplo) y devuelve su texto. Úsalo para investigar integraciones antes de escribirlas. No envía credenciales.",
+    input_schema: obj({ url: str("URL https:// pública") }, ["url"]),
+    async run(i: { url: string }) {
+      return clip(await fetchPublicText(i.url));
     },
   },
   {

@@ -1,6 +1,6 @@
 import { mkdirSync, writeFileSync, existsSync } from "node:fs";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
+
 import * as esbuild from "esbuild";
 import { ROOT_DIR, paths } from "../config.js";
 import { sha256 } from "../lib/crypto.js";
@@ -171,7 +171,13 @@ export const jobFiles = (files: FileMap): JobInfo[] =>
     .filter((x) => x.m)
     .map((x) => ({ file: x.file, name: x.m![1]! }));
 
-const moduleCache = new Map<string, Promise<Record<string, unknown>>>();
+export interface CompiledModule {
+  /** Absolute path of the bundled .mjs, loaded only inside a project's sandbox. */
+  file: string;
+  exports: string[];
+}
+
+const compileCache = new Map<string, Promise<CompiledModule>>();
 
 /** Server code depends on endpoints/, jobs/ and helpers/ only; hash just those. */
 function serverHash(files: FileMap, entry: string) {
@@ -183,12 +189,18 @@ function serverHash(files: FileMap, entry: string) {
   return sha256(entry + "\0" + relevant).slice(0, 32);
 }
 
-export async function loadServerModule(files: FileMap, entry: string): Promise<Record<string, unknown>> {
+/**
+ * Bundles one endpoint or job to a file. The platform never imports it: it runs in the
+ * project's sandbox (runtime/sandbox.ts). The cache lives under node_modules so the
+ * bundle's bare imports (zod...) resolve, and so the sandbox can read it.
+ */
+export async function compileServerModule(files: FileMap, entry: string): Promise<CompiledModule> {
   const key = serverHash(files, entry);
-  let p = moduleCache.get(key);
+  let p = compileCache.get(key);
   if (!p) {
     p = (async () => {
       let code: string;
+      let exports: string[] = [];
       try {
         const result = await esbuild.build({
           entryPoints: [`./${entry}`],
@@ -200,22 +212,35 @@ export async function loadServerModule(files: FileMap, entry: string): Promise<R
           target: "node22",
           logLevel: "silent",
           packages: "external",
+          metafile: true,
           plugins: [vfsPlugin(files)],
           absWorkingDir: ROOT_DIR,
         });
         code = result.outputFiles[0]!.text;
+        exports = Object.values(result.metafile.outputs)[0]?.exports ?? [];
       } catch (e) {
         throw new BuildError(toProblems(e));
       }
       mkdirSync(paths.bundleCache, { recursive: true });
       const file = path.join(paths.bundleCache, `${key}.mjs`);
       if (!existsSync(file)) writeFileSync(file, code);
-      return (await import(pathToFileURL(file).href)) as Record<string, unknown>;
+      return { file, exports };
     })();
-    moduleCache.set(key, p);
-    p.catch(() => moduleCache.delete(key));
+    compileCache.set(key, p);
+    p.catch(() => compileCache.delete(key));
+    if (compileCache.size > 500) compileCache.delete(compileCache.keys().next().value!);
   }
   return p;
+}
+
+/**
+ * A job's `schedule` and `timezone` exports, read from source so the platform never has
+ * to execute project code to plan cron runs. Only string literals count.
+ */
+export function readJobSettings(source: string): { schedule: string | null; timezone: string | null } {
+  const lit = (name: string) =>
+    new RegExp(String.raw`export\s+const\s+${name}\s*(?::\s*string)?\s*=\s*(["'` + "`" + String.raw`])([^"'` + "`" + String.raw`\n]+)\1`).exec(source)?.[2] ?? null;
+  return { schedule: lit("schedule"), timezone: lit("timezone") };
 }
 
 /** Compiles everything and reports every problem — the builder's "does it build?" check. */
@@ -229,11 +254,17 @@ export async function checkProject(files: FileMap): Promise<BuildProblem[]> {
   }
   for (const f of [...endpointRoutes(files).map((e) => e.file), ...jobFiles(files).map((j) => j.file)]) {
     try {
-      const mod = await loadServerModule(files, f);
-      if (typeof mod.default !== "function") problems.push({ file: f, text: "Debe exportar por defecto una función (export default async function ...)." });
+      const mod = await compileServerModule(files, f);
+      if (!mod.exports.includes("default")) problems.push({ file: f, text: "Debe exportar por defecto una función (export default async function ...)." });
     } catch (e) {
       if (e instanceof BuildError) problems.push(...e.problems);
-      else problems.push({ file: f, text: `Error al cargar: ${(e as Error).message}` });
+      else problems.push({ file: f, text: `Error al compilar: ${(e as Error).message}` });
+    }
+  }
+  for (const j of jobFiles(files)) {
+    const { schedule } = readJobSettings(files[j.file]!);
+    if (/export\s+const\s+schedule/.test(files[j.file]!) && !schedule) {
+      problems.push({ file: j.file, text: "`schedule` debe ser un texto literal, p. ej. export const schedule = \"0 8 * * *\"." });
     }
   }
   return problems;

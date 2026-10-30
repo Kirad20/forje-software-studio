@@ -14,6 +14,7 @@ import { accountFromApiToken } from "./platform/accounts.js";
 import { platformDb } from "./platform/db.js";
 import { getProject, getProjectBySlug, type Project } from "./platform/projects.js";
 import { cookie, parseCookies, serveApp } from "./runtime/appServer.js";
+import { stopAllSandboxes } from "./runtime/sandbox.js";
 import { checkShareToken, parseAppHost } from "./runtime/urls.js";
 
 const SHARE_COOKIE = "forja_share";
@@ -110,6 +111,7 @@ server.on("upgrade", async (req, socket, head) => {
 });
 
 const shutdown = async () => {
+  stopAllSandboxes();
   await closeAll();
   process.exit(0);
 };
