@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import { api, streamPost } from "../api";
+import { AgentLanes, type Lane, type TeamTurn } from "./AgentLanes";
 import { Check, Cross, Send } from "./Icons";
 
 type Block =
@@ -10,6 +11,43 @@ type Block =
 interface Message {
   role: "user" | "assistant";
   content: Block[];
+  turnId?: string | null;
+}
+
+/** One agent's run in a turn, as stored by the server (agent_tasks). */
+interface TaskRow {
+  id: string;
+  turnId: string;
+  role: string;
+  goal: string;
+  model: string | null;
+  status: "pending" | "running" | "done" | "failed";
+  summary: string | null;
+  steps: { tool: string; summary: string; ok: boolean }[] | null;
+  dependsOn: string[] | null;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  cacheReadTokens: number | null;
+  usd: number | string | null;
+  startedAt: string | null;
+}
+
+function teamOf(rows: TaskRow[]): TeamTurn {
+  const sorted = [...rows].sort((a, b) => (a.startedAt ?? "9").localeCompare(b.startedAt ?? "9"));
+  return {
+    lanes: sorted.map((t) => ({
+      id: t.id.slice(t.id.indexOf(":") + 1),
+      role: t.role,
+      goal: t.role === "fast" ? "" : t.goal,
+      model: t.model ?? undefined,
+      status: t.status,
+      steps: (t.steps ?? []).map((s, i) => ({ id: `${t.id}:${i}`, name: s.tool, summary: s.summary, state: s.ok ? "ok" : "err" })),
+      note: t.role === "fast" ? undefined : (t.summary ?? undefined),
+      usd: Number(t.usd ?? 0),
+      tokens: (t.inputTokens ?? 0) + (t.outputTokens ?? 0) + (t.cacheReadTokens ?? 0),
+      dependsOn: t.dependsOn ?? [],
+    })),
+  };
 }
 
 interface Step {
@@ -21,7 +59,11 @@ interface Step {
 }
 
 /** A rendered turn item: user text, assistant text, or a group of tool steps. */
-type Item = { kind: "user"; text: string; element?: string; attachments?: string[] } | { kind: "ai"; text: string } | { kind: "steps"; steps: Step[] };
+type Item =
+  | { kind: "user"; text: string; element?: string; attachments?: string[] }
+  | { kind: "ai"; text: string }
+  | { kind: "steps"; steps: Step[] }
+  | { kind: "team"; team: TeamTurn };
 
 /** An element picked with the Select tool in the preview. */
 export interface SelectedElement {
@@ -93,9 +135,12 @@ function summarize(name: string, input: Record<string, unknown>) {
   return "";
 }
 
-function toItems(messages: Message[]): Item[] {
+function toItems(messages: Message[], tasks: TaskRow[] = []): Item[] {
   const results = new Map<string, Extract<Block, { type: "tool_result" }>>();
   for (const m of messages) for (const b of m.content) if (b.type === "tool_result") results.set(b.tool_use_id, b);
+  const byTurn = new Map<string, TaskRow[]>();
+  for (const t of tasks) byTurn.set(t.turnId, [...(byTurn.get(t.turnId) ?? []), t]);
+  const shown = new Set<string>();
   const items: Item[] = [];
   const pushStep = (s: Step) => {
     const last = items[items.length - 1];
@@ -103,6 +148,11 @@ function toItems(messages: Message[]): Item[] {
     else items.push({ kind: "steps", steps: [s] });
   };
   for (const m of messages) {
+    // Multi-agent turns: the lanes go right before the turn's reply.
+    if (m.role === "assistant" && m.turnId && !shown.has(m.turnId) && byTurn.has(m.turnId)) {
+      shown.add(m.turnId);
+      items.push({ kind: "team", team: teamOf(byTurn.get(m.turnId)!) });
+    }
     for (const b of m.content) {
       if (b.type === "text" && b.text.trim()) items.push(m.role === "user" ? userItem(b.text) : { kind: "ai", text: b.text });
       if (b.type === "tool_use") {
@@ -219,8 +269,8 @@ export function Chat({
   const started = useRef(false);
 
   const load = () =>
-    api<{ messages: Message[]; building: boolean }>(`/projects/${projectId}/chat`).then((r) => {
-      setItems(toItems(r.messages));
+    api<{ messages: Message[]; tasks?: TaskRow[]; building: boolean }>(`/projects/${projectId}/chat`).then((r) => {
+      setItems(toItems(r.messages, r.tasks));
       return r;
     });
 
@@ -257,11 +307,34 @@ export function Chat({
     setAttachments([]);
     const turn: Item[] = [{ ...userItem(message), attachments: files } as Item];
     setLive([...turn]);
-    const update = () => setLive([...turn]);
+    const update = () => setLive(turn.map((it) => (it.kind === "team" ? { kind: "team", team: { ...it.team, lanes: it.team.lanes.map((l) => ({ ...l, steps: [...l.steps] })) } } : it)));
+    let team: TeamTurn | null = null;
+    const lane = (id: string, role = "fast"): Lane => {
+      if (!team) {
+        team = { lanes: [] };
+        turn.push({ kind: "team", team });
+      }
+      let l = team.lanes.find((x) => x.id === id);
+      if (!l) team.lanes.push((l = { id, role, goal: "", status: "pending", steps: [] }));
+      return l;
+    };
     try {
       await streamPost(`/projects/${projectId}/chat`, { message, attachments: files }, (e) => {
-        if (e.type === "text") turn.push({ kind: "ai", text: e.text });
-        else if (e.type === "tool_start") {
+        if (e.type === "route") {
+          if (!e.fastPath) lane("plan", "planner").goal = "Planificar el trabajo del equipo";
+        } else if (e.type === "plan") {
+          for (const t of e.tasks as { id: string; role: string; goal: string; dependsOn: string[] }[]) Object.assign(lane(t.id, t.role), { goal: t.goal, dependsOn: t.dependsOn });
+        } else if (e.type === "task_start") Object.assign(lane(e.taskId, e.role), { status: "running", model: e.model });
+        else if (e.type === "task_end") Object.assign(lane(e.taskId), { status: e.ok ? "done" : "failed", usd: e.usd, tokens: e.tokens, note: e.taskId === "fast" ? undefined : e.summary });
+        else if (e.type === "review" && team) team.review = { ok: e.ok, summary: e.summary, issues: e.issues };
+        else if (e.type === "done" && team) team.metrics = { usd: e.usd, baselineUsd: e.baselineUsd, cachedTokens: e.cachedTokens };
+        else if (e.type === "text" && e.taskId && e.taskId !== "fast") lane(e.taskId).note = e.text;
+        else if (e.type === "text") turn.push({ kind: "ai", text: e.text });
+        else if (e.taskId && e.type === "tool_start") lane(e.taskId).steps.push({ id: e.id, name: e.name, summary: e.summary, state: "running" });
+        else if (e.taskId && e.type === "tool_end") {
+          const s = lane(e.taskId).steps.find((x) => x.id === e.id);
+          if (s) Object.assign(s, { state: e.ok ? "ok" : "err", output: e.output });
+        } else if (e.type === "tool_start") {
           const last = turn[turn.length - 1];
           const step: Step = { id: e.id, name: e.name, summary: e.summary, state: "running" };
           if (last?.kind === "steps") last.steps.push(step);
@@ -310,6 +383,8 @@ export function Chat({
             <div key={i} className="msg-ai">
               <Markdown text={it.text} />
             </div>
+          ) : it.kind === "team" ? (
+            <AgentLanes key={i} team={it.team} />
           ) : (
             <Steps key={i} steps={it.steps} />
           ),

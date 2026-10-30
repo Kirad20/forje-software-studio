@@ -4,6 +4,7 @@ import { DeleteDialog } from "../pages/Dashboard";
 import { go } from "../router";
 import type { SelectedElement } from "./Chat";
 import { Avatar, copyText, Modal, Switch } from "./ui";
+import { ProjectModels } from "./Models";
 
 // --- Preview canvas -----------------------------------------------------------------------
 
@@ -681,6 +682,8 @@ export function ProjectSettings({ project, onChange }: { project: Project; onCha
         </section>
 
         <AppearanceSection project={project} onChange={onChange} />
+
+        <ProjectModels projectId={project.id} canEdit={project.access !== "editor"} />
 
         <section className="card section">
           <h3>✦ Instrucciones para la IA</h3>

@@ -7,20 +7,21 @@ Constructor de apps full-stack por chat, con su propio BaaS incluido. Es una rei
 ```bash
 cd forja
 npm install
-cp .env.example .env   # pon SECRETS_KEY y ANTHROPIC_API_KEY (u OPENAI_BASE_URL para Ollama/OpenRouter)
+cp .env.example .env   # pon SECRETS_KEY y al menos un proveedor: ANTHROPIC_API_KEY, OPENROUTER_API_KEY u OPENAI_BASE_URL
 npm run build          # compila el studio
 npm start              # http://localhost:4100
 ```
 
 Desarrollo con recarga: `npm run dev` (servidor en :4100 + studio Vite en :5173). Sin SMTP, el código de acceso al studio aparece en la consola del servidor.
 
-Pruebas: `npm run typecheck` y `npm run test:e2e`. La prueba e2e levanta su propio servidor con datos temporales y recorre el studio, todos los servicios BaaS, la vista previa, la publicación, el tiempo real y MCP (49 comprobaciones, sin LLM).
+Pruebas: `npm run typecheck`, `npm test` (unidad: enrutador, aprendizaje, índice), `npm run test:e2e` (studio, todos los servicios BaaS, vista previa, publicación, tiempo real y MCP, sin LLM) y `npm run test:agents` (equipo de agentes contra un modelo simulado: plan, paralelismo, propiedad de archivos, revisión, listas blancas, respaldo y costes).
 
 ## Cómo está hecho
 
 ```
 studio (React)  ──/api──▶  servidor de plataforma (Hono, Node 22+)
-                              ├─ builder/   agente LLM + herramientas (archivos, SQL, build, logs, publicar…)
+                              ├─ builder/   equipo de agentes (orquestador, roles, índice del proyecto) + herramientas
+                              ├─ llm/       catálogo de modelos, enrutador con aprendizaje, Anthropic / OpenRouter / compatibles OpenAI
                               ├─ mcp/       las mismas herramientas como servidor MCP remoto (/mcp, token Bearer)
                               ├─ runtime/   bundler esbuild desde archivos en BD, servidor de apps, publicación
                               ├─ baas/      Postgres por proyecto, auth, archivos, correo, IA, tareas, tiempo real, pagos, secretos
@@ -32,6 +33,9 @@ apps generadas ──▶  pv-<id>.localhost   (vista previa, enlace con token)
 - **Proyecto** = árbol de archivos virtual guardado en la BD de la plataforma: `pages/`, `components/`, `helpers/`, `endpoints/<ruta>_GET|POST.ts`, `jobs/`, `static/`, `base.css`. No hay disco por proyecto; esbuild compila directo desde la BD.
 - **Cada app vive en su propio origen**, así su código nunca toca la sesión del studio. Dentro del iframe del studio sus cookies van particionadas (CHIPS).
 - **Base de datos**: un Postgres 18 embebido (PGlite) por proyecto, compartido por vista previa y app publicada. Se "duerme" tras 60 s sin consultas y despierta en la siguiente.
+- **Equipo de agentes**: cada mensaje pasa por un análisis (heurística + clasificador barato si hace falta). Los cambios pequeños van por la vía rápida (un agente). Los grandes los planifica un agente que reparte tareas con dependencias y archivos propios entre especialistas de **datos**, **backend** e **interfaz**, que trabajan **en paralelo** (cada uno solo puede escribir sus archivos); después un agente de **revisión** compila, prueba y devuelve arreglos (hasta 2 rondas). El chat muestra un carril por agente con su modelo, pasos, tokens y coste.
+- **Enrutador de modelos** (`server/llm/router.ts`): para cada agente puntúa los modelos permitidos (lista blanca de plataforma ∩ cuenta ∩ proyecto) por calidad aprendida (Thompson sampling por tipo de tarea, con recompensas de compilación, pruebas, revisión, Detener y deshacer), precio según el modo del proyecto (Ahorro/Equilibrado/Calidad) y velocidad; si un modelo falla, pasa al siguiente. Cada decisión queda registrada y visible en Ajustes del proyecto.
+- **Ahorro de tokens**: índice del proyecto estilo grafo (`builder/index.ts`: exports, imports, rutas, endpoints, tablas, llamadas a la API) con las herramientas `project_map`, `find_symbol`, `related_files` y lecturas por rangos; cada especialista recibe solo los archivos de su tarea y vecinos; caché de prompts de Anthropic; prompts por rol; resumen acumulado de la conversación en vez del historial completo; `edit_file` antes que reescribir. Cada turno informa coste, tokens servidos desde caché y ahorro frente a usar siempre el modelo más potente.
 - **SDK**: el navegador usa `@forja/client` (router, `api`, `useApi`, `auth`, `storage`, `realtime`, `ai`); los endpoints y tareas reciben `ctx` (`db`, `user`, `storage`, `email`, `ai`, `jobs`, `realtime`, `payments`, `env`). El manual completo que lee el agente está en `server/builder/prompt.ts`.
 
 ## Paridad con Floot

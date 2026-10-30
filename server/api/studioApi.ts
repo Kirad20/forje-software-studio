@@ -515,6 +515,9 @@ studioApi.get("/projects/:id/chat", async (c) => {
      where t.project_id = $1 order by t.created_at desc limit 300`,
     [pid(c)],
   );
+  // Custom (env-declared) models are not in model_catalog: label them from the live catalog.
+  const labels = new Map((await availableModels()).map((m) => [m.id, m.label]));
+  for (const t of tasks as { modelId: string | null; model: string | null }[]) if (t.modelId && labels.has(t.modelId)) t.model = labels.get(t.modelId)!;
   return c.json({ messages: await loadHistory(pid(c)), tasks, building: isBuilding(pid(c)) });
 });
 studioApi.post("/projects/:id/chat", async (c) => {

@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { api, timeAgo } from "../api";
 import type { Me } from "../App";
+import { AccountModels } from "../components/Models";
 import { Modal } from "../components/ui";
 import { applyTheme, savedTheme, type Theme } from "../theme";
 
@@ -116,6 +117,8 @@ export function Account({ me, onChange }: { me: Me; onChange: () => void }) {
           </div>
         )}
       </section>
+
+      <AccountModels />
 
       <section className="card" style={{ padding: "6px 18px" }}>
         <div className="section-title" style={{ margin: "10px 0 4px" }}>Preferencias</div>
