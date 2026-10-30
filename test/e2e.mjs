@@ -184,15 +184,60 @@ const brk = await req("PUT", `/api/projects/${project.id}/file`, { body: { path:
 const pub2 = await req("POST", `/api/projects/${project.id}/publish`, {});
 ok(pub2.status === 400 && pub2.json.error.includes("broken.tsx"), "publish blocked by build error", pub2.text.slice(0, 200));
 ok((await req("GET", "/", { host: "tareas-equipo.localhost" })).status === 200, "live app untouched after failed publish");
+await req("PUT", `/api/projects/${project.id}/file`, { body: { path: "pages/broken.tsx", content: "export default () => <p>arreglada</p>;" } });
 
-// Checkpoints
-const cps = await req("GET", `/api/projects/${project.id}/checkpoints`);
-ok(cps.json.checkpoints.length >= 1, "checkpoints listed");
-const first = cps.json.checkpoints.at(-1);
-await req("POST", `/api/projects/${project.id}/checkpoints/${first.id}/restore`, { body: {} });
+// SEO, analytics and code export on the published app
+await req("PATCH", `/api/projects/${project.id}`, { body: { seo: { siteName: "Tareas del equipo", robots: true, sitemap: true } } });
+const robots = await req("GET", "/robots.txt", { host: "tareas-equipo.localhost" });
+ok(robots.status === 200 && robots.text.includes("Sitemap:"), "robots.txt served", robots.text);
+const sitemap = await req("GET", "/sitemap.xml", { host: "tareas-equipo.localhost" });
+ok(sitemap.text.includes("<loc>http://tareas-equipo.localhost") && !sitemap.text.includes(":id"), "sitemap lists static pages", sitemap.text);
+ok((await req("GET", "/", { host: "tareas-equipo.localhost" })).text.includes("<title>Tareas del equipo</title>"), "SEO title applied");
+await req("POST", "/_baas/pv", { host: "tareas-equipo.localhost", body: JSON.stringify({ path: "/", referrer: "https://google.com/x" }), headers: { "user-agent": "Mozilla/5.0 Chrome/130" } });
+const stats = await req("GET", `/api/projects/${project.id}/analytics?days=7`);
+ok(stats.json.views === 1 && stats.json.topReferrers[0]?.label === "google.com", "analytics records a page view", stats.text);
+await req("PUT", `/api/projects/${project.id}/file`, { body: { path: "static/__dev/todos.md", content: "- [ ] privado" } });
+ok((await req("GET", "/static/__dev/todos.md", { host: pv })).status === 404, "builder notes are never served");
+const codeZip = await req("GET", `/api/projects/${project.id}/export-code`);
+ok(codeZip.status === 200 && codeZip.headers["content-type"] === "application/zip" && codeZip.text.startsWith("PK"), "code export is a zip");
+
+// Data grid: add and delete rows
+const added = await req("POST", `/api/projects/${project.id}/db/rows`, { body: { table: "todos", values: { title: "Desde el studio", user_id: "" } } });
+ok(added.json?.row?.title === "Desde el studio", "add row uses column defaults", added.text);
+const searched = await req("GET", `/api/projects/${project.id}/db/rows?table=todos&search=studio`);
+ok(searched.json.total === 1 && searched.json.primaryKey === "id", "search rows", searched.text);
+const del = await req("POST", `/api/projects/${project.id}/db/rows/delete`, { body: { table: "todos", keys: [added.json.row.id] } });
+ok(del.json.deleted === 1, "delete selected rows");
+
+// Account integrations reach server code as env vars
+const integ = await req("POST", "/api/integrations", { body: { type: "generic", name: "Clima", envName: "WEATHER_KEY", value: "w-123" } });
+await req("POST", `/api/projects/${project.id}/integrations/${integ.json.id}`, { body: {} });
+await req("PUT", `/api/projects/${project.id}/file`, { body: { path: "endpoints/env_GET.ts", content: `export default async (ctx: any) => ({ has: ctx.env.WEATHER_KEY === "w-123" });` } });
+ok((await req("GET", "/_api/env", { host: pv })).json?.has === true, "connected integration injected into ctx.env");
+
+// Change timeline: per-file changes with authors, and restore to any point
+const changes = (await req("GET", `/api/projects/${project.id}/changes`)).json.changes;
+ok(changes.some((c) => c.kind === "publish") && changes.some((c) => c.kind === "create" && c.author === "owner"), "timeline lists writes and publishes");
+const creation = changes.at(-1);
+ok(creation.kind === "checkpoint" && creation.label === "Proyecto creado", "first entry is the creation checkpoint", JSON.stringify(creation));
+await req("POST", `/api/projects/${project.id}/changes/${creation.id}/restore`, { body: {} });
 const filesAfter = await req("GET", `/api/projects/${project.id}/files`);
-ok(filesAfter.json.files.length === 3, "restore to starter checkpoint", filesAfter.text);
+ok(filesAfter.json.files.length === 3, "restore to the starter files", filesAfter.text);
 ok((await req("GET", `/api/projects/${project.id}/db/rows?table=todos`)).json.total === 1, "restore leaves data alone");
+const restoreEntry = (await req("GET", `/api/projects/${project.id}/changes`)).json.changes[0];
+const beforeRestore = (await req("GET", `/api/projects/${project.id}/changes`)).json.changes[1];
+await req("POST", `/api/projects/${project.id}/changes/${beforeRestore.id}/restore`, { body: {} });
+ok(restoreEntry.kind === "restore" && (await req("GET", `/api/projects/${project.id}/files`)).json.files.length > 3, "a restore can itself be undone");
+
+// Folders, favorites and duplicate (copies the database too)
+const folder = await req("POST", "/api/folders", { body: { name: "Clientes" } });
+await req("PATCH", `/api/projects/${project.id}`, { body: { folderId: folder.json.id, favorite: true } });
+const listed = (await req("GET", "/api/projects")).json.projects.find((p) => p.id === project.id);
+ok(listed.folderId === folder.json.id && listed.favorite === true, "folder and favorite saved");
+const dup = await req("POST", `/api/projects/${project.id}/duplicate`, { body: {} });
+ok(dup.json.project?.name.endsWith("(copia)"), "duplicate project", dup.text);
+const dupRows = await req("GET", `/api/projects/${dup.json.project.id}/db/rows?table=todos`);
+ok(dupRows.json.total === 1, "duplicate copies the database", dupRows.text);
 
 // MCP with an API token
 const tok = (await req("POST", "/api/tokens", { body: { name: "test" } })).json.token;

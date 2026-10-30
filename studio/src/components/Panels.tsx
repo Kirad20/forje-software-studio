@@ -1,8 +1,8 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { api, bytes, timeAgo, type Project } from "../api";
-import { External, Refresh } from "./Icons";
+import { Refresh } from "./Icons";
 
-function useLoad<T>(path: string, deps: unknown[] = []) {
+export function useLoad<T>(path: string, deps: unknown[] = []) {
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState("");
   const reload = () =>
@@ -19,7 +19,7 @@ function useLoad<T>(path: string, deps: unknown[] = []) {
   return { data, error, reload };
 }
 
-const Loading = ({ error }: { error?: string }) =>
+export const Loading = ({ error }: { error?: string }) =>
   error ? (
     <div className="error-box" style={{ margin: 16 }}>
       {error}
@@ -30,7 +30,7 @@ const Loading = ({ error }: { error?: string }) =>
     </div>
   );
 
-const Header = ({ title, hint, children }: { title: string; hint?: ReactNode; children?: ReactNode }) => (
+export const Header = ({ title, hint, children }: { title: string; hint?: ReactNode; children?: ReactNode }) => (
   <div className="row" style={{ marginBottom: 14, alignItems: "flex-start" }}>
     <div className="grow">
       <h3 style={{ fontSize: 16 }}>{title}</h3>
@@ -40,62 +40,11 @@ const Header = ({ title, hint, children }: { title: string; hint?: ReactNode; ch
   </div>
 );
 
-// --- Preview -------------------------------------------------------------------
-
-const DEVICES = {
-  desktop: null,
-  iphone: { w: 393, h: 852 },
-  pixel: { w: 412, h: 915 },
-  ipad: { w: 820, h: 1180 },
-} as const;
-
-export function PreviewPanel({ project, reloadKey }: { project: Project; reloadKey: number }) {
-  const [device, setDevice] = useState<keyof typeof DEVICES>("desktop");
-  const [nonce, setNonce] = useState(0);
-  const [path, setPath] = useState("/");
-  const d = DEVICES[device];
-  const src = `${project.previewOrigin}${path}?share=${new URL(project.previewUrl).searchParams.get("share")}`;
-  return (
-    <div style={{ display: "grid", gridTemplateRows: "40px 1fr", height: "100%" }}>
-      <div className="row" style={{ padding: "0 10px", borderBottom: "1px solid var(--border)", background: "var(--surface)" }}>
-        <button className="ghost sm" title="Recargar" onClick={() => setNonce((n) => n + 1)}>
-          <Refresh />
-        </button>
-        <input
-          style={{ height: 28, maxWidth: 320, fontFamily: "var(--mono)", fontSize: 12 }}
-          value={path}
-          onChange={(e) => setPath(e.target.value.startsWith("/") ? e.target.value : `/${e.target.value}`)}
-          onKeyDown={(e) => e.key === "Enter" && setNonce((n) => n + 1)}
-        />
-        <div className="grow" />
-        <select style={{ width: 130, height: 28, padding: "0 6px" }} value={device} onChange={(e) => setDevice(e.target.value as keyof typeof DEVICES)}>
-          <option value="desktop">Escritorio</option>
-          <option value="iphone">iPhone</option>
-          <option value="pixel">Pixel</option>
-          <option value="ipad">iPad</option>
-        </select>
-        <a className="btn sm" style={{ height: 28 }} href={project.previewUrl} target="_blank" rel="noreferrer" title="Abrir en otra pestaña">
-          <External />
-        </a>
-      </div>
-      <div className="preview-wrap">
-        <iframe
-          key={`${reloadKey}-${nonce}`}
-          title="Vista previa"
-          src={src}
-          className={`preview-frame ${d ? "device" : ""}`}
-          style={d ? { width: d.w + 20, height: d.h + 20, maxHeight: "100%" } : undefined}
-        />
-      </div>
-    </div>
-  );
-}
-
 // --- Code ---------------------------------------------------------------------------
 
-export function CodePanel({ projectId, reloadKey }: { projectId: string; reloadKey: number }) {
+export function CodePanel({ projectId, reloadKey, initialPath = null }: { projectId: string; reloadKey: number; initialPath?: string | null }) {
   const files = useLoad<{ files: { path: string; size: number }[] }>(`/projects/${projectId}/files`, [reloadKey]);
-  const [path, setPath] = useState<string | null>(null);
+  const [path, setPath] = useState<string | null>(initialPath);
   const [content, setContent] = useState("");
   const [saved, setSaved] = useState("");
   useEffect(() => {
@@ -140,148 +89,6 @@ export function CodePanel({ projectId, reloadKey }: { projectId: string; reloadK
   );
 }
 
-// --- Data ---------------------------------------------------------------------------
-
-type Col = { name: string; type: string };
-
-export function DataPanel({ projectId, reloadKey }: { projectId: string; reloadKey: number }) {
-  const schema = useLoad<{ tables: Record<string, Col[]>; awake: boolean }>(`/projects/${projectId}/db/schema?internal=1`, [reloadKey]);
-  const [table, setTable] = useState<string | null>(null);
-  const [rows, setRows] = useState<{ rows: Record<string, unknown>[]; total: number; columns: Col[] } | null>(null);
-  const [sql, setSql] = useState("");
-  const [sqlOut, setSqlOut] = useState<{ error?: string; results?: { fields: string[]; rows: Record<string, unknown>[]; affectedRows: number }[] } | null>(null);
-
-  useEffect(() => {
-    if (!table) return setRows(null);
-    api(`/projects/${projectId}/db/rows?table=${encodeURIComponent(table)}&limit=100`).then(setRows);
-  }, [table, projectId, reloadKey]);
-
-  if (!schema.data) return <Loading error={schema.error} />;
-  const names = Object.keys(schema.data.tables);
-  const appTables = names.filter((n) => !n.startsWith("_forja_"));
-  const internal = names.filter((n) => n.startsWith("_forja_"));
-  return (
-    <div className="two-col">
-      <div className="list">
-        <div className="section-title" style={{ padding: "4px 8px" }}>
-          Tablas
-        </div>
-        {appTables.length === 0 && <div className="small muted" style={{ padding: 8 }}>Sin tablas todavía</div>}
-        {appTables.map((t) => (
-          <button key={t} className={t === table ? "active" : ""} onClick={() => setTable(t)}>
-            {t}
-          </button>
-        ))}
-        <div className="section-title" style={{ padding: "12px 8px 4px" }}>
-          Sistema
-        </div>
-        {internal.map((t) => (
-          <button key={t} className={t === table ? "active" : ""} onClick={() => setTable(t)}>
-            {t}
-          </button>
-        ))}
-        <button className={table === null ? "active" : ""} onClick={() => setTable(null)} style={{ marginTop: 12 }}>
-          ▸ Consola SQL
-        </button>
-      </div>
-      <div style={{ overflow: "auto", minHeight: 0 }}>
-        <div className="row" style={{ padding: "10px 14px", borderBottom: "1px solid var(--border)" }}>
-          <span className="grow small muted">
-            Postgres 18 · {schema.data.awake ? <span className="pill ok">despierta</span> : <span className="pill">dormida</span>} · la vista previa y la app publicada comparten
-            estos datos
-          </span>
-          <a className="btn sm" href={`/api/projects/${projectId}/db/export`}>
-            Exportar
-          </a>
-        </div>
-        {table ? (
-          !rows ? (
-            <Loading />
-          ) : (
-            <>
-              <div className="small muted" style={{ padding: "8px 14px" }}>
-                {rows.total} filas{rows.total > rows.rows.length ? ` · mostrando ${rows.rows.length}` : ""}
-              </div>
-              <table className="grid">
-                <thead>
-                  <tr>
-                    {rows.columns.map((c) => (
-                      <th key={c.name}>
-                        {c.name} <span style={{ fontWeight: 400 }}>{c.type}</span>
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.rows.map((r, i) => (
-                    <tr key={i}>
-                      {rows.columns.map((c) => (
-                        <td key={c.name} title={fmt(r[c.name])}>
-                          {fmt(r[c.name])}
-                        </td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </>
-          )
-        ) : (
-          <div className="stack" style={{ padding: 14 }}>
-            <textarea className="code" rows={6} placeholder="select * from …" value={sql} onChange={(e) => setSql(e.target.value)} />
-            <div className="row">
-              <button
-                className="primary sm"
-                disabled={!sql.trim()}
-                onClick={async () => {
-                  try {
-                    setSqlOut(await api(`/projects/${projectId}/db/sql`, { body: { sql } }));
-                    void schema.reload();
-                  } catch (e) {
-                    setSqlOut({ error: (e as Error).message });
-                  }
-                }}
-              >
-                Ejecutar
-              </button>
-              <span className="small muted">Los cambios son reales e inmediatos.</span>
-            </div>
-            {sqlOut?.error && <div className="error-box">{sqlOut.error}</div>}
-            {sqlOut?.results?.map((r, i) =>
-              r.fields.length ? (
-                <table key={i} className="grid card">
-                  <thead>
-                    <tr>
-                      {r.fields.map((f) => (
-                        <th key={f}>{f}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {r.rows.slice(0, 200).map((row, j) => (
-                      <tr key={j}>
-                        {r.fields.map((f) => (
-                          <td key={f}>{fmt(row[f])}</td>
-                        ))}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              ) : (
-                <div key={i} className="pill ok">
-                  OK · {r.affectedRows} filas afectadas
-                </div>
-              ),
-            )}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-const fmt = (v: unknown) => (v === null || v === undefined ? "∅" : v instanceof Object ? JSON.stringify(v) : String(v));
-
 // --- Users -----------------------------------------------------------------------------
 
 export function UsersPanel({ projectId }: { projectId: string }) {
@@ -316,51 +123,6 @@ export function UsersPanel({ projectId }: { projectId: string }) {
                 <td>{u.role === "admin" ? <span className="pill accent">admin</span> : u.role}</td>
                 <td>{u.hasPassword ? "sí" : <span className="pill warn">sin fijar</span>}</td>
                 <td>{timeAgo(u.createdAt)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-    </>
-  );
-}
-
-// --- Storage ---------------------------------------------------------------------------
-
-export function StoragePanel({ projectId }: { projectId: string }) {
-  const { data, reload, error } = useLoad<{
-    objects: { key: string; filename: string; contentType: string; size: number; createdAt: string }[];
-    bytes: number;
-  }>(`/projects/${projectId}/storage`);
-  if (!data) return <Loading error={error} />;
-  return (
-    <>
-      <Header title="Archivos" hint={`Lo que suben los usuarios de tu app · ${bytes(data.bytes)} usados · máx. 100 MB por archivo`} />
-      {data.objects.length === 0 ? (
-        <div className="card empty">Aún no hay archivos.</div>
-      ) : (
-        <table className="grid card">
-          <thead>
-            <tr>
-              <th>Archivo</th>
-              <th>Tipo</th>
-              <th>Tamaño</th>
-              <th>Subido</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {data.objects.map((o) => (
-              <tr key={o.key}>
-                <td title={o.key}>{o.filename}</td>
-                <td>{o.contentType}</td>
-                <td>{bytes(o.size)}</td>
-                <td>{timeAgo(o.createdAt)}</td>
-                <td style={{ textAlign: "right" }}>
-                  <button className="sm danger" onClick={() => api(`/projects/${projectId}/storage/${o.key}`, { method: "DELETE" }).then(reload)}>
-                    Borrar
-                  </button>
-                </td>
               </tr>
             ))}
           </tbody>
@@ -712,53 +474,3 @@ export function LogsPanel({ projectId, lines }: { projectId: string; lines: { at
   );
 }
 
-// --- Checkpoints ------------------------------------------------------------------------------
-
-export function CheckpointsPanel({ projectId, reloadKey }: { projectId: string; reloadKey: number }) {
-  const { data, reload, error } = useLoad<{ checkpoints: { id: string; label: string; createdAt: string; fileCount: number }[] }>(`/projects/${projectId}/checkpoints`, [reloadKey]);
-  const [label, setLabel] = useState("");
-  if (!data) return <Loading error={error} />;
-  return (
-    <div className="stack">
-      <Header title="Checkpoints" hint="Cada turno del constructor guarda uno. Restaurar cambia el código, no los datos." />
-      <div className="row">
-        <input placeholder="Etiqueta (p. ej. «antes del rediseño»)" value={label} onChange={(e) => setLabel(e.target.value)} />
-        <button
-          onClick={async () => {
-            await api(`/projects/${projectId}/checkpoints`, { body: { label: label || "Manual" } });
-            setLabel("");
-            void reload();
-          }}
-        >
-          Guardar checkpoint
-        </button>
-      </div>
-      <div className="card">
-        {data.checkpoints.map((c, i) => (
-          <div key={c.id} className="row" style={{ padding: "10px 14px", borderBottom: "1px solid var(--border)" }}>
-            <div className="grow">
-              <div style={{ fontWeight: 500 }}>{c.label}</div>
-              <div className="small muted">
-                {timeAgo(c.createdAt)} · {c.fileCount} archivos
-              </div>
-            </div>
-            {i === 0 ? (
-              <span className="pill">actual</span>
-            ) : (
-              <button
-                className="sm"
-                onClick={async () => {
-                  if (!confirm(`¿Restaurar el código a «${c.label}»? Los datos no cambian.`)) return;
-                  await api(`/projects/${projectId}/checkpoints/${c.id}/restore`, { body: {} });
-                  void reload();
-                }}
-              >
-                Restaurar
-              </button>
-            )}
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}

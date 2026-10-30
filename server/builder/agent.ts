@@ -4,6 +4,7 @@ import { chat, type Block, type LlmMessage } from "../lib/llm.js";
 import { getAccount, type Account } from "../platform/accounts.js";
 import { q } from "../platform/db.js";
 import { createCheckpoint, getProject } from "../platform/projects.js";
+import { countAction } from "../platform/usage.js";
 import { BUILDER_SYSTEM_PROMPT } from "./prompt.js";
 import { builderTools, toolByName, type ToolContext } from "./tools.js";
 
@@ -105,7 +106,7 @@ export async function runBuilderTurn(account: Account, projectId: string, userTe
   const abort = new AbortController();
   active.set(projectId, abort);
   let credits = 0;
-  const ctx: ToolContext = { account, projectId };
+  const ctx: ToolContext = { account, projectId, author: "builder" };
   try {
     const project = await getProject(projectId);
     const fresh = await getAccount(account.id);
@@ -114,7 +115,14 @@ export async function runBuilderTurn(account: Account, projectId: string, userTe
     const userMsg: LlmMessage = { role: "user", content: [{ type: "text", text: userText }] };
     await save(projectId, userMsg);
     const history = [...(await loadHistory(projectId))];
-    const system = `${BUILDER_SYSTEM_PROMPT}\n\n# This project\nName: ${project?.name}\nDescription: ${project?.description || "(none)"}\nOwner email: ${account.email}`;
+    const system = [
+      BUILDER_SYSTEM_PROMPT,
+      `# This project\nName: ${project?.name}\nDescription: ${project?.description || "(none)"}\nOwner email: ${account.email}`,
+      project?.systemPrompt ? `# Owner's project instructions\n${project.systemPrompt}` : "",
+      project?.designPrompt ? `# Owner's design guidelines\n${project.designPrompt}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n\n");
 
     for (let step = 0; step < MAX_STEPS; step++) {
       if (abort.signal.aborted) throw new Error("Detenido.");
@@ -140,6 +148,7 @@ export async function runBuilderTurn(account: Account, projectId: string, userTe
       for (const call of calls) {
         emit({ type: "tool_start", id: call.id, name: call.name, summary: summarize(call.name, call.input) });
         const tool = toolByName.get(call.name);
+        await countAction(account.id);
         let output: string;
         let ok = true;
         try {
@@ -162,6 +171,7 @@ export async function runBuilderTurn(account: Account, projectId: string, userTe
     emit({ type: "error", message: abort.signal.aborted ? "Detenido. Escribe qué quieres cambiar o «continúa»." : (e as Error).message });
   } finally {
     active.delete(projectId);
-    if (ctx.wrote) await createCheckpoint(projectId, userText.slice(0, 80)).catch(() => {});
+    // A named point per turn, labelled with the request, on top of the per-file change log.
+    if (ctx.wrote) await createCheckpoint(projectId, userText.slice(0, 80), "builder").catch(() => {});
   }
 }

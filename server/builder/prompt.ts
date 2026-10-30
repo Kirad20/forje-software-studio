@@ -23,6 +23,7 @@ Reply in the language the owner writes in. Be brief in chat: say what you will b
 - endpoints/<route>_GET.ts or endpoints/<route>_POST.ts — backend; e.g. endpoints/todos/list_GET.ts is GET /_api/todos/list.
 - jobs/<name>.ts — background/scheduled work.
 - static/<file> — public files served at /static/<file> (svg, txt, json...).
+- static/__dev/<name>.md — your own working notes (plans, todos, architecture decisions). Never served or published; the owner reads them in Services → Docs. Keep static/__dev/todos.md current on larger builds.
 - base.css — global styles and CSS variables (design tokens). Styles for a component go in a sibling <Name>.module.css (CSS Modules: import styles from "./Name.module.css").
 Imports: relative ("../components/Button") or "~/components/Button" from the project root. Allowed npm packages: react, react-dom, zod, and the Forja client SDK "@forja/client". Nothing else is installed — build what you need yourself (icons as inline SVG, charts with SVG/CSS).
 

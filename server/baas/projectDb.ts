@@ -1,4 +1,4 @@
-import { mkdirSync } from "node:fs";
+import { mkdirSync, rmSync } from "node:fs";
 import { PGlite } from "@electric-sql/pglite";
 import { config, paths } from "../config.js";
 
@@ -143,6 +143,30 @@ export async function describeSchema(projectId: string, includeInternal = false)
 /** A full copy of the database files, for the Data tab's export button. */
 export async function dumpDatabase(projectId: string): Promise<Blob> {
   return run(projectId, async (db) => (await db.dumpDataDir("gzip")) as Blob);
+}
+
+/** Closes a project's database now (before deleting or replacing its files). */
+export async function closeProject(projectId: string) {
+  const existing = open.get(projectId);
+  if (!existing) return;
+  open.delete(projectId);
+  const e = await existing.catch(() => null);
+  if (e) {
+    clearTimeout(e.timer);
+    await e.queue.catch(() => {});
+    await e.db.close().catch(() => {});
+  }
+}
+
+/** Copies a project's whole database into another project's (used by "duplicate"). */
+export async function cloneDatabase(fromProjectId: string, toProjectId: string) {
+  const dump = await dumpDatabase(fromProjectId);
+  await closeProject(toProjectId);
+  const dir = paths.projectDb(toProjectId);
+  rmSync(dir, { recursive: true, force: true });
+  mkdirSync(dir, { recursive: true });
+  const db = await PGlite.create(dir, { loadDataDir: dump });
+  await db.close();
 }
 
 export async function closeAll() {

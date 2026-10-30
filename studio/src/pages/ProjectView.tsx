@@ -1,212 +1,338 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api, type Project } from "../api";
-import type { Me } from "../App";
-import { Chat } from "../components/Chat";
-import { Back, External, Globe } from "../components/Icons";
-import {
-  AiPanel,
-  CheckpointsPanel,
-  CodePanel,
-  DataPanel,
-  EmailPanel,
-  JobsPanel,
-  LogsPanel,
-  PreviewPanel,
-  SecretsPanel,
-  StoragePanel,
-  UsersPanel,
-} from "../components/Panels";
-import { go } from "../router";
+import { UserMenu, type Me } from "../App";
+import { Chat, type SelectedElement } from "../components/Chat";
+import { External, Refresh } from "../components/Icons";
+import { AiPanel, CodePanel, EmailPanel, JobsPanel, LogsPanel, UsersPanel } from "../components/Panels";
+import { AnalyticsPanel, DataPanel, DocsPanel, IntegrationsPanel, PaymentsPanel, SeoPanel, StoragePanel } from "../components/ServicePanels";
+import { Avatar, copyText, Menu, MenuItem, useDismiss } from "../components/ui";
+import { CheckpointPanel, DEVICES, PagePalette, PreviewCanvas, ProjectSettings, PublishPanel, type Device, type PreviewHandle } from "../components/Workspace";
 
-const TABS = [
-  ["preview", "Vista previa"],
-  ["code", "Código"],
-  ["data", "Datos"],
-  ["users", "Usuarios"],
-  ["storage", "Archivos"],
-  ["email", "Correo"],
-  ["jobs", "Tareas"],
-  ["secrets", "Secretos"],
-  ["ai", "IA"],
-  ["logs", "Registros"],
-  ["checkpoints", "Checkpoints"],
-] as const;
-type Tab = (typeof TABS)[number][0];
-
+type View = "preview" | "services" | "settings";
+type ServiceKey = "data" | "users" | "ai" | "integrations" | "analytics" | "seo" | "docs" | "jobs" | "storage" | "email" | "payments" | "logs" | "code";
 type LogLine = { at: string; env: string; level: string; source: string; message: string };
+
+const SERVICES: { key: ServiceKey; label: string; icon: string }[] = [
+  { key: "data", label: "Datos", icon: "⛁" },
+  { key: "users", label: "Usuarios", icon: "☺" },
+  { key: "ai", label: "IA", icon: "✦" },
+  { key: "integrations", label: "Integraciones", icon: "⚷" },
+  { key: "analytics", label: "Analítica", icon: "▥" },
+  { key: "seo", label: "SEO", icon: "◎" },
+  { key: "docs", label: "Docs", icon: "▢" },
+  { key: "jobs", label: "Tareas", icon: "◷" },
+  { key: "storage", label: "Archivos", icon: "⇪" },
+  { key: "email", label: "Correo", icon: "✉" },
+  { key: "payments", label: "Pagos", icon: "¤" },
+  { key: "logs", label: "Registros", icon: "≡" },
+];
+/** Always listed among the used ones. */
+const ALWAYS_USED = new Set<ServiceKey>(["seo", "logs"]);
+
+const readDrawer = () => {
+  try {
+    return localStorage.getItem("forja:drawer") !== "0";
+  } catch {
+    return true;
+  }
+};
 
 export function ProjectView({ id, me, onCredits }: { id: string; me: Me; onCredits: () => void }) {
   const [project, setProject] = useState<Project | null>(null);
   const [error, setError] = useState("");
-  const [tab, setTab] = useState<Tab>("preview");
+  const [view, setView] = useState<View>("preview");
+  const [service, setService] = useState<ServiceKey>("data");
+  const [used, setUsed] = useState<Record<string, boolean>>({});
   const [filesKey, setFilesKey] = useState(0);
   const [logLines, setLogLines] = useState<LogLine[]>([]);
-  const [publishing, setPublishing] = useState(false);
   const [building, setBuilding] = useState(false);
+  const [drawer, setDrawer] = useState(() => readDrawer() || new URLSearchParams(location.search).has("edit") || !!sessionStorage.getItem(`forja:first:${id}`));
+  const [device, setDevice] = useState<Device>("desktop");
+  const [fullscreen, setFullscreen] = useState(false);
+  const [path, setPath] = useState("/");
+  const [selecting, setSelecting] = useState(false);
+  const [selection, setSelection] = useState<SelectedElement | null>(null);
+  const [panel, setPanel] = useState<"checkpoints" | "publish" | null>(null);
+  const [palette, setPalette] = useState(false);
+  const [codeFile, setCodeFile] = useState<string | null>(null);
+  const preview = useRef<PreviewHandle>(null);
+  const closePanel = useCallback(() => setPanel(null), []);
+  const checkpointRef = useDismiss<HTMLDivElement>(panel === "checkpoints", closePanel);
+  const publishRef = useDismiss<HTMLDivElement>(panel === "publish", closePanel);
 
   const load = () =>
     api<{ project: Project }>(`/projects/${id}`)
       .then((r) => setProject(r.project))
       .catch((e) => setError(e.message));
+  const loadUsed = () => api<Record<string, boolean>>(`/projects/${id}/services`).then(setUsed).catch(() => {});
 
   useEffect(() => {
     void load();
+    void loadUsed();
     const es = new EventSource(`/api/projects/${id}/events`);
     let t: ReturnType<typeof setTimeout>;
     es.onmessage = (m) => {
       const e = JSON.parse(m.data);
       if (e.type === "files") {
         clearTimeout(t);
-        t = setTimeout(() => setFilesKey((k) => k + 1), 400);
+        t = setTimeout(() => (setFilesKey((k) => k + 1), void load()), 400);
       } else if (e.type === "log") setLogLines((l) => [...l.slice(-300), e.entry]);
       else if (e.type === "published") void load();
     };
-    return () => es.close();
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && (e.key === "k" || e.key === "p")) {
+        e.preventDefault();
+        setPalette(true);
+      }
+      if (e.key === "Escape") setFullscreen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      es.close();
+      window.removeEventListener("keydown", onKey);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
+
+  const toggleDrawer = () => {
+    setDrawer((d) => {
+      try {
+        localStorage.setItem("forja:drawer", d ? "0" : "1");
+      } catch {
+        /* per-viewer convenience only */
+      }
+      return !d;
+    });
+  };
+  const toggleSelect = () => {
+    const on = !selecting;
+    setSelecting(on);
+    preview.current?.setSelecting(on);
+    if (on && !drawer) toggleDrawer();
+  };
+  const onSelected = useCallback((el: SelectedElement) => setSelection(el), []);
+  const onSelectEnded = useCallback(() => setSelecting(false), []);
+  const openService = (key: ServiceKey) => {
+    setService(key);
+    setView("services");
+  };
 
   if (error) return <div className="empty">{error}</div>;
   if (!project) return <div className="empty">Cargando…</div>;
 
-  const errorsSince = logLines.filter((l) => l.level === "error").length;
+  const errors = logLines.filter((l) => l.level === "error").length;
+  const isUsed = (k: ServiceKey) => ALWAYS_USED.has(k) || !!used[k];
+  const ordered = [...SERVICES.filter((s) => isUsed(s.key)), ...SERVICES.filter((s) => !isUsed(s.key))];
+  const pageLabel = path === "/" ? "Inicio" : path;
+  const publishLabel = !project.slug ? "Publicar" : project.hasUnpublishedChanges ? "Publicar cambios" : "Publicada";
 
   return (
-    <div className="workspace">
-      <header className="topbar">
-        <button className="ghost sm" onClick={() => go("/")} title="Proyectos">
-          <Back />
-        </button>
-        <strong style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{project.name}</strong>
-        {building && (
-          <span className="pill accent">
-            <span className="spinner" style={{ width: 10, height: 10 }} /> construyendo
-          </span>
-        )}
-        <div className="grow" />
-        <span className="small muted" style={{ whiteSpace: "nowrap" }}>
-          {me.credits.toLocaleString()} créditos
-        </span>
-        {project.appUrl && (
-          <a className="btn sm" href={project.appUrl} target="_blank" rel="noreferrer">
-            <External /> App en vivo
-          </a>
-        )}
-        <button className="primary sm" onClick={() => setPublishing(true)}>
-          <Globe /> {project.appUrl ? (project.hasUnpublishedChanges ? "Publicar cambios" : "Publicada") : "Publicar"}
-        </button>
-      </header>
-      <div className="split">
-        <Chat
-          projectId={id}
-          onBuildingChange={setBuilding}
-          onTurnEnd={() => {
-            void load();
-            onCredits();
-          }}
-        />
-        <section className="stage">
-          <nav className="tabs">
-            {TABS.map(([key, label]) => (
-              <button key={key} className={tab === key ? "active" : ""} onClick={() => setTab(key)}>
-                {label}
-                {key === "logs" && errorsSince > 0 && <span className="pill err" style={{ marginLeft: 4, padding: "0 6px" }}>{errorsSince}</span>}
-              </button>
-            ))}
-          </nav>
-          <div className={`panel ${["preview", "code", "data"].includes(tab) ? "flush" : ""}`}>
-            {tab === "preview" && <PreviewPanel project={project} reloadKey={0} />}
-            {tab === "code" && <CodePanel projectId={id} reloadKey={filesKey} />}
-            {tab === "data" && <DataPanel projectId={id} reloadKey={filesKey} />}
-            {tab === "users" && <UsersPanel projectId={id} />}
-            {tab === "storage" && <StoragePanel projectId={id} />}
-            {tab === "email" && <EmailPanel project={project} onChange={load} />}
-            {tab === "jobs" && <JobsPanel projectId={id} reloadKey={filesKey} />}
-            {tab === "secrets" && <SecretsPanel projectId={id} reloadKey={filesKey} />}
-            {tab === "ai" && <AiPanel project={project} onChange={load} />}
-            {tab === "logs" && <LogsPanel projectId={id} lines={logLines} />}
-            {tab === "checkpoints" && <CheckpointsPanel projectId={id} reloadKey={filesKey} />}
+    <div className="ws">
+      <div>
+        <header className="ws-bar">
+          <UserMenu me={me} asLogo />
+          <button className={`project-chip ${view === "settings" ? "on" : ""}`} onClick={() => setView("settings")} title="Ajustes del proyecto">
+            <Avatar id={project.id} name={project.name} size={24} />
+            <span style={{ maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{project.name}</span>
+          </button>
+          <div className="ws-tabs">
+            <button className={view === "preview" ? "on" : ""} onClick={() => setView("preview")}>
+              Vista previa
+            </button>
+            <button className={view === "services" ? "on" : ""} onClick={() => setView("services")}>
+              Servicios
+            </button>
+            <button title="Datos" aria-label="Datos" onClick={() => openService("data")}>
+              ⛁
+            </button>
+            <button title="Correo" aria-label="Correo" onClick={() => openService("email")}>
+              ✉
+            </button>
+            <button title="Registros" aria-label="Registros" onClick={() => openService("logs")} style={errors ? { color: "var(--err)" } : undefined}>
+              ≡{errors > 0 && <span className="small"> {errors}</span>}
+            </button>
           </div>
+          <div className="center">
+            {view === "preview" ? (
+              <>
+                <button className="sm icon-btn ghost" title="Pantalla completa (Esc para salir)" onClick={() => setFullscreen(true)}>
+                  ⛶
+                </button>
+                <button className="page-chip" title="Ir a una página (Ctrl+K)" onClick={() => setPalette(true)}>
+                  ▭ {pageLabel} {project.appUrl && <span className="live-dot" title="Publicada" />} ▾
+                </button>
+                <button className="sm icon-btn ghost" title="Recargar" onClick={() => preview.current?.reload()}>
+                  <Refresh />
+                </button>
+              </>
+            ) : view === "services" ? (
+              <span className="page-chip">
+                {SERVICES.find((s) => s.key === service)?.icon} {SERVICES.find((s) => s.key === service)?.label ?? "Código"}
+                <button className="ghost sm icon-btn" style={{ height: 20, width: 20 }} aria-label="Volver a la vista previa" onClick={() => setView("preview")}>
+                  ×
+                </button>
+              </span>
+            ) : (
+              <span className="page-chip">⚙ Ajustes del proyecto</span>
+            )}
+          </div>
+          {building && (
+            <span className="pill accent">
+              <span className="spinner" style={{ width: 10, height: 10 }} /> construyendo
+            </span>
+          )}
+          {project.appUrl && (
+            <a className="btn sm" href={project.appUrl} target="_blank" rel="noreferrer" title="Abrir la app en vivo">
+              <External /> En vivo
+            </a>
+          )}
+          <div className="split-btn">
+            <button className={`sm ${drawer ? "" : "primary"}`} style={{ height: 32 }} onClick={toggleDrawer} title="Chat con el constructor">
+              ✦ {drawer ? "Ocultar chat" : "Editar"}
+            </button>
+            <Menu
+              align="right"
+              button={(_, toggle) => (
+                <button className={`sm ${drawer ? "" : "primary"}`} style={{ height: 32 }} aria-label="Otros agentes" onClick={toggle}>
+                  ▾
+                </button>
+              )}
+            >
+              {(close) => (
+                <>
+                  <div className="menu-label">Constructor integrado</div>
+                  <MenuItem onClick={() => (close(), drawer || toggleDrawer())}>✦ Abrir el chat aquí</MenuItem>
+                  <div className="menu-sep" />
+                  <div className="menu-label">¿Usas otro agente?</div>
+                  <MenuItem onClick={() => (close(), void copyText(`Ayúdame a hacer cambios en mi proyecto de Forja ${project.id}: `))}>⧉ Copiar prompt para Claude o ChatGPT</MenuItem>
+                  <MenuItem onClick={() => (close(), (location.href = "/account"))}>＋ Conectar un agente por MCP…</MenuItem>
+                </>
+              )}
+            </Menu>
+          </div>
+          <div className="menu-anchor" ref={publishRef}>
+            <button className="primary sm" style={{ height: 32 }} onClick={() => setPanel(panel === "publish" ? null : "publish")}>
+              ⇪ {publishLabel}
+            </button>
+            {panel === "publish" && <PublishPanel project={project} onDone={load} onClose={closePanel} />}
+          </div>
+        </header>
+        {view === "preview" && (
+          <div className="tool-row">
+            <div className="menu-anchor" ref={checkpointRef}>
+              <button className={`tool ${panel === "checkpoints" ? "on" : ""}`} onClick={() => setPanel(panel === "checkpoints" ? null : "checkpoints")}>
+                ⚑ Checkpoint
+              </button>
+              {panel === "checkpoints" && <CheckpointPanel projectId={id} reloadKey={filesKey} onClose={closePanel} />}
+            </div>
+            <button className={`tool ${selecting ? "on" : ""}`} onClick={toggleSelect} title="Elige un elemento de la vista previa para pedir un cambio sobre él">
+              ⌖ Seleccionar
+            </button>
+            <Menu
+              button={(_, toggle) => (
+                <button className="tool" onClick={toggle}>
+                  ▭ {DEVICES[device].label} ▾
+                </button>
+              )}
+            >
+              {(close) =>
+                (Object.keys(DEVICES) as Device[]).map((d) => (
+                  <MenuItem key={d} checked={device === d} onClick={() => (close(), setDevice(d))}>
+                    <span>
+                      {DEVICES[d].label} <span className="small muted">{DEVICES[d].hint}</span>
+                    </span>
+                  </MenuItem>
+                ))
+              }
+            </Menu>
+            {selecting && <span className="small muted">Haz clic en un elemento de la vista previa · Esc para cancelar</span>}
+          </div>
+        )}
+      </div>
+
+      <div className="ws-body">
+        {drawer ? (
+          <aside className="drawer">
+            <div className="drawer-head">
+              <strong className="grow">✦ Constructor</strong>
+              <span className="small muted">{me.credits.toLocaleString()} créditos</span>
+              <button className="sm icon-btn ghost" aria-label="Cerrar chat" onClick={toggleDrawer}>
+                ×
+              </button>
+            </div>
+            <Chat
+              projectId={id}
+              onBuildingChange={setBuilding}
+              selection={selection}
+              onClearSelection={() => setSelection(null)}
+              onTurnEnd={() => {
+                void load();
+                void loadUsed();
+                onCredits();
+              }}
+            />
+          </aside>
+        ) : (
+          <div />
+        )}
+        <section style={{ minWidth: 0, minHeight: 0, display: "grid" }}>
+          {/* The preview stays mounted while other views are open, so it does not reload. */}
+          <div style={{ display: view === "preview" ? "grid" : "none", minHeight: 0 }}>
+            <PreviewCanvas ref={preview} project={project} device={device} fullscreen={fullscreen} onPath={setPath} onSelected={onSelected} onSelectEnded={onSelectEnded} />
+          </div>
+          {view === "services" && (
+            <div className="services">
+              <nav className="svc-nav">
+                {ordered.map((s, i) => (
+                  <div key={s.key} style={{ display: "contents" }}>
+                    {i > 0 && isUsed(ordered[i - 1]!.key) && !isUsed(s.key) && <div className="sep" />}
+                    <button className={`${service === s.key ? "on" : ""} ${isUsed(s.key) ? "" : "unused"}`} onClick={() => setService(s.key)}>
+                      <span className="svc-icon">{s.icon}</span> {s.label}
+                      {s.key === "logs" && errors > 0 && <span className="pill err" style={{ marginLeft: "auto", padding: "0 6px" }}>{errors}</span>}
+                    </button>
+                  </div>
+                ))}
+                <div className="sep" />
+                <div className="menu-label">Avanzado</div>
+                <button className={service === "code" ? "on" : ""} onClick={() => setService("code")}>
+                  <span className="svc-icon">{"{}"}</span> Código
+                </button>
+              </nav>
+              <div className={`svc-detail ${["data", "docs", "storage", "code"].includes(service) ? "" : "pad"}`}>
+                {service === "data" && <DataPanel projectId={id} projectName={project.name} reloadKey={filesKey} />}
+                {service === "users" && <UsersPanel projectId={id} />}
+                {service === "ai" && <AiPanel project={project} onChange={load} />}
+                {service === "integrations" && <IntegrationsPanel projectId={id} reloadKey={filesKey} />}
+                {service === "analytics" && <AnalyticsPanel project={project} />}
+                {service === "seo" && <SeoPanel project={project} onChange={load} />}
+                {service === "docs" && <DocsPanel projectId={id} reloadKey={filesKey} />}
+                {service === "jobs" && <JobsPanel projectId={id} reloadKey={filesKey} />}
+                {service === "storage" && <StoragePanel projectId={id} reloadKey={filesKey} />}
+                {service === "email" && <EmailPanel project={project} onChange={load} />}
+                {service === "payments" && <PaymentsPanel projectId={id} />}
+                {service === "logs" && <LogsPanel projectId={id} lines={logLines} />}
+                {service === "code" && <CodePanel key={codeFile ?? ""} projectId={id} reloadKey={filesKey} initialPath={codeFile} />}
+              </div>
+            </div>
+          )}
+          {view === "settings" && <ProjectSettings project={project} onChange={load} />}
         </section>
       </div>
-      {publishing && <PublishDialog project={project} onClose={() => setPublishing(false)} onDone={load} />}
-    </div>
-  );
-}
-
-function PublishDialog({ project, onClose, onDone }: { project: Project; onClose: () => void; onDone: () => void }) {
-  const [slug, setSlug] = useState(project.slug ?? project.suggestedSlug);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-  const host = new URL(project.previewOrigin).host.replace(/^pv-[^.]+\./, "");
-
-  const publish = async () => {
-    setBusy(true);
-    setError("");
-    try {
-      await api(`/projects/${project.id}/publish`, { body: { slug } });
-      onDone();
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="card modal" onClick={(e) => e.stopPropagation()}>
-        <h3>Publicar</h3>
-        <p className="small muted" style={{ margin: 0 }}>
-          Publica el código actual. La base de datos es la misma que en la vista previa. Las tareas programadas empiezan a correr con esta versión.
-        </p>
-        <label>
-          Dirección
-          <div className="row" style={{ gap: 4 }}>
-            <input value={slug} onChange={(e) => setSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, "-"))} disabled={!!project.slug} />
-            <span className="muted" style={{ whiteSpace: "nowrap" }}>.{host}</span>
-          </div>
-        </label>
-        {project.appUrl && (
-          <div className="row small">
-            <span className="pill ok">En vivo</span>
-            <a href={project.appUrl} target="_blank" rel="noreferrer" className="grow">
-              {project.appUrl}
-            </a>
-          </div>
-        )}
-        <label className="row" style={{ color: "var(--text)" }}>
-          <input
-            type="checkbox"
-            style={{ width: "auto" }}
-            checked={project.visibility === "private"}
-            onChange={async (e) => {
-              await api(`/projects/${project.id}`, { method: "PATCH", body: { visibility: e.target.checked ? "private" : "public" } });
-              onDone();
-            }}
-          />
-          Privada: solo quien tenga el enlace con token puede abrirla
-        </label>
-        {error && <div className="error-box" style={{ maxHeight: 200, overflow: "auto" }}>{error}</div>}
-        <div className="row">
-          {project.appUrl && (
-            <button
-              className="danger"
-              onClick={async () => {
-                if (!confirm("¿Despublicar? La app dejará de estar en línea.")) return;
-                await api(`/projects/${project.id}/unpublish`, { body: {} });
-                onDone();
-              }}
-            >
-              Despublicar
-            </button>
-          )}
-          <div className="grow" />
-          <button onClick={onClose}>Cerrar</button>
-          <button className="primary" disabled={busy || !slug} onClick={publish}>
-            {busy ? <span className="spinner" /> : project.appUrl ? "Publicar cambios" : "Publicar"}
-          </button>
-        </div>
-      </div>
+      {palette && (
+        <PagePalette
+          projectId={id}
+          onClose={() => setPalette(false)}
+          onPage={(p) => {
+            setView("preview");
+            setPath(p);
+            preview.current?.navigate(p);
+          }}
+          onComponent={(file) => {
+            setCodeFile(file);
+            openService("code");
+          }}
+        />
+      )}
     </div>
   );
 }

@@ -20,8 +20,9 @@
   color-scheme: light;
 }
 
+/* Dark tokens apply for the "system" theme when the OS is dark, or when forced with data-theme. */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --bg: #0b0d12;
     --surface: #12151c;
     --surface-2: #1a1e27;
@@ -36,6 +37,21 @@
     --err-soft: #2a0a0a;
     color-scheme: dark;
   }
+}
+:root[data-theme="dark"] {
+  --bg: #0b0d12;
+  --surface: #12151c;
+  --surface-2: #1a1e27;
+  --text: #e5e7eb;
+  --muted: #9ca3af;
+  --border: #262b36;
+  --accent: #818cf8;
+  --accent-soft: #1e1b4b;
+  --accent-text: #0b0d12;
+  --ok-soft: #022c22;
+  --warn-soft: #2a1a05;
+  --err-soft: #2a0a0a;
+  color-scheme: dark;
 }
 
 * { box-sizing: border-box; }

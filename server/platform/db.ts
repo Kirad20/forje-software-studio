@@ -58,13 +58,6 @@ create table if not exists project_files (
   updated_at timestamptz not null default now(),
   primary key (project_id, path)
 );
-create table if not exists checkpoints (
-  id text primary key,
-  project_id text not null references projects(id) on delete cascade,
-  label text not null,
-  files jsonb not null,
-  created_at timestamptz not null default now()
-);
 create table if not exists published_versions (
   id text primary key,
   project_id text not null references projects(id) on delete cascade,
@@ -134,6 +127,64 @@ create table if not exists job_settings (
   job text not null,
   enabled boolean not null default true,
   primary key (project_id, job)
+);
+create table if not exists folders (
+  id text primary key,
+  account_id text not null references accounts(id) on delete cascade,
+  name text not null,
+  created_at timestamptz not null default now()
+);
+alter table projects add column if not exists favorite boolean not null default false;
+alter table projects add column if not exists archived boolean not null default false;
+alter table projects add column if not exists folder_id text references folders(id) on delete set null;
+alter table projects add column if not exists last_opened_at timestamptz not null default now();
+alter table projects add column if not exists system_prompt text not null default '';
+alter table projects add column if not exists design_prompt text not null default '';
+alter table projects add column if not exists seo jsonb not null default '{}';
+-- One row per write, holding what each touched file looked like before, so any point can be restored.
+create table if not exists project_changes (
+  id serial primary key,
+  project_id text not null references projects(id) on delete cascade,
+  kind text not null,
+  paths jsonb not null,
+  author text not null,
+  label text,
+  description text,
+  before jsonb not null default '{}',
+  created_at timestamptz not null default now()
+);
+create index if not exists project_changes_project on project_changes (project_id, id desc);
+create table if not exists account_integrations (
+  id text primary key,
+  account_id text not null references accounts(id) on delete cascade,
+  type text not null,
+  name text not null,
+  description text not null default '',
+  env_name text not null,
+  value_enc text not null,
+  created_at timestamptz not null default now()
+);
+create table if not exists project_integrations (
+  project_id text not null references projects(id) on delete cascade,
+  integration_id text not null references account_integrations(id) on delete cascade,
+  primary key (project_id, integration_id)
+);
+create table if not exists page_views (
+  id serial primary key,
+  project_id text not null references projects(id) on delete cascade,
+  visitor text not null,
+  path text not null,
+  referrer text,
+  browser text,
+  device text,
+  created_at timestamptz not null default now()
+);
+create index if not exists page_views_project on page_views (project_id, created_at desc);
+create table if not exists builder_actions (
+  account_id text not null references accounts(id) on delete cascade,
+  day date not null default current_date,
+  count integer not null default 0,
+  primary key (account_id, day)
 );
 create table if not exists storage_objects (
   project_id text not null references projects(id) on delete cascade,

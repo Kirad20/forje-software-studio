@@ -4,7 +4,8 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprot
 import { BUILDER_SYSTEM_PROMPT } from "../builder/prompt.js";
 import { builderTools, previewUrl, toolByName } from "../builder/tools.js";
 import type { Account } from "../platform/accounts.js";
-import { createCheckpoint, createProject, getProject, listProjects } from "../platform/projects.js";
+import { createProject, getProject, listProjects } from "../platform/projects.js";
+import { countAction } from "../platform/usage.js";
 
 /**
  * Remote MCP server: lets any MCP client (Claude, ChatGPT, Cursor, Codex...) build Forja
@@ -84,13 +85,9 @@ function buildServer(account: Account) {
       const projectId = String(args.projectId ?? "");
       const project = await getProject(projectId);
       if (!project || project.ownerId !== account.id) return text("Proyecto no encontrado en esta cuenta.", true);
-      const ctx = { account, projectId };
-      const out = await tool.run(args, ctx);
-      if ((ctx as { wrote?: boolean }).wrote && req.params.name !== "create_checkpoint") {
-        // Each write is cheap to checkpoint and makes MCP edits undoable from the studio.
-        await createCheckpoint(projectId, `MCP: ${req.params.name} ${String(args.path ?? "")}`.trim());
-      }
-      return text(out);
+      await countAction(account.id);
+      // Every write lands in the project's change log as "mcp", so it can be undone from the studio.
+      return text(await tool.run(args, { account, projectId, author: "mcp" }));
     } catch (e) {
       return text(`Error: ${(e as Error).message}`, true);
     }

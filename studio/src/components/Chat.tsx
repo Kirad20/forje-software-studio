@@ -21,7 +21,31 @@ interface Step {
 }
 
 /** A rendered turn item: user text, assistant text, or a group of tool steps. */
-type Item = { kind: "user"; text: string } | { kind: "ai"; text: string } | { kind: "steps"; steps: Step[] };
+type Item = { kind: "user"; text: string; element?: string } | { kind: "ai"; text: string } | { kind: "steps"; steps: Step[] };
+
+/** An element picked with the Select tool in the preview. */
+export interface SelectedElement {
+  tag: string;
+  text: string;
+  selector: string;
+  html: string;
+  path: string;
+}
+
+const ELEMENT_MARK = "\n\n[Elemento seleccionado en la vista previa";
+
+/** The builder gets the element's details; the chat shows only a chip. */
+function withElement(text: string, el: SelectedElement | null) {
+  if (!el) return text;
+  return `${text}${ELEMENT_MARK} — página ${el.path}]\nSelector: ${el.selector}\nTexto: ${el.text || "(sin texto)"}\nHTML: ${el.html}`;
+}
+
+function userItem(text: string): Item {
+  const i = text.indexOf(ELEMENT_MARK);
+  if (i < 0) return { kind: "user", text };
+  const selector = /Selector: (.*)/.exec(text.slice(i))?.[1] ?? "elemento";
+  return { kind: "user", text: text.slice(0, i), element: selector };
+}
 
 const TOOL_LABEL: Record<string, string> = {
   list_files: "Revisó los archivos",
@@ -64,7 +88,7 @@ function toItems(messages: Message[]): Item[] {
   };
   for (const m of messages) {
     for (const b of m.content) {
-      if (b.type === "text" && b.text.trim()) items.push(m.role === "user" ? { kind: "user", text: b.text } : { kind: "ai", text: b.text });
+      if (b.type === "text" && b.text.trim()) items.push(m.role === "user" ? userItem(b.text) : { kind: "ai", text: b.text });
       if (b.type === "tool_use") {
         const r = results.get(b.id);
         pushStep({ id: b.id, name: b.name, summary: summarize(b.name, b.input), state: !r ? "err" : r.is_error ? "err" : "ok", output: r?.content });
@@ -136,7 +160,19 @@ function Steps({ steps }: { steps: Step[] }) {
   );
 }
 
-export function Chat({ projectId, onTurnEnd, onBuildingChange }: { projectId: string; onTurnEnd: () => void; onBuildingChange: (b: boolean) => void }) {
+export function Chat({
+  projectId,
+  onTurnEnd,
+  onBuildingChange,
+  selection = null,
+  onClearSelection = () => {},
+}: {
+  projectId: string;
+  onTurnEnd: () => void;
+  onBuildingChange: (b: boolean) => void;
+  selection?: SelectedElement | null;
+  onClearSelection?: () => void;
+}) {
   const [items, setItems] = useState<Item[]>([]);
   const [live, setLive] = useState<Item[]>([]);
   const [input, setInput] = useState("");
@@ -178,11 +214,13 @@ export function Chat({ projectId, onTurnEnd, onBuildingChange }: { projectId: st
     setInput("");
     setError("");
     setBusy(true);
-    const turn: Item[] = [{ kind: "user", text }];
+    const message = withElement(text, selection);
+    onClearSelection();
+    const turn: Item[] = [userItem(message)];
     setLive([...turn]);
     const update = () => setLive([...turn]);
     try {
-      await streamPost(`/projects/${projectId}/chat`, { message: text }, (e) => {
+      await streamPost(`/projects/${projectId}/chat`, { message }, (e) => {
         if (e.type === "text") turn.push({ kind: "ai", text: e.text });
         else if (e.type === "tool_start") {
           const last = turn[turn.length - 1];
@@ -217,6 +255,11 @@ export function Chat({ projectId, onTurnEnd, onBuildingChange }: { projectId: st
         {all.map((it, i) =>
           it.kind === "user" ? (
             <div key={i} className="msg-user">
+              {it.element && (
+                <div className="small" style={{ opacity: 0.85, marginBottom: 4 }}>
+                  ⌖ {it.element}
+                </div>
+              )}
               {it.text}
             </div>
           ) : it.kind === "ai" ? (
@@ -235,8 +278,16 @@ export function Chat({ projectId, onTurnEnd, onBuildingChange }: { projectId: st
         {error && <div className="error-box">{error}</div>}
       </div>
       <div className="composer">
+        {selection && (
+          <div className="selection-chip">
+            ⌖ <code title={selection.html}>{selection.selector}</code>
+            <button className="ghost sm icon-btn" style={{ height: 22, width: 22 }} aria-label="Quitar selección" onClick={onClearSelection}>
+              ×
+            </button>
+          </div>
+        )}
         <textarea
-          placeholder={building ? "Espera a que termine o detenlo…" : "Pide un cambio o una función nueva…"}
+          placeholder={building ? "Espera a que termine o detenlo…" : selection ? "¿Qué cambio en este elemento?" : "Pide un cambio o una función nueva…"}
           value={input}
           disabled={building}
           onChange={(e) => setInput(e.target.value)}

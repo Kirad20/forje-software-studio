@@ -14,6 +14,8 @@ export { previewUrl };
 export interface ToolContext {
   account: Account;
   projectId: string;
+  /** Recorded on every change: the studio's builder or an external MCP client. */
+  author: "builder" | "mcp";
   /** Set when a tool changed project files, so the caller can checkpoint. */
   wrote?: boolean;
 }
@@ -72,7 +74,7 @@ export const builderTools: BuilderTool[] = [
     description: "Crea o reemplaza un archivo completo. La vista previa se actualiza sola.",
     input_schema: obj({ path: str("Ruta, p. ej. pages/_index.tsx"), content: str("Contenido completo") }, ["path", "content"]),
     async run(i: { path: string; content: string }, ctx) {
-      await projects.writeFile(ctx.projectId, i.path, i.content);
+      await projects.writeFile(ctx.projectId, i.path, i.content, ctx.author);
       ctx.wrote = true;
       return `Escrito ${i.path} (${i.content.length} B)`;
     },
@@ -91,7 +93,7 @@ export const builderTools: BuilderTool[] = [
       const count = c.split(i.old_text).length - 1;
       if (count === 0) throw new Error("old_text no aparece en el archivo. Lee el archivo y vuelve a intentarlo con el texto exacto.");
       if (count > 1 && !i.replace_all) throw new Error(`old_text aparece ${count} veces; añade contexto o usa replace_all.`);
-      await projects.writeFile(ctx.projectId, i.path, i.replace_all ? c.split(i.old_text).join(i.new_text) : c.replace(i.old_text, () => i.new_text));
+      await projects.writeFile(ctx.projectId, i.path, i.replace_all ? c.split(i.old_text).join(i.new_text) : c.replace(i.old_text, () => i.new_text), ctx.author);
       ctx.wrote = true;
       return `Editado ${i.path} (${count} reemplazo${count > 1 ? "s" : ""})`;
     },
@@ -101,7 +103,7 @@ export const builderTools: BuilderTool[] = [
     description: "Borra un archivo.",
     input_schema: obj({ path: str("Ruta") }, ["path"]),
     async run(i: { path: string }, ctx) {
-      await projects.deleteFile(ctx.projectId, i.path);
+      await projects.deleteFile(ctx.projectId, i.path, ctx.author);
       ctx.wrote = true;
       return `Borrado ${i.path}`;
     },
@@ -111,7 +113,7 @@ export const builderTools: BuilderTool[] = [
     description: "Mueve o renombra un archivo.",
     input_schema: obj({ from: str("Ruta actual"), to: str("Ruta nueva") }, ["from", "to"]),
     async run(i: { from: string; to: string }, ctx) {
-      await projects.renameFile(ctx.projectId, i.from, i.to);
+      await projects.renameFile(ctx.projectId, i.from, i.to, ctx.author);
       ctx.wrote = true;
       return `Movido ${i.from} → ${i.to}`;
     },
@@ -225,7 +227,7 @@ export const builderTools: BuilderTool[] = [
     description: "Guarda un punto de restauración del código con una etiqueta.",
     input_schema: obj({ label: str("Etiqueta") }, ["label"]),
     async run(i: { label: string }, ctx) {
-      await projects.createCheckpoint(ctx.projectId, i.label);
+      await projects.createCheckpoint(ctx.projectId, i.label, ctx.author);
       return `Checkpoint «${i.label}» creado.`;
     },
   },
@@ -235,7 +237,7 @@ export const builderTools: BuilderTool[] = [
       "Publica la app en <slug>.localhost. Compila todo antes; si hay errores no publica. Solo publica cuando el dueño lo pida.",
     input_schema: obj({ slug: str("Dirección deseada (opcional)") }),
     async run(i: { slug?: string }, ctx) {
-      const r = await publishProject(ctx.projectId, i.slug);
+      const r = await publishProject(ctx.projectId, i.slug, ctx.author);
       return `Publicada en ${r.url}`;
     },
   },

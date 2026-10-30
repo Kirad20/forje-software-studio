@@ -98,6 +98,27 @@ export async function deleteApiToken(accountId: string, id: string) {
   await q(`delete from api_tokens where account_id = $1 and id = $2`, [accountId, id]);
 }
 
+export async function updateAccountName(id: string, name: string) {
+  await q(`update accounts set name = $2 where id = $1`, [id, name.trim().slice(0, 80) || null]);
+}
+
+/** Ends every studio session except the one making the request. */
+export async function signOutOtherSessions(accountId: string, currentToken: string) {
+  const r = await q(`delete from account_sessions where account_id = $1 and token_hash <> $2 returning 1`, [accountId, sha256(currentToken)]);
+  return r.length;
+}
+
+export async function countSessions(accountId: string) {
+  return (await one<{ n: number }>(`select count(*)::int as n from account_sessions where account_id = $1 and expires_at > now()`, [accountId]))!.n;
+}
+
+/** Deletes the account and, by cascade, every project, file, log and token it owns. */
+export async function deleteAccount(id: string) {
+  const projects = await q<{ id: string }>(`select id from projects where owner_id = $1`, [id]);
+  await q(`delete from accounts where id = $1`, [id]);
+  return projects.map((p) => p.id);
+}
+
 export async function getAccount(id: string): Promise<Account | undefined> {
   return one<Account>(`select id, email, name, credits from accounts where id = $1`, [id]);
 }

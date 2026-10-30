@@ -52,9 +52,16 @@ apps generadas ──▶  pv-<id>.localhost   (vista previa, enlace con token)
 | Realtime WebSocket | Canales por proyecto, publish desde servidor y navegador | ✅ (sin presencia) |
 | Pagos Stripe | `ctx.payments.checkout` con clave propia | ⚠️ sin Stripe Connect ni comisión |
 | Secretos que el agente nunca ve | Cifrados AES-GCM, el agente solo pide nombres | ✅ |
-| Checkpoints y restaurar | Automáticos por turno + manuales | ✅ |
+| Checkpoints: línea de tiempo por cambio con autor, restaurar a cualquier punto | Registro de cambios (Constructor/Tú/Agente MCP), checkpoints con nombre, marca de publicación; restaurar es deshacible | ✅ |
 | Publicar a subdominio, despublicar, app privada | `<slug>.localhost`, privada por token | ✅ |
-| Dominios propios, SEO, analítica, PWA/móvil nativo, apps conectadas, colaboradores, planes y facturación | — | ❌ fuera de este corte |
+| Panel: carpetas, favoritos, estado, orden, lista/cuadrícula, renombrar/duplicar/archivar/borrar | Igual | ✅ |
+| Plan y uso, Integraciones de cuenta, Cuenta (perfil, agentes, sesiones, borrar) | Igual, con medidores reales | ✅ |
+| Vista de proyecto: Preview/Services, selector de páginas (Ctrl+K), dispositivos, Select, pantalla completa | Igual; Edit abre el chat integrado | ✅ (Select sin mapeo a línea de código) |
+| Services: Analytics, SEO (robots/sitemap/meta), Docs del agente | Igual, analítica sin cookies | ✅ (sin países, sin prerender) |
+| Ajustes del proyecto: compartir, duplicar (con BD), descargar código, System/Design Prompt, uso | Igual | ✅ |
+| Dominios propios, PWA/móvil nativo, apps conectadas, colaboradores, Annotate, notificaciones push, facturación | — | ❌ fuera de este corte |
+
+El recorrido completo de la interfaz de Floot y qué se replicó está en [docs/inventario-floot.md](docs/inventario-floot.md).
 
 ## Límites conocidos
 

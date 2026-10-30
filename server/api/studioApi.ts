@@ -13,6 +13,43 @@ import { projectEvents, readLogs, type ProjectEvent } from "../platform/events.j
 import * as projects from "../platform/projects.js";
 import { publishProject, suggestSlug, unpublishProject } from "../runtime/publish.js";
 import { appUrl, previewOrigin, previewUrl, shareToken } from "../runtime/urls.js";
+import { rm } from "node:fs/promises";
+import path from "node:path";
+import { config } from "../config.js";
+import { analyticsSummary } from "../baas/analytics.js";
+import { zip } from "../lib/zip.js";
+import { one } from "../platform/db.js";
+import {
+  INTEGRATION_TYPES,
+  connectIntegration,
+  createIntegration,
+  deleteIntegration,
+  disconnectIntegration,
+  listIntegrations,
+  projectIntegrationIds,
+  updateIntegrationValue,
+} from "../platform/integrations.js";
+import { usageSummary } from "../platform/usage.js";
+
+const quoteIdent = (name: string) => `"${name.replace(/"/g, '""')}"`;
+
+/** Single-column primary key of a table, if it has one. */
+async function primaryKeyOf(projectId: string, table: string): Promise<string | null> {
+  const rows = await projectDb(projectId).query<{ column_name: string }>(
+    `select kcu.column_name from information_schema.table_constraints tc
+     join information_schema.key_column_usage kcu on kcu.constraint_name = tc.constraint_name and kcu.table_schema = tc.table_schema
+     where tc.table_schema = 'public' and tc.table_name = $1 and tc.constraint_type = 'PRIMARY KEY'`,
+    [table],
+  );
+  return rows.length === 1 ? rows[0]!.column_name : null;
+}
+
+/** Removes a deleted project's database and uploaded files from disk. */
+async function removeProjectData(projectId: string) {
+  const { closeProject } = await import("../baas/projectDb.js");
+  await closeProject(projectId);
+  await rm(path.join(config.dataDir, "projects", projectId), { recursive: true, force: true }).catch(() => {});
+}
 
 type Env = { Variables: { account: accounts.Account; project: projects.Project } };
 
@@ -76,7 +113,54 @@ studioApi.use("*", async (c, next) => {
   await next();
 });
 
-studioApi.get("/me", async (c) => c.json({ account: await accounts.getAccount(c.get("account").id) }));
+studioApi.get("/me", async (c) => {
+  const id = c.get("account").id;
+  return c.json({ account: { ...(await accounts.getAccount(id)), sessions: await accounts.countSessions(id) } });
+});
+studioApi.patch("/me", async (c) => {
+  const { name } = await c.req.json<{ name: string }>();
+  await accounts.updateAccountName(c.get("account").id, name ?? "");
+  return c.json({ ok: true });
+});
+studioApi.post("/me/sign-out-others", async (c) =>
+  c.json({ ended: await accounts.signOutOtherSessions(c.get("account").id, getCookie(c, SESSION_COOKIE)!) }),
+);
+studioApi.delete("/me", async (c) => {
+  const account = c.get("account");
+  const { confirmEmail } = await c.req.json<{ confirmEmail: string }>();
+  if (confirmEmail?.trim().toLowerCase() !== account.email) return c.json({ error: "Escribe tu correo para confirmar." }, 400);
+  for (const p of await projects.listProjects(account.id)) await unpublishProject(p.id);
+  const ids = await accounts.deleteAccount(account.id);
+  for (const id of ids) await removeProjectData(id);
+  deleteCookie(c, SESSION_COOKIE, { path: "/" });
+  return c.json({ ok: true });
+});
+
+studioApi.get("/usage", async (c) => c.json(await usageSummary(c.get("account").id)));
+
+// Folders
+studioApi.get("/folders", async (c) => c.json({ folders: await projects.listFolders(c.get("account").id) }));
+studioApi.post("/folders", async (c) => {
+  const { name } = await c.req.json<{ name: string }>();
+  return c.json({ id: await projects.createFolder(c.get("account").id, name ?? "") });
+});
+studioApi.delete("/folders/:id", async (c) => {
+  await projects.deleteFolder(c.get("account").id, c.req.param("id"));
+  return c.json({ ok: true });
+});
+
+// Account-level integrations
+studioApi.get("/integrations", async (c) => c.json({ integrations: await listIntegrations(c.get("account").id), types: INTEGRATION_TYPES }));
+studioApi.post("/integrations", async (c) => c.json({ id: await createIntegration(c.get("account").id, await c.req.json()) }));
+studioApi.put("/integrations/:id", async (c) => {
+  const { value } = await c.req.json<{ value: string }>();
+  await updateIntegrationValue(c.get("account").id, c.req.param("id"), value ?? "");
+  return c.json({ ok: true });
+});
+studioApi.delete("/integrations/:id", async (c) => {
+  await deleteIntegration(c.get("account").id, c.req.param("id"));
+  return c.json({ ok: true });
+});
 
 studioApi.get("/tokens", async (c) => c.json({ tokens: await accounts.listApiTokens(c.get("account").id) }));
 studioApi.post("/tokens", async (c) => {
@@ -129,14 +213,84 @@ studioApi.use("/projects/:id", async (c, next) => {
 
 const pid = (c: Context<Env>) => c.get("project").id;
 
-studioApi.get("/projects/:id", async (c) => c.json({ project: await projectView(c.get("project")) }));
+studioApi.get("/projects/:id", async (c) => {
+  await projects.markOpened(pid(c));
+  return c.json({ project: await projectView(c.get("project")) });
+});
 studioApi.patch("/projects/:id", async (c) => {
-  await projects.updateProject(pid(c), await c.req.json());
+  const patch = await c.req.json<projects.ProjectPatch>();
+  if (patch.folderId) {
+    const mine = await projects.listFolders(c.get("account").id);
+    if (!mine.some((f) => f.id === patch.folderId)) return c.json({ error: "Carpeta no encontrada" }, 404);
+  }
+  await projects.updateProject(pid(c), patch);
   return c.json({ project: await projectView((await projects.getProject(pid(c)))!) });
 });
 studioApi.delete("/projects/:id", async (c) => {
   await unpublishProject(pid(c));
   await projects.deleteProject(pid(c));
+  await removeProjectData(pid(c));
+  return c.json({ ok: true });
+});
+studioApi.post("/projects/:id/duplicate", async (c) => {
+  const copy = await projects.duplicateProject(c.get("account").id, pid(c));
+  return c.json({ project: await projectView(copy) });
+});
+
+/** "Get code": the project's source as a zip, without the builder's working notes. */
+studioApi.get("/projects/:id/export-code", async (c) => {
+  const files = Object.fromEntries(Object.entries(await projects.readAllFiles(pid(c))).filter(([p]) => !projects.isDevFile(p)));
+  const slug = suggestSlug(c.get("project").name);
+  return new Response(new Uint8Array(zip(Object.fromEntries(Object.entries(files).map(([p, v]) => [`${slug}/${p}`, v])))), {
+    headers: { "content-type": "application/zip", "content-disposition": `attachment; filename="${slug}.zip"` },
+  });
+});
+
+studioApi.get("/projects/:id/stats", async (c) => {
+  const files = await projects.readAllFiles(pid(c));
+  const code = Object.entries(files).filter(([p]) => !projects.isDevFile(p) && /\.(tsx?|css)$/.test(p));
+  const credits = await one<{ n: number }>(`select coalesce(sum(credits), 0)::int as n from ai_usage where project_id = $1`, [pid(c)]);
+  return c.json({
+    files: code.length,
+    linesOfCode: code.reduce((n, [, v]) => n + v.split("\n").length, 0),
+    creditsUsed: credits?.n ?? 0,
+  });
+});
+
+/** Which services this project already uses: the services nav lists those first and dims the rest. */
+studioApi.get("/projects/:id/services", async (c) => {
+  const id = pid(c);
+  const files = Object.keys(await projects.readAllFiles(id));
+  const tables = Object.keys(await describeSchema(id));
+  const count = async (sql: string) => (await one<{ n: number }>(sql, [id]))?.n ?? 0;
+  const secrets = await listSecrets(id);
+  const users = await projectDb(id).one<{ n: number }>(`select count(*)::int as n from _forja_users`);
+  return c.json({
+    data: tables.length > 0,
+    users: (users?.n ?? 0) > 0,
+    ai: (await count(`select count(*)::int as n from ai_usage where project_id = $1`)) > 0,
+    integrations: secrets.length > 0 || (await projectIntegrationIds(id)).length > 0,
+    analytics: !!c.get("project").slug,
+    docs: files.some(projects.isDevFile),
+    jobs: files.some((f) => f.startsWith("jobs/")),
+    storage: (await count(`select count(*)::int as n from storage_objects where project_id = $1`)) > 0,
+    email: (await count(`select count(*)::int as n from emails where project_id = $1`)) > 0,
+    payments: secrets.some((s) => s.name === "STRIPE_SECRET_KEY" && s.isSet),
+  });
+});
+
+studioApi.get("/projects/:id/analytics", async (c) => c.json(await analyticsSummary(pid(c), Number(c.req.query("days") ?? 7))));
+
+// Integrations connected to this project
+studioApi.get("/projects/:id/integrations", async (c) =>
+  c.json({ all: await listIntegrations(c.get("account").id), connected: await projectIntegrationIds(pid(c)) }),
+);
+studioApi.post("/projects/:id/integrations/:iid", async (c) => {
+  await connectIntegration(c.get("account").id, pid(c), c.req.param("iid"));
+  return c.json({ ok: true });
+});
+studioApi.delete("/projects/:id/integrations/:iid", async (c) => {
+  await disconnectIntegration(pid(c), c.req.param("iid"));
   return c.json({ ok: true });
 });
 
@@ -194,13 +348,52 @@ studioApi.get("/projects/:id/db/rows", async (c) => {
   if (!schema[table]) return c.json({ error: "Tabla no encontrada" }, 404);
   const limit = Math.min(Number(c.req.query("limit") ?? 50), 500);
   const offset = Number(c.req.query("offset") ?? 0);
+  const search = (c.req.query("search") ?? "").trim();
   const db = projectDb(pid(c));
-  const ident = `"${table.replace(/"/g, '""')}"`;
-  const rows = await db.query(`select * from ${ident} limit $1 offset $2`, [limit, offset]);
-  const total = (await db.one<{ n: number }>(`select count(*)::int as n from ${ident}`))!.n;
+  const ident = quoteIdent(table);
+  // Search matches any column's text form; column names come from the catalog, not the request.
+  const where = search ? `where ${schema[table]!.map((col) => `${quoteIdent(col.name)}::text ilike $3`).join(" or ")}` : "";
+  const params = search ? [limit, offset, `%${search}%`] : [limit, offset];
+  const primaryKey = await primaryKeyOf(pid(c), table);
+  const order = primaryKey ? `order by ${quoteIdent(primaryKey)}` : "";
+  const rows = await db.query(`select * from ${ident} ${where} ${order} limit $1 offset $2`, params);
+  const total = (await db.one<{ n: number }>(`select count(*)::int as n from ${ident} ${search ? where.replace(/\$3/g, "$1") : ""}`, search ? [`%${search}%`] : []))!.n;
   // Never show password hashes in the studio.
   const safe = table === "_forja_users" ? rows.map(({ password_hash, ...r }) => ({ ...r, password_hash: password_hash ? "••••" : null })) : rows;
-  return c.json({ columns: schema[table], rows: safe, total });
+  return c.json({ columns: schema[table], rows: safe, total, primaryKey });
+});
+
+studioApi.post("/projects/:id/db/rows", async (c) => {
+  const { table, values } = await c.req.json<{ table: string; values: Record<string, unknown> }>();
+  const schema = await describeSchema(pid(c), true);
+  const cols = schema[table];
+  if (!cols) return c.json({ error: "Tabla no encontrada" }, 404);
+  // Empty fields are left out so column defaults (ids, timestamps) apply.
+  const entries = Object.entries(values ?? {}).filter(([k, v]) => cols.some((col) => col.name === k) && v !== "" && v !== undefined);
+  const sql = entries.length
+    ? `insert into ${quoteIdent(table)} (${entries.map(([k]) => quoteIdent(k)).join(", ")}) values (${entries.map((_, i) => `$${i + 1}`).join(", ")}) returning *`
+    : `insert into ${quoteIdent(table)} default values returning *`;
+  try {
+    return c.json({ row: await projectDb(pid(c)).one(sql, entries.map(([, v]) => v)) });
+  } catch (e) {
+    return c.json({ error: (e as Error).message }, 400);
+  }
+});
+
+studioApi.post("/projects/:id/db/rows/delete", async (c) => {
+  const { table, keys } = await c.req.json<{ table: string; keys: unknown[] }>();
+  const schema = await describeSchema(pid(c), true);
+  if (!schema[table]) return c.json({ error: "Tabla no encontrada" }, 404);
+  const pk = await primaryKeyOf(pid(c), table);
+  if (!pk) return c.json({ error: "La tabla no tiene clave primaria; bórralas con SQL." }, 400);
+  try {
+    const rows = await projectDb(pid(c)).query(`delete from ${quoteIdent(table)} where ${quoteIdent(pk)}::text = any($1::text[]) returning 1`, [
+      (keys ?? []).map(String),
+    ]);
+    return c.json({ deleted: rows.length });
+  } catch (e) {
+    return c.json({ error: (e as Error).message }, 400);
+  }
 });
 studioApi.post("/projects/:id/db/sql", async (c) => {
   const { sql } = await c.req.json<{ sql: string }>();
@@ -290,14 +483,14 @@ studioApi.get("/projects/:id/ai", async (c) => c.json({ usage: await aiUsage(pid
 studioApi.get("/projects/:id/realtime", async (c) => c.json({ channels: realtimeStats(pid(c)) }));
 studioApi.get("/projects/:id/logs", (c) => c.json({ logs: readLogs(pid(c), { limit: 300, level: c.req.query("level") }) }));
 
-// Checkpoints
-studioApi.get("/projects/:id/checkpoints", async (c) => c.json({ checkpoints: await projects.listCheckpoints(pid(c)) }));
+// Change timeline and named checkpoints
+studioApi.get("/projects/:id/changes", async (c) => c.json({ changes: await projects.listChanges(pid(c)) }));
 studioApi.post("/projects/:id/checkpoints", async (c) => {
-  const { label } = await c.req.json<{ label: string }>();
-  return c.json({ id: await projects.createCheckpoint(pid(c), label || "Manual") });
+  const { label, description } = await c.req.json<{ label: string; description?: string }>();
+  return c.json({ id: await projects.createCheckpoint(pid(c), label || "Checkpoint", "owner", description) });
 });
-studioApi.post("/projects/:id/checkpoints/:cid/restore", async (c) => {
-  await projects.restoreCheckpoint(pid(c), c.req.param("cid"));
+studioApi.post("/projects/:id/changes/:cid/restore", async (c) => {
+  await projects.restoreToChange(pid(c), Number(c.req.param("cid")), "owner");
   return c.json({ ok: true });
 });
 

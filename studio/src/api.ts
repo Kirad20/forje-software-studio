@@ -58,12 +58,25 @@ export interface Project {
   emailDomainVerified: boolean;
   publishedAt: string | null;
   updatedAt: string;
+  createdAt: string;
+  lastOpenedAt: string;
+  favorite: boolean;
+  archived: boolean;
+  folderId: string | null;
+  systemPrompt: string;
+  designPrompt: string;
+  seo: { siteName?: string; siteDescription?: string; robots?: boolean; sitemap?: boolean };
   previewUrl: string;
   previewOrigin: string;
   appUrl: string | null;
   suggestedSlug: string;
   building: boolean;
   hasUnpublishedChanges: boolean;
+}
+
+export interface Folder {
+  id: string;
+  name: string;
 }
 
 export const timeAgo = (iso: string) => {

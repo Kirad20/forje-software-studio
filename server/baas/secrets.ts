@@ -38,6 +38,12 @@ export async function listSecrets(projectId: string) {
 }
 
 export async function secretEnv(projectId: string): Promise<Record<string, string>> {
+  const { integrationEnv } = await import("../platform/integrations.js");
+  const fromIntegrations = await integrationEnv(projectId);
+  return { ...fromIntegrations, ...(await projectSecretEnv(projectId)) };
+}
+
+async function projectSecretEnv(projectId: string): Promise<Record<string, string>> {
   const rows = await q<{ name: string; value_enc: string }>(
     `select name, value_enc from project_secrets where project_id = $1 and value_enc is not null`,
     [projectId],

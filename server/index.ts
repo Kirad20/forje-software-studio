@@ -59,7 +59,8 @@ app.use("*", async (c, next) => {
       },
     });
   }
-  return serveApp(c.req.raw, { project: resolved.project, env: resolved.env, base: "" }, url.pathname);
+  const clientIp = (c.env as { incoming?: { socket?: { remoteAddress?: string } } })?.incoming?.socket?.remoteAddress;
+  return serveApp(c.req.raw, { project: resolved.project, env: resolved.env, base: "", clientIp }, url.pathname);
 });
 
 app.route("/api", studioApi);
@@ -77,8 +78,8 @@ app.get("/healthz", (c) => c.json({ ok: true }));
 // The built studio (npm run build). In development Vite serves it and proxies /api here.
 if (existsSync(STUDIO_DIST)) {
   app.use("/*", serveStatic({ root: path.relative(process.cwd(), STUDIO_DIST) }));
-  const index = readFileSync(path.join(STUDIO_DIST, "index.html"), "utf8");
-  app.get("*", (c) => c.html(index));
+  // Read per request: a rebuild renames the hashed assets the page points at.
+  app.get("*", (c) => c.html(readFileSync(path.join(STUDIO_DIST, "index.html"), "utf8")));
 } else {
   app.get("/", (c) => c.html(page("Forja", "El studio corre con Vite en desarrollo: <code>npm run dev</code> y abre http://localhost:5173")));
 }

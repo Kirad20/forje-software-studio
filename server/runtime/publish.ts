@@ -1,5 +1,5 @@
 import { scheduleProject } from "../baas/jobs.js";
-import { getProject, isSlugTaken, readAllFiles, recordPublish, unpublish, type Project } from "../platform/projects.js";
+import { getProject, isSlugTaken, readAllFiles, recordPublish, unpublish, type Author, type Project } from "../platform/projects.js";
 import { checkProject, formatProblem } from "./bundler.js";
 import { appUrl, RESERVED_SLUG } from "./urls.js";
 
@@ -19,7 +19,7 @@ export function suggestSlug(name: string) {
  * Publishing checks that everything compiles, then snapshots the files. A failed publish
  * leaves the live version untouched. The database is shared and is not part of a publish.
  */
-export async function publishProject(projectId: string, requestedSlug?: string): Promise<{ url: string; slug: string }> {
+export async function publishProject(projectId: string, requestedSlug?: string, author: Author = "owner"): Promise<{ url: string; slug: string }> {
   const project = (await getProject(projectId)) as Project;
   const slug = suggestSlug(requestedSlug ?? project.slug ?? project.name);
   if (!/^[a-z0-9][a-z0-9-]{1,39}$/.test(slug)) throw new Error("Dirección no válida: usa minúsculas, números y guiones.");
@@ -28,7 +28,7 @@ export async function publishProject(projectId: string, requestedSlug?: string):
   const files = await readAllFiles(projectId);
   const problems = await checkProject(files);
   if (problems.length) throw new Error(`No se publicó: la app tiene errores.\n${problems.map(formatProblem).join("\n")}`);
-  await recordPublish(projectId, slug, files);
+  await recordPublish(projectId, slug, files, author);
   await scheduleProject(projectId);
   return { slug, url: appUrl(slug) };
 }
