@@ -349,6 +349,20 @@ jar.localhost = ownerCookie;
 let limited = 0;
 for (let i = 0; i < 7; i++) if ((await req("POST", "/api/auth/request", { body: { email: "spam@example.com" } })).status === 429) limited++;
 ok(limited >= 2, "login code requests are rate limited");
+// Chat attachments and app icon / installable manifest.
+const png1x1 = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+const att = await req("POST", `/api/projects/${project.id}/attachments`, { body: { filename: "Logo Café.png", dataUrl: png1x1 } });
+ok(/^static\/uploads\/[a-z0-9]+-Logo-Cafe\.png$/.test(att.json?.path ?? ""), "attachment saved under static/uploads with a safe name", att.text);
+const attServed = await req("GET", `/${att.json.path}`, { host: pv });
+ok(attServed.headers["content-type"] === "image/png" && attServed.text.startsWith("\u0089PNG") || attServed.status === 200, "attachment served by the app");
+ok((await req("POST", `/api/projects/${project.id}/icon`, { body: { filename: "x.exe", dataUrl: png1x1 } })).status === 400, "icon must be an image");
+await req("POST", `/api/projects/${project.id}/icon`, { body: { filename: "icon.png", dataUrl: png1x1 } });
+const manifest = await req("GET", "/manifest.webmanifest", { host: pv });
+ok(manifest.json?.icons?.[0]?.src === "/static/icon.png" && manifest.json.display === "standalone", "manifest lists the app icon", manifest.text);
+ok((await req("GET", "/", { host: pv })).text.includes('rel="apple-touch-icon"'), "app html links icon and manifest");
+await req("PUT", `/api/projects/${project.id}/file`, { body: { path: "static/x.svg", content: "<svg xmlns='http://www.w3.org/2000/svg'><script>alert(1)</script></svg>" } });
+ok(/sandbox/.test((await req("GET", "/static/x.svg", { host: pv })).headers["content-security-policy"] ?? ""), "static SVG is sandboxed");
+
 // Share links expire and can be revoked all at once.
 const link = await req("POST", `/api/projects/${project.id}/share-link`, { body: { days: 7 } });
 const linkToken = new URL(link.json.url).searchParams.get("share");

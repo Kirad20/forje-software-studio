@@ -14,6 +14,8 @@ export interface SeoSettings {
   siteDescription?: string;
   robots?: boolean;
   sitemap?: boolean;
+  /** Browser/OS chrome color for the installed app. */
+  themeColor?: string;
 }
 
 export interface Project {

@@ -65,7 +65,7 @@ export interface Project {
   folderId: string | null;
   systemPrompt: string;
   designPrompt: string;
-  seo: { siteName?: string; siteDescription?: string; robots?: boolean; sitemap?: boolean };
+  seo: { siteName?: string; siteDescription?: string; robots?: boolean; sitemap?: boolean; themeColor?: string };
   /** Present on projects opened by id: whether you own it or collaborate on it. */
   access?: "owner" | "editor";
   previewUrl: string;

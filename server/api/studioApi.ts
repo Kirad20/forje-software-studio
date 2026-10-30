@@ -399,15 +399,59 @@ studioApi.put("/projects/:id/file", async (c) => {
 // Chat with the builder
 studioApi.get("/projects/:id/chat", async (c) => c.json({ messages: await loadHistory(pid(c)), building: isBuilding(pid(c)) }));
 studioApi.post("/projects/:id/chat", async (c) => {
-  const { message } = await c.req.json<{ message: string }>();
+  const { message, attachments } = await c.req.json<{ message: string; attachments?: string[] }>();
   if (!message?.trim()) return c.json({ error: "Mensaje vacío" }, 400);
+  if (message.length > 20_000) return c.json({ error: "Mensaje demasiado largo" }, 400);
   if (isBuilding(pid(c))) return c.json({ error: "El constructor ya está trabajando" }, 409);
   const account = c.get("account");
   const id = pid(c);
+  const files = (Array.isArray(attachments) ? attachments : []).filter((p) => typeof p === "string");
   return sse((send, close) => {
-    void runBuilderTurn(account, id, message, (e: AgentEvent) => send(e)).finally(close);
+    void runBuilderTurn(account, id, message, (e: AgentEvent) => send(e), files).finally(close);
     return () => {};
   });
+});
+
+const MAX_ATTACHMENT = 5 * 1024 * 1024;
+const TEXT_EXT = /\.(txt|md|csv|json|svg|html|css)$/i;
+
+/** Decodes a data: URL from the studio, keeping text files readable for the builder. */
+function fromDataUrl(dataUrl: string, filename: string): { content: string; size: number } {
+  const m = /^data:([^;,]*)(;base64)?,(.*)$/s.exec(dataUrl ?? "");
+  if (!m) throw new Error("Archivo no válido");
+  const bytes = m[2] ? Buffer.from(m[3]!, "base64") : Buffer.from(decodeURIComponent(m[3]!), "utf8");
+  if (bytes.byteLength > MAX_ATTACHMENT) throw new Error("El archivo supera 5 MB");
+  return { content: TEXT_EXT.test(filename) ? bytes.toString("utf8") : `base64:${bytes.toString("base64")}`, size: bytes.byteLength };
+}
+
+const safeName = (name: string) =>
+  name
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/[^A-Za-z0-9._-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(-60) || "archivo";
+
+/** Files the owner attaches in the chat land in static/uploads/, usable by the app and visible to the builder. */
+studioApi.post("/projects/:id/attachments", async (c) => {
+  const { filename, dataUrl } = await c.req.json<{ filename: string; dataUrl: string }>();
+  const name = safeName(String(filename ?? "archivo"));
+  const { content, size } = fromDataUrl(dataUrl, name);
+  const path = `static/uploads/${Date.now().toString(36)}-${name}`;
+  await projects.writeFile(pid(c), path, content, "owner", c.get("account").email);
+  return c.json({ path, size });
+});
+
+/** App icon: used as favicon, home-screen icon and in the web app manifest. */
+studioApi.post("/projects/:id/icon", async (c) => {
+  const { filename, dataUrl } = await c.req.json<{ filename: string; dataUrl: string }>();
+  const ext = (/\.(png|svg|jpg|jpeg|webp)$/i.exec(String(filename ?? ""))?.[1] ?? "").toLowerCase().replace("jpeg", "jpg");
+  if (!ext) return c.json({ error: "Usa una imagen PNG, SVG, JPG o WebP" }, 400);
+  const { content } = fromDataUrl(dataUrl, `icon.${ext}`);
+  const files = await projects.listFiles(pid(c));
+  for (const f of files) if (/^static\/icon\.(png|svg|jpg|webp)$/.test(f.path) && f.path !== `static/icon.${ext}`) await projects.deleteFile(pid(c), f.path, "owner");
+  await projects.writeFile(pid(c), `static/icon.${ext}`, content, "owner", c.get("account").email);
+  return c.json({ path: `static/icon.${ext}` });
 });
 studioApi.post("/projects/:id/chat/stop", (c) => {
   stopBuilding(pid(c));

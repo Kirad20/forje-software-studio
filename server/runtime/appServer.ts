@@ -100,6 +100,21 @@ async function route(req: Request, t: AppTarget, rest: string): Promise<Response
 
   const files = await loadFiles(t);
   const seo = t.project.seo ?? {};
+  if (rest === "/manifest.webmanifest") {
+    // Makes the app installable ("add to home screen") with its own name and icon.
+    const icon = iconPath(files);
+    const manifest = {
+      name: seo.siteName || t.project.name,
+      short_name: (seo.siteName || t.project.name).slice(0, 12),
+      description: seo.siteDescription || t.project.description,
+      start_url: `${t.base}/`,
+      display: "standalone",
+      background_color: "#ffffff",
+      theme_color: seo.themeColor || "#ffffff",
+      icons: icon ? [{ src: `${t.base}/${icon}`, sizes: icon.endsWith(".svg") ? "any" : "512x512", type: MIME[icon.split(".").pop()!] }] : [],
+    };
+    return new Response(JSON.stringify(manifest), { headers: { "content-type": "application/manifest+json" } });
+  }
   if (rest === "/robots.txt") {
     if (!seo.robots) return new Response("Not found", { status: 404 });
     return new Response(`User-agent: *\nAllow: /\n${seo.sitemap ? `Sitemap: ${appOrigin(t)}/sitemap.xml\n` : ""}`, {
@@ -154,7 +169,10 @@ const MIME: Record<string, string> = {
 function staticFile(p: string, content: string) {
   const ext = p.split(".").pop()!.toLowerCase();
   const body = content.startsWith("base64:") ? Buffer.from(content.slice(7), "base64") : content;
-  return new Response(body, { headers: { "content-type": MIME[ext] ?? "application/octet-stream" } });
+  const headers: Record<string, string> = { "content-type": MIME[ext] ?? "application/octet-stream" };
+  // An SVG opened directly could run script on the app's origin; as an <img> it is unaffected.
+  if (ext === "svg" || ext === "html") headers["content-security-policy"] = "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data:";
+  return new Response(body, { headers });
 }
 
 async function html(t: AppTarget, files: FileMap): Promise<Response> {
@@ -175,10 +193,23 @@ async function html(t: AppTarget, files: FileMap): Promise<Response> {
     : `<div id="root"></div><script type="module" src="${t.base}/_forja/app.js"></script>`;
   const doc = `<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${title}</title><meta name="description" content="${description}"><meta property="og:title" content="${title}"><meta property="og:description" content="${description}">
-${files["static/favicon.svg"] ? `<link rel="icon" href="${t.base}/static/favicon.svg">` : ""}
+${iconLinks(t, files)}
 <link rel="stylesheet" href="${t.base}/_forja/app.css"><script>window.__FORJA__=${runtime}</script>${reporter}</head>
 <body>${body}${t.env === "published" ? badge() : ""}</body></html>`;
   return new Response(doc, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-cache" } });
+}
+
+/** The app icon the owner uploaded (static/icon.*), else a static/favicon.svg the builder wrote. */
+const iconPath = (files: FileMap) => ["static/icon.png", "static/icon.svg", "static/icon.webp", "static/icon.jpg", "static/favicon.svg"].find((p) => p in files);
+
+function iconLinks(t: AppTarget, files: FileMap) {
+  const icon = iconPath(files);
+  const theme = t.project.seo?.themeColor;
+  return [
+    icon ? `<link rel="icon" href="${t.base}/${icon}"><link rel="apple-touch-icon" href="${t.base}/${icon}">` : "",
+    `<link rel="manifest" href="${t.base}/manifest.webmanifest">`,
+    theme && /^#[0-9a-f]{3,8}$/i.test(theme) ? `<meta name="theme-color" content="${theme}">` : "",
+  ].join("");
 }
 
 const appOrigin = (t: AppTarget) => (t.env === "published" && t.project.slug ? appUrl(t.project.slug) : previewOrigin(t.project.id));

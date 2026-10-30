@@ -3,7 +3,7 @@ import { charge } from "../baas/ai.js";
 import { chat, type Block, type LlmMessage } from "../lib/llm.js";
 import { getAccount, type Account } from "../platform/accounts.js";
 import { q } from "../platform/db.js";
-import { createCheckpoint, getProject } from "../platform/projects.js";
+import { createCheckpoint, getProject, readFile } from "../platform/projects.js";
 import { countAction } from "../platform/usage.js";
 import { BUILDER_SYSTEM_PROMPT } from "./prompt.js";
 import { builderTools, toolByName, type ToolContext } from "./tools.js";
@@ -91,6 +91,31 @@ function compact(history: LlmMessage[]): LlmMessage[] {
     .reverse();
 }
 
+export const UPLOADS = "static/uploads/";
+const IMAGE_TYPES: Record<string, string> = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp" };
+
+/**
+ * Attachments are kept in history as [[adjunto:path]] markers. Only the latest user turn
+ * gets its images inlined for the model, so long conversations don't resend them.
+ */
+async function withImages(projectId: string, history: LlmMessage[]): Promise<LlmMessage[]> {
+  // The owner's latest message: the last user turn that has text (tool results have none).
+  const idx = history.findLastIndex((m) => m.role === "user" && typeof m.content !== "string" && m.content.some((b) => b.type === "text"));
+  const m = history[idx];
+  if (!m || typeof m.content === "string") return history;
+  const text = m.content.map((b) => (b.type === "text" ? b.text : "")).join("\n");
+  const images: Block[] = [];
+  for (const [, path] of text.matchAll(/\[\[adjunto:([^\]]+)\]\]/g)) {
+    const type = IMAGE_TYPES[path!.split(".").pop()!.toLowerCase()];
+    const content = type ? await readFile(projectId, path!) : undefined;
+    if (type && content?.startsWith("base64:")) images.push({ type: "image", source: { type: "base64", media_type: type, data: content.slice(7) } });
+  }
+  if (!images.length) return history;
+  const copy = [...history];
+  copy[idx] = { ...m, content: [...m.content, ...images] };
+  return copy;
+}
+
 /** One-line description of a tool call for the chat UI. */
 function summarize(name: string, input: Record<string, unknown>): string {
   if (typeof input.path === "string") return input.path;
@@ -101,7 +126,7 @@ function summarize(name: string, input: Record<string, unknown>): string {
   return name;
 }
 
-export async function runBuilderTurn(account: Account, projectId: string, userText: string, emit: (e: AgentEvent) => void) {
+export async function runBuilderTurn(account: Account, projectId: string, userText: string, emit: (e: AgentEvent) => void, attachments: string[] = []) {
   if (active.has(projectId)) throw new Error("El constructor ya está trabajando en este proyecto.");
   const abort = new AbortController();
   active.set(projectId, abort);
@@ -114,7 +139,9 @@ export async function runBuilderTurn(account: Account, projectId: string, userTe
     const fresh = await getAccount(payer);
     if ((fresh?.credits ?? 0) <= 0) throw new Error("La cuenta dueña del proyecto no tiene créditos para el constructor.");
 
-    const userMsg: LlmMessage = { role: "user", content: [{ type: "text", text: userText }] };
+    const files = attachments.filter((p) => p.startsWith(UPLOADS)).slice(0, 6);
+    const note = files.length ? `\n\n${files.map((p) => `[[adjunto:${p}]]`).join("\n")}` : "";
+    const userMsg: LlmMessage = { role: "user", content: [{ type: "text", text: userText + note }] };
     await save(projectId, userMsg);
     const history = [...(await loadHistory(projectId))];
     const system = [
@@ -132,7 +159,7 @@ export async function runBuilderTurn(account: Account, projectId: string, userTe
         provider: config.builder.provider,
         model: config.builder.model,
         system,
-        messages: compact(history),
+        messages: await withImages(projectId, compact(history)),
         tools: builderTools.map(({ name, description, input_schema }) => ({ name, description, input_schema })),
         maxTokens: 16000,
         signal: abort.signal,

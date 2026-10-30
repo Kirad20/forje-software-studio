@@ -21,7 +21,7 @@ interface Step {
 }
 
 /** A rendered turn item: user text, assistant text, or a group of tool steps. */
-type Item = { kind: "user"; text: string; element?: string } | { kind: "ai"; text: string } | { kind: "steps"; steps: Step[] };
+type Item = { kind: "user"; text: string; element?: string; attachments?: string[] } | { kind: "ai"; text: string } | { kind: "steps"; steps: Step[] };
 
 /** An element picked with the Select tool in the preview. */
 export interface SelectedElement {
@@ -40,11 +40,27 @@ function withElement(text: string, el: SelectedElement | null) {
   return `${text}${ELEMENT_MARK} — página ${el.path}]\nSelector: ${el.selector}\nTexto: ${el.text || "(sin texto)"}\nHTML: ${el.html}`;
 }
 
-function userItem(text: string): Item {
+const ATTACH = /\[\[adjunto:([^\]]+)\]\]/g;
+
+function userItem(raw: string): Item {
+  // Attachments are [[adjunto:path]] markers added by the server; show them as chips.
+  const attachments = [...raw.matchAll(ATTACH)].map((m) => m[1]!);
+  const text = raw.replace(ATTACH, "").trimEnd();
   const i = text.indexOf(ELEMENT_MARK);
-  if (i < 0) return { kind: "user", text };
+  if (i < 0) return { kind: "user", text, attachments };
   const selector = /Selector: (.*)/.exec(text.slice(i))?.[1] ?? "elemento";
-  return { kind: "user", text: text.slice(0, i), element: selector };
+  return { kind: "user", text: text.slice(0, i), element: selector, attachments };
+}
+
+const fileName = (path: string) => path.split("/").pop()!.replace(/^[a-z0-9]+-/, "");
+
+function readAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result));
+    r.onerror = () => reject(r.error);
+    r.readAsDataURL(file);
+  });
 }
 
 const TOOL_LABEL: Record<string, string> = {
@@ -176,6 +192,27 @@ export function Chat({
   const [items, setItems] = useState<Item[]>([]);
   const [live, setLive] = useState<Item[]>([]);
   const [input, setInput] = useState("");
+  const [attachments, setAttachments] = useState<string[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const fileInput = useRef<HTMLInputElement>(null);
+
+  const attach = async (files: FileList | null) => {
+    if (!files?.length) return;
+    setUploading(true);
+    setError("");
+    try {
+      for (const file of [...files].slice(0, 6)) {
+        if (file.size > 5 * 1024 * 1024) throw new Error(`${file.name} supera 5 MB`);
+        const r = await api<{ path: string }>(`/projects/${projectId}/attachments`, { body: { filename: file.name, dataUrl: await readAsDataUrl(file) } });
+        setAttachments((a) => [...a, r.path]);
+      }
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setUploading(false);
+      if (fileInput.current) fileInput.current.value = "";
+    }
+  };
   const [building, setBuilding] = useState(false);
   const [error, setError] = useState("");
   const logRef = useRef<HTMLDivElement>(null);
@@ -215,12 +252,14 @@ export function Chat({
     setError("");
     setBusy(true);
     const message = withElement(text, selection);
+    const files = attachments;
     onClearSelection();
-    const turn: Item[] = [userItem(message)];
+    setAttachments([]);
+    const turn: Item[] = [{ ...userItem(message), attachments: files } as Item];
     setLive([...turn]);
     const update = () => setLive([...turn]);
     try {
-      await streamPost(`/projects/${projectId}/chat`, { message }, (e) => {
+      await streamPost(`/projects/${projectId}/chat`, { message, attachments: files }, (e) => {
         if (e.type === "text") turn.push({ kind: "ai", text: e.text });
         else if (e.type === "tool_start") {
           const last = turn[turn.length - 1];
@@ -255,6 +294,11 @@ export function Chat({
         {all.map((it, i) =>
           it.kind === "user" ? (
             <div key={i} className="msg-user">
+              {it.attachments?.map((a) => (
+                <div key={a} className="small" style={{ opacity: 0.85, marginBottom: 4 }}>
+                  📎 {fileName(a)}
+                </div>
+              ))}
               {it.element && (
                 <div className="small" style={{ opacity: 0.85, marginBottom: 4 }}>
                   ⌖ {it.element}
@@ -278,6 +322,18 @@ export function Chat({
         {error && <div className="error-box">{error}</div>}
       </div>
       <div className="composer">
+        {attachments.length > 0 && (
+          <div className="row" style={{ flexWrap: "wrap", gap: 6 }}>
+            {attachments.map((a) => (
+              <span key={a} className="selection-chip" style={{ padding: "3px 8px" }}>
+                📎 {fileName(a)}
+                <button className="ghost sm icon-btn" style={{ height: 20, width: 20 }} aria-label={`Quitar ${fileName(a)}`} onClick={() => setAttachments((x) => x.filter((y) => y !== a))}>
+                  ×
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
         {selection && (
           <div className="selection-chip">
             ⌖ <code title={selection.html}>{selection.selector}</code>
@@ -305,9 +361,15 @@ export function Chat({
               Detener
             </button>
           ) : (
-            <button className="primary sm" disabled={!input.trim()} onClick={() => send(input)}>
-              <Send /> Enviar
-            </button>
+            <>
+              <input ref={fileInput} type="file" multiple hidden accept="image/*,.pdf,.txt,.md,.csv,.json,.svg" onChange={(e) => void attach(e.target.files)} />
+              <button className="sm ghost icon-btn" title="Adjuntar imágenes o archivos (logo, captura, CSV…)" aria-label="Adjuntar archivo" disabled={uploading} onClick={() => fileInput.current?.click()}>
+                {uploading ? <span className="spinner" /> : "📎"}
+              </button>
+              <button className="primary sm" disabled={!input.trim()} onClick={() => send(input)}>
+                <Send /> Enviar
+              </button>
+            </>
           )}
         </div>
       </div>

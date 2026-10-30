@@ -505,6 +505,91 @@ export function Collaborators({ projectId, onLeft }: { projectId: string; onLeft
   );
 }
 
+// --- Icon & appearance -------------------------------------------------------------------------
+
+const ICON_PATHS = ["static/icon.png", "static/icon.svg", "static/icon.webp", "static/icon.jpg"];
+const MIME_OF: Record<string, string> = { png: "image/png", svg: "image/svg+xml", webp: "image/webp", jpg: "image/jpeg" };
+
+/** The app's icon (favicon, home screen, manifest) and the installed app's theme color. */
+function AppearanceSection({ project, onChange }: { project: Project; onChange: () => void }) {
+  const [icon, setIcon] = useState<string | null>(null);
+  const [theme, setTheme] = useState(project.seo?.themeColor ?? "#ffffff");
+  const [error, setError] = useState("");
+  const input = useRef<HTMLInputElement>(null);
+  const load = async () => {
+    const files = (await api<{ files: { path: string }[] }>(`/projects/${project.id}/files`)).files.map((f) => f.path);
+    const path = ICON_PATHS.find((p) => files.includes(p));
+    if (!path) return setIcon(null);
+    const { content } = await api<{ content: string }>(`/projects/${project.id}/file?path=${encodeURIComponent(path)}`);
+    const mime = MIME_OF[path.split(".").pop()!]!;
+    setIcon(content.startsWith("base64:") ? `data:${mime};base64,${content.slice(7)}` : `data:${mime};charset=utf-8,${encodeURIComponent(content)}`);
+  };
+  useEffect(() => {
+    void load();
+  }, [project.id]);
+
+  return (
+    <section className="card section">
+      <h3>◈ Icono y apariencia</h3>
+      <div className="row-setting">
+        <div>
+          <strong>Icono de la app</strong>
+          <div className="small muted">Pestaña del navegador, pantalla de inicio del móvil y app instalable. PNG cuadrado de 512×512 o SVG.</div>
+        </div>
+        <div className="row">
+          <div style={{ width: 48, height: 48, borderRadius: 12, border: "1px solid var(--border)", display: "grid", placeItems: "center", overflow: "hidden", background: "var(--surface-2)" }}>
+            {icon ? <img src={icon} alt="Icono actual" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <span className="small muted">—</span>}
+          </div>
+          <input
+            ref={input}
+            type="file"
+            hidden
+            accept=".png,.svg,.webp,.jpg,.jpeg"
+            onChange={async (e) => {
+              const file = e.target.files?.[0];
+              if (!file) return;
+              setError("");
+              try {
+                const dataUrl = await new Promise<string>((res, rej) => {
+                  const r = new FileReader();
+                  r.onload = () => res(String(r.result));
+                  r.onerror = () => rej(r.error);
+                  r.readAsDataURL(file);
+                });
+                await api(`/projects/${project.id}/icon`, { body: { filename: file.name, dataUrl } });
+                await load();
+              } catch (err) {
+                setError((err as Error).message);
+              }
+            }}
+          />
+          <button onClick={() => input.current?.click()}>{icon ? "Cambiar" : "Subir icono"}</button>
+        </div>
+      </div>
+      <div className="row-setting">
+        <div>
+          <strong>Color del tema</strong>
+          <div className="small muted">Color de la barra del sistema cuando la app se instala en el móvil.</div>
+        </div>
+        <div className="row">
+          <input type="color" value={theme} onChange={(e) => setTheme(e.target.value)} style={{ width: 44, height: 34, padding: 2 }} aria-label="Color del tema" />
+          <button
+            disabled={theme === (project.seo?.themeColor ?? "#ffffff")}
+            onClick={async () => {
+              await api(`/projects/${project.id}`, { method: "PATCH", body: { seo: { ...project.seo, themeColor: theme } } });
+              onChange();
+            }}
+          >
+            Guardar
+          </button>
+        </div>
+      </div>
+      {project.appUrl && <div className="small muted">En el móvil, abre la app publicada y usa «Añadir a pantalla de inicio» para instalarla.</div>}
+      {error && <div className="error-box">{error}</div>}
+    </section>
+  );
+}
+
 // --- Project settings ------------------------------------------------------------------------
 
 export function ProjectSettings({ project, onChange }: { project: Project; onChange: () => void }) {
@@ -587,6 +672,8 @@ export function ProjectSettings({ project, onChange }: { project: Project; onCha
             </div>
           </div>
         </section>
+
+        <AppearanceSection project={project} onChange={onChange} />
 
         <section className="card section">
           <h3>✦ Instrucciones para la IA</h3>

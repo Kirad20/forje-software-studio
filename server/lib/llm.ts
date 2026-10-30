@@ -7,7 +7,8 @@ import { config } from "../config.js";
 export type Block =
   | { type: "text"; text: string }
   | { type: "tool_use"; id: string; name: string; input: Record<string, unknown> }
-  | { type: "tool_result"; tool_use_id: string; content: string; is_error?: boolean };
+  | { type: "tool_result"; tool_use_id: string; content: string; is_error?: boolean }
+  | { type: "image"; source: { type: "base64"; media_type: string; data: string } };
 
 export interface LlmMessage {
   role: "user" | "assistant";
@@ -82,9 +83,11 @@ async function anthropicChat(req: LlmRequest): Promise<LlmResponse> {
   };
 }
 
+type OpenAiPart = { type: "text"; text: string } | { type: "image_url"; image_url: { url: string } };
+
 interface OpenAiMessage {
   role: "system" | "user" | "assistant" | "tool";
-  content: string | null;
+  content: string | OpenAiPart[] | null;
   tool_calls?: { id: string; type: "function"; function: { name: string; arguments: string } }[];
   tool_call_id?: string;
 }
@@ -106,10 +109,16 @@ function toOpenAi(system: string | undefined, messages: LlmMessage[]): OpenAiMes
           : undefined,
       });
     } else {
-      for (const b of m.content) {
-        if (b.type === "tool_result") out.push({ role: "tool", tool_call_id: b.tool_use_id, content: b.content });
-        else if (b.type === "text") out.push({ role: "user", content: b.text });
-      }
+      for (const b of m.content) if (b.type === "tool_result") out.push({ role: "tool", tool_call_id: b.tool_use_id, content: b.content });
+      // Text and images of one user turn travel together, as OpenAI's content parts.
+      const parts = m.content.flatMap((b): OpenAiPart[] =>
+        b.type === "text"
+          ? [{ type: "text", text: b.text }]
+          : b.type === "image"
+            ? [{ type: "image_url", image_url: { url: `data:${b.source.media_type};base64,${b.source.data}` } }]
+            : [],
+      );
+      if (parts.length) out.push({ role: "user", content: parts.every((p) => p.type === "text") ? parts.map((p) => (p as { text: string }).text).join("\n") : parts });
     }
   }
   return out;
@@ -139,7 +148,7 @@ async function openaiChat(req: LlmRequest): Promise<LlmResponse> {
   };
   const msg = data.choices[0]!.message;
   const content: Block[] = [];
-  if (msg.content) content.push({ type: "text", text: msg.content });
+  if (typeof msg.content === "string" && msg.content) content.push({ type: "text", text: msg.content });
   for (const c of msg.tool_calls ?? []) {
     let input: Record<string, unknown> = {};
     try {
