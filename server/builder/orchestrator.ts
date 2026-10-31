@@ -10,7 +10,7 @@ import { imageBlocks, runAgent, save, UPLOADS, type AgentEvent, type AgentResult
 import { formatProblems, listProblems, recheckBuild, watchProblems } from "../platform/problems.js";
 import { holdSync, releaseSync } from "../platform/github.js";
 import { projectMap, selectContext } from "./index.js";
-import { FAST_EXCLUDED_TOOLS, MAX_STEPS, PLANNER_FILES, ROLE_PROMPTS, ROLE_TOOLS } from "./roles.js";
+import { FAST_EXCLUDED_TOOLS, FIRST_BUILD, MAX_STEPS, PLANNER_FILES, ROLE_PROMPTS, ROLE_TOOLS } from "./roles.js";
 import { builderTools, toolByName, type BuilderTool, type ToolContext } from "./tools.js";
 
 /**
@@ -306,14 +306,34 @@ async function runLane(
   }
 }
 
+/** Files handed to an agent up front, so it does not spend steps reading them. */
+const preloadSection = (files: Record<string, string>, paths: string[]) =>
+  paths.length ? `# Archivos relevantes (ya leídos; no hace falta volver a pedirlos)\n${paths.map((p) => `### ${p}\n\`\`\`\n${files[p]}\n\`\`\``).join("\n\n")}` : "";
+
+const isNewApp = (s: TurnState) => s.features.intent === "new_app";
+
 async function runFast(s: TurnState): Promise<void> {
   const ctx: ToolContext = { account: s.account, projectId: s.project.id, author: "builder" };
+  // Like the specialists: the map and the files the request most likely touches, already read.
+  const files = await readAllFiles(s.project.id);
+  const map = projectMap(files, await describeSchema(s.project.id, true));
+  // Words in the request pick most files; the request's kind adds the obvious ones.
+  const focus = isNewApp(s) ? ["pages/", "components/", "base.css"] : s.features.intent === "style" || s.features.domains.includes("ui") ? ["base.css"] : [];
+  const preload = selectContext(files, s.request, focus, 20_000);
   const r = await runLane(
     s,
     { id: "fast", role: "fast", goal: s.request.slice(0, 500), files: [], dependsOn: [] },
     {
       system: `${ROLE_PROMPTS.fast}\n\n${projectSection(s.project, s.account)}`,
-      messages: [{ role: "user", content: [{ type: "text", text: [s.context, `## Petición\n${s.request}`].filter(Boolean).join("\n\n") }, ...s.images] }],
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: [s.context, `## Petición\n${s.request}`, isNewApp(s) ? FIRST_BUILD : "", map, preloadSection(files, preload)].filter(Boolean).join("\n\n") },
+            ...s.images,
+          ],
+        },
+      ],
       tools: FAST_TOOLS,
       ctx,
       routing: { complexity: s.features.complexity, domains: s.features.domains, needsVision: s.features.needsVision },
@@ -443,7 +463,7 @@ async function runTeam(s: TurnState, opts: { given?: Plan; planOnly?: boolean } 
       messages: [
         {
           role: "user",
-          content: [{ type: "text", text: [s.context, `## Petición del dueño\n${s.request}`, map, "El mapa del proyecto ya está arriba: no llames a project_map. Planifica y llama a submit_plan."].filter(Boolean).join("\n\n") }, ...s.images],
+          content: [{ type: "text", text: [s.context, `## Petición del dueño\n${s.request}`, isNewApp(s) ? FIRST_BUILD : "", map, "El mapa del proyecto ya está arriba: no llames a project_map. Planifica y llama a submit_plan."].filter(Boolean).join("\n\n") }, ...s.images],
         },
       ],
       // In Plan mode nothing is written until the owner approves.
@@ -492,8 +512,9 @@ async function runTeam(s: TurnState, opts: { given?: Plan; planOnly?: boolean } 
       `# Plan del equipo\n${overview}`,
       extra,
       `# Petición original del dueño\n${s.request}`,
+      isNewApp(s) && !extra && t.role !== "backend" ? FIRST_BUILD : "",
       projectMap(current, await describeSchema(s.project.id, true)),
-      preload.length ? `# Archivos relevantes (ya leídos; no hace falta volver a pedirlos)\n${preload.map((p) => `### ${p}\n\`\`\`\n${current[p]}\n\`\`\``).join("\n\n")}` : "",
+      preloadSection(current, preload),
     ]
       .filter(Boolean)
       .join("\n\n");

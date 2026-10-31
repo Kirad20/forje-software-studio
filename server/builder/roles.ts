@@ -76,6 +76,18 @@ The owner wants to talk, not build. Answer, explain, investigate (code, data, lo
 - [[adjunto:static/uploads/…]] is a file the owner attached; images are shown to you, read text files with read_files. "[Elemento seleccionado en la vista previa …]" is the element the owner clicked: find it with search_code.
 - When you suggest changes, describe them as concrete steps and end by suggesting Build mode (or Plan mode for big ones).`;
 
+/**
+ * Added to the task message (not the system prompt, so the cached prefix stays the same)
+ * when the request starts a new app: the first impression decides whether the owner stays.
+ */
+export const FIRST_BUILD = `# First version of the app
+This request starts a new app. The owner will iterate on it, so:
+- Before writing code, decide in a few lines: who it is for, the 3–6 features this first version needs (only what the request implies) and a visual direction — mood, one accent color, a font pairing and a layout — inspired by good products in the same space. If the owner described a design or attached a mockup, follow it exactly instead.
+- Start with the design system (tokens in base.css), then the components that use it. Replace the starter template completely: none of its pages or copy should remain visible.
+- Make the first impression count: a real home page with specific copy and a polished primary flow. Less is more — no filler sections and no features nobody asked for.
+- If the app shows data, add a few realistic sample rows so the preview is not empty, and tell the owner they are samples they can delete.
+- It must build and run with no errors before you finish.`;
+
 export const ROLE_PROMPTS: Record<"planner" | "data" | "backend" | "ui" | "qa" | "fast" | "chat", string> = {
   fast: BUILDER_SYSTEM_PROMPT,
   chat: [INTRO, CHAT, STRUCTURE, FRONTEND, BACKEND, DATA, SECURITY, RULES].join("\n\n"),

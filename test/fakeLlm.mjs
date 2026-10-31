@@ -117,7 +117,10 @@ export function startFakeLlm() {
         return res.end(JSON.stringify({ error: { message: "overloaded" } }));
       }
       const { role, res: out } = script(body);
-      log.push({ model: body.model, role, at: Date.now() });
+      const first = body.messages?.find((m) => m.role === "user");
+      const text = typeof first?.content === "string" ? first.content : (first?.content ?? []).map((p) => p.text ?? "").join("\n");
+      // What the agent was handed up front, so tests can check the context it got.
+      log.push({ model: body.model, role, at: Date.now(), hasMap: text.includes("# Mapa del proyecto"), firstBuild: text.includes("# First version of the app"), preloaded: text.includes("# Archivos relevantes") });
       // Specialists take a while, so parallel lanes visibly overlap.
       const delay = ["data", "backend", "ui"].includes(role) ? 400 : 30;
       setTimeout(() => {

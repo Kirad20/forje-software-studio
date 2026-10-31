@@ -88,6 +88,38 @@ export function useRoute(): RouteMatch {
   return { path, params: {}, query: new URLSearchParams(search) };
 }
 
+/** Sets the page's <title>, meta description and canonical URL while the page is shown. */
+export function useHead(head: { title?: string; description?: string; canonical?: string }) {
+  const { title, description, canonical } = head;
+  useEffect(() => {
+    const prevTitle = document.title;
+    if (title) document.title = title;
+    const restore = [
+      setHeadTag("meta", "name", "description", "content", description),
+      setHeadTag("link", "rel", "canonical", "href", canonical && new URL(canonical, window.location.origin).href),
+    ];
+    return () => {
+      document.title = prevTitle;
+      restore.forEach((r) => r());
+    };
+  }, [title, description, canonical]);
+}
+
+/** Sets one attribute of a <meta>/<link> in <head> (creating it if needed); returns an undo. */
+function setHeadTag(tag: string, key: string, keyValue: string, attr: string, value: string | undefined): () => void {
+  if (!value) return () => {};
+  let el = document.head.querySelector<HTMLElement>(`${tag}[${key}="${keyValue}"]`);
+  const created = !el;
+  if (!el) {
+    el = document.createElement(tag);
+    el.setAttribute(key, keyValue);
+    document.head.appendChild(el);
+  }
+  const prev = el.getAttribute(attr);
+  el.setAttribute(attr, value);
+  return () => (created ? el!.remove() : prev === null ? el!.removeAttribute(attr) : el!.setAttribute(attr, prev));
+}
+
 export interface PageRoute {
   pattern: string;
   component: ComponentType;

@@ -121,6 +121,9 @@ try {
   const done = events.find((e) => e.type === "done");
   ok(done && done.usd > 0 && done.baselineUsd > done.usd && done.cachedTokens > 0, "turn reports cost, cache use and savings vs. the strongest model", JSON.stringify(done));
   ok(events.some((e) => e.type === "text" && !e.taskId && /notas/.test(e.text)), "a single final reply for the owner");
+  const teamCalls = llmLog.filter((l) => ["planner", "data", "backend", "ui"].includes(l.role));
+  ok(teamCalls.some((l) => l.role === "planner" && l.firstBuild) && teamCalls.some((l) => l.role === "ui" && l.firstBuild), "a new app gets the first-version guidance", JSON.stringify(teamCalls.map((l) => [l.role, l.firstBuild])));
+  ok(!teamCalls.some((l) => l.role === "backend" && l.firstBuild), "the backend does not get the design-only first-version guidance");
 
   // Lanes: backend and ui overlapped in time (they only depend on data).
   const chat = (await req("GET", `/api/projects/${project.id}/chat`)).json;
@@ -152,6 +155,8 @@ try {
   ok(fast.find((e) => e.type === "route")?.fastPath === true, "small change takes the fast path");
   ok(llmLog.slice(before).some((l) => l.model === "fake-flaky") && llmLog.slice(before).some((l) => l.model === "fake-mid" && l.role === "fast"), "a failing model falls back to the next one");
   ok(fast.some((e) => e.type === "text" && /verde/.test(e.text)) && !fast.some((e) => e.type === "error"), "the fast agent finished the change", JSON.stringify(fast.filter((e) => e.type === "error")));
+  const fastCall = llmLog.slice(before).find((l) => l.role === "fast");
+  ok(fastCall?.hasMap && fastCall.preloaded && !fastCall.firstBuild, "the fast agent gets the project map and the relevant files up front", JSON.stringify(fastCall));
   const fastRouter = (await req("GET", `/api/projects/${project.id}/router`)).json;
   ok(fastRouter.decisions.slice(0, 3).some((d) => d.modelId === "openai:fake-mid"), "fallback decision is logged");
 
