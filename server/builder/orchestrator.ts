@@ -10,7 +10,7 @@ import { imageBlocks, runAgent, save, UPLOADS, type AgentEvent, type AgentResult
 import { formatProblems, listProblems, recheckBuild, watchProblems } from "../platform/problems.js";
 import { holdSync, releaseSync } from "../platform/github.js";
 import { projectMap, selectContext } from "./index.js";
-import { MAX_STEPS, PLANNER_FILES, ROLE_PROMPTS, ROLE_TOOLS } from "./roles.js";
+import { FAST_EXCLUDED_TOOLS, MAX_STEPS, PLANNER_FILES, ROLE_PROMPTS, ROLE_TOOLS } from "./roles.js";
 import { builderTools, toolByName, type BuilderTool, type ToolContext } from "./tools.js";
 
 /**
@@ -45,6 +45,7 @@ interface Review {
 
 const RECENT_TURNS = 4;
 const tools = (names: string[]) => names.map((n) => toolByName.get(n)).filter((t): t is BuilderTool => !!t);
+const FAST_TOOLS = builderTools.filter((t) => !FAST_EXCLUDED_TOOLS.includes(t.name));
 
 // --- Context per turn: a rolling summary + the last few exchanges (text only) -----------------------
 
@@ -261,7 +262,14 @@ async function finishTask(s: TurnState, taskId: string, r: AgentResult | Error) 
 async function runLane(
   s: TurnState,
   task: { id: string; role: Role; goal: string; files: string[]; dependsOn: string[] },
-  spec: { system: string; messages: LlmMessage[]; tools: BuilderTool[]; ctx: ToolContext; routing: { complexity: number; domains: string[]; needsVision: boolean } },
+  spec: {
+    system: string;
+    messages: LlmMessage[];
+    tools: BuilderTool[];
+    ctx: ToolContext;
+    routing: { complexity: number; domains: string[]; needsVision: boolean };
+    requiredTool?: string;
+  },
 ): Promise<AgentResult> {
   await insertTask(s, task);
   try {
@@ -270,6 +278,7 @@ async function runLane(
       billing: s.billing,
       role: task.role,
       routing: spec.routing,
+      requiredTool: spec.requiredTool,
       system: spec.system,
       messages: spec.messages,
       tools: spec.tools,
@@ -305,7 +314,7 @@ async function runFast(s: TurnState): Promise<void> {
     {
       system: `${ROLE_PROMPTS.fast}\n\n${projectSection(s.project, s.account)}`,
       messages: [{ role: "user", content: [{ type: "text", text: [s.context, `## Petición\n${s.request}`].filter(Boolean).join("\n\n") }, ...s.images] }],
-      tools: builderTools,
+      tools: FAST_TOOLS,
       ctx,
       routing: { complexity: s.features.complexity, domains: s.features.domains, needsVision: s.features.needsVision },
     },
@@ -328,7 +337,7 @@ async function runFast(s: TurnState): Promise<void> {
             content: `## Petición del dueño (ya hecha)\n${s.request}\n\n## Lo que hiciste\n${reply}\n\n## La app ya no compila\n${formatProblems(broken)}\n\nArregla la causa con el menor cambio posible y comprueba con get_problems. Responde en una o dos frases qué arreglaste.`,
           },
         ],
-        tools: builderTools,
+        tools: FAST_TOOLS,
         ctx: fixCtx,
         routing: { complexity: 2, domains: s.features.domains, needsVision: false },
       },
@@ -341,12 +350,6 @@ async function runFast(s: TurnState): Promise<void> {
   if (reply !== (r.text || "Listo.")) s.emit({ type: "text", text: reply.slice((r.text || "Listo.").length).trim() });
 }
 
-/**
- * The team path. `given` is a plan approved earlier in Plan mode (no re-planning);
- * `planOnly` stops after planning so the owner can review the plan first.
- */
-const CHAT_TOOLS = ["project_map", "read_files", "find_symbol", "related_files", "search_code", "describe_database", "query_database", "get_problems", "get_logs", "list_secrets", "fetch_url"];
-
 /** Chat mode: answers, explains and investigates with read-only tools; changes nothing. */
 async function runChat(s: TurnState): Promise<void> {
   const ctx: ToolContext = { account: s.account, projectId: s.project.id, author: "builder" };
@@ -354,9 +357,9 @@ async function runChat(s: TurnState): Promise<void> {
     s,
     { id: "chat", role: "chat", goal: s.request.slice(0, 500), files: [], dependsOn: [] },
     {
-      system: `${ROLE_PROMPTS.fast}\n\n# Chat mode\nThe owner wants to talk, not build: answer, explain, investigate (code, data, logs, problems) and propose. You cannot change files or data in this mode. When you suggest changes, describe them as concrete steps and end by suggesting Build mode (or Plan mode for big ones). Keep answers short and in the owner's language.\n\n${projectSection(s.project, s.account)}`,
+      system: `${ROLE_PROMPTS.chat}\n\n${projectSection(s.project, s.account)}`,
       messages: [{ role: "user", content: [{ type: "text", text: [s.context, `## Pregunta\n${s.request}`].filter(Boolean).join("\n\n") }, ...s.images] }],
-      tools: tools(CHAT_TOOLS),
+      tools: tools(ROLE_TOOLS.chat),
       ctx,
       routing: { complexity: Math.min(3, s.features.complexity), domains: s.features.domains, needsVision: s.features.needsVision },
     },
@@ -380,6 +383,10 @@ export async function pendingPlan(projectId: string): Promise<{ turnId: string; 
   return row ? { turnId: row.turn_id, plan: row.plan } : null;
 }
 
+/**
+ * The team path. `given` is a plan approved earlier in Plan mode (no re-planning);
+ * `planOnly` stops after planning so the owner can review the plan first.
+ */
 async function runTeam(s: TurnState, opts: { given?: Plan; planOnly?: boolean } = {}): Promise<boolean> {
   const files = await readAllFiles(s.project.id);
   const map = projectMap(files, await describeSchema(s.project.id, true));
@@ -389,22 +396,30 @@ async function runTeam(s: TurnState, opts: { given?: Plan; planOnly?: boolean } 
   let plan: Plan | null = opts.given ?? null;
   const submitPlan: BuilderTool = {
     name: "submit_plan",
-    description: "Entrega el plan final (una sola vez). tasks: 1–6 tareas con id, role (data|backend|ui), goal, files (rutas exactas o carpetas terminadas en /) y depends_on.",
+    description: "Entrega el plan final, una sola vez y al terminar de planificar. Es la única forma de que el equipo empiece a trabajar.",
     input_schema: {
       type: "object",
       properties: {
         summary: { type: "string", description: "Para el dueño, en su idioma: qué se va a construir (2–4 frases)." },
-        contract: { type: "string", description: "Contrato compartido: endpoints (método, ruta, entrada, salida), tablas y columnas, tipos." },
+        contract: {
+          type: "string",
+          description: "Contrato compartido, completo: cada endpoint (método, ruta, JSON de entrada y de salida), cada tabla con sus columnas y tipos, y los nombres de los tipos compartidos.",
+        },
         tasks: {
           type: "array",
+          description: "De 1 a 6 tareas; menos es mejor.",
           items: {
             type: "object",
             properties: {
-              id: { type: "string" },
-              role: { type: "string", enum: ["data", "backend", "ui"] },
-              goal: { type: "string" },
-              files: { type: "array", items: { type: "string" } },
-              depends_on: { type: "array", items: { type: "string" } },
+              id: { type: "string", description: "Identificador corto y único, p. ej. db, api, pages." },
+              role: { type: "string", enum: ["data", "backend", "ui"], description: "Especialista que hace la tarea." },
+              goal: { type: "string", description: "Qué tiene que construir, con el detalle suficiente para hacerlo sin preguntar." },
+              files: {
+                type: "array",
+                items: { type: "string" },
+                description: 'Archivos que solo esta tarea puede escribir: rutas exactas o carpetas terminadas en "/". Dos tareas nunca comparten un archivo.',
+              },
+              depends_on: { type: "array", items: { type: "string" }, description: "ids de las tareas que deben terminar antes (las de datos van primero)." },
             },
             required: ["id", "role", "goal", "files"],
           },
@@ -428,12 +443,13 @@ async function runTeam(s: TurnState, opts: { given?: Plan; planOnly?: boolean } 
       messages: [
         {
           role: "user",
-          content: [{ type: "text", text: [s.context, `## Petición del dueño\n${s.request}`, map, "Planifica y llama a submit_plan."].filter(Boolean).join("\n\n") }, ...s.images],
+          content: [{ type: "text", text: [s.context, `## Petición del dueño\n${s.request}`, map, "El mapa del proyecto ya está arriba: no llames a project_map. Planifica y llama a submit_plan."].filter(Boolean).join("\n\n") }, ...s.images],
         },
       ],
       // In Plan mode nothing is written until the owner approves.
       tools: [...tools(opts.planOnly ? ROLE_TOOLS.planner.filter((n) => !/write|edit/.test(n)) : ROLE_TOOLS.planner), submitPlan],
       ctx: plannerCtx,
+      requiredTool: "submit_plan",
       routing: { complexity: s.features.complexity, domains: s.features.domains, needsVision: s.features.needsVision },
     },
   );
@@ -500,17 +516,23 @@ async function runTeam(s: TurnState, opts: { given?: Plan; planOnly?: boolean } 
     let got: Review | null = null;
     const reportReview: BuilderTool = {
       name: "report_review",
-      description: "Entrega el veredicto (una sola vez): ok, summary y issues (role data|backend|ui, files, problem, fix).",
+      description: "Entrega el veredicto de la revisión, una sola vez y al terminar de revisar.",
       input_schema: {
         type: "object",
         properties: {
-          ok: { type: "boolean" },
-          summary: { type: "string" },
+          ok: { type: "boolean", description: "true solo si compila, los endpoints responden bien y no hay problemas de seguridad. Si es false, issues no puede ir vacío." },
+          summary: { type: "string", description: "Qué se comprobó y qué se encontró, en 1–3 frases." },
           issues: {
             type: "array",
+            description: "Solo defectos reales, uno por problema.",
             items: {
               type: "object",
-              properties: { role: { type: "string", enum: ["data", "backend", "ui"] }, files: { type: "array", items: { type: "string" } }, problem: { type: "string" }, fix: { type: "string" } },
+              properties: {
+                role: { type: "string", enum: ["data", "backend", "ui"], description: "Especialista que debe arreglarlo." },
+                files: { type: "array", items: { type: "string" }, description: "Archivos afectados." },
+                problem: { type: "string", description: "Qué está mal y cómo se nota." },
+                fix: { type: "string", description: "Cómo arreglarlo, en concreto." },
+              },
               required: ["role", "problem"],
             },
           },
@@ -519,6 +541,7 @@ async function runTeam(s: TurnState, opts: { given?: Plan; planOnly?: boolean } 
       },
       async run(input) {
         const i = input as Review;
+        if (!i.ok && !(Array.isArray(i.issues) && i.issues.length)) throw new Error("Con ok=false hace falta al menos un issue (role, problem, fix). Vuelve a llamar a report_review.");
         got = {
           ok: !!i.ok,
           summary: String(i.summary ?? ""),
@@ -528,7 +551,7 @@ async function runTeam(s: TurnState, opts: { given?: Plan; planOnly?: boolean } 
       },
     };
     const reports = [...results.entries(), ...fixResults.map((f) => [f.task.id, f.result] as const)]
-      .map(([id, r]) => `## ${id}\n${r instanceof Error ? `FALLÓ: ${r.message}` : r.text.slice(0, 2500)}`)
+      .map(([id, r]) => `## ${id}\n${r instanceof Error ? `FALLÓ: ${r.message}` : `Archivos tocados: ${r.written.join(", ") || "ninguno"}\n${r.text.slice(0, 2500)}`}`)
       .join("\n\n");
     await runLane(
       s,
@@ -543,6 +566,7 @@ async function runTeam(s: TurnState, opts: { given?: Plan; planOnly?: boolean } 
         ],
         tools: [...tools(ROLE_TOOLS.qa), reportReview],
         ctx: { account: s.account, projectId: s.project.id, author: "builder", owned: [] },
+        requiredTool: "report_review",
         routing: { complexity: s.features.complexity, domains: s.features.domains, needsVision: false },
       },
     ).catch(() => null);
