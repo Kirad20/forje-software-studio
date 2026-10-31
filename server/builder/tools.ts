@@ -151,21 +151,39 @@ export const builderTools: BuilderTool[] = [
   {
     name: "edit_file",
     description:
-      "Reemplaza un fragmento exacto de un archivo. old_text debe aparecer una sola vez (o usa replace_all). Úsalo para cambios pequeños en archivos grandes.",
+      'Reemplaza fragmentos exactos de un archivo existente. Un cambio: old_text + new_text. Varios cambios en el mismo archivo: "edits", en una sola llamada; se aplican en orden y, si uno falla, no se guarda ninguno. Cada old_text debe aparecer una sola vez (o usa replace_all).',
     input_schema: obj(
-      { path: str("Ruta"), old_text: str("Texto exacto a reemplazar"), new_text: str("Texto nuevo"), replace_all: { type: "boolean" } },
-      ["path", "old_text", "new_text"],
+      {
+        path: str("Ruta"),
+        old_text: str("Texto exacto a reemplazar (para un solo cambio)"),
+        new_text: str("Texto nuevo (para un solo cambio)"),
+        replace_all: { type: "boolean", description: "Reemplazar todas las apariciones de old_text, no solo una" },
+        edits: {
+          type: "array",
+          description: "Varios cambios en orden, en lugar de old_text/new_text",
+          items: obj({ old_text: str("Texto exacto a reemplazar"), new_text: str("Texto nuevo"), replace_all: { type: "boolean", description: "Reemplazar todas las apariciones" } }, ["old_text", "new_text"]),
+        },
+      },
+      ["path"],
     ),
-    async run(i: { path: string; old_text: string; new_text: string; replace_all?: boolean }, ctx) {
+    async run(i: { path: string; old_text?: string; new_text?: string; replace_all?: boolean; edits?: { old_text: string; new_text: string; replace_all?: boolean }[] }, ctx) {
       assertOwned(ctx, i.path);
-      const c = await projects.readFile(ctx.projectId, i.path);
+      const edits = i.edits?.length ? i.edits : i.old_text !== undefined && i.new_text !== undefined ? [{ old_text: i.old_text, new_text: i.new_text, replace_all: i.replace_all }] : [];
+      if (!edits.length) throw new Error("Hace falta old_text y new_text, o una lista edits.");
+      let c = await projects.readFile(ctx.projectId, i.path);
       if (c === undefined) throw new Error(`No existe ${i.path}`);
-      const count = c.split(i.old_text).length - 1;
-      if (count === 0) throw new Error("old_text no aparece en el archivo. Lee el archivo y vuelve a intentarlo con el texto exacto.");
-      if (count > 1 && !i.replace_all) throw new Error(`old_text aparece ${count} veces; añade contexto o usa replace_all.`);
-      await projects.writeFile(ctx.projectId, i.path, i.replace_all ? c.split(i.old_text).join(i.new_text) : c.replace(i.old_text, () => i.new_text), ctx.author, ctx.actor);
+      let total = 0;
+      for (const [n, e] of edits.entries()) {
+        const which = edits.length > 1 ? ` (cambio ${n + 1})` : "";
+        const count = e.old_text ? c.split(e.old_text).length - 1 : 0;
+        if (count === 0) throw new Error(`old_text${which} no aparece en el archivo. Lee el archivo y vuelve a intentarlo con el texto exacto. No se guardó nada.`);
+        if (count > 1 && !e.replace_all) throw new Error(`old_text${which} aparece ${count} veces; añade contexto o usa replace_all. No se guardó nada.`);
+        c = e.replace_all ? c.split(e.old_text).join(e.new_text) : c.replace(e.old_text, () => e.new_text);
+        total += e.replace_all ? count : 1;
+      }
+      await projects.writeFile(ctx.projectId, i.path, c, ctx.author, ctx.actor);
       noteWrite(ctx, i.path);
-      return `Editado ${i.path} (${count} reemplazo${count > 1 ? "s" : ""})`;
+      return `Editado ${i.path} (${total} reemplazo${total > 1 ? "s" : ""})`;
     },
   },
   {
@@ -195,7 +213,7 @@ export const builderTools: BuilderTool[] = [
     name: "search_code",
     description: "Busca un texto o expresión regular en todos los archivos del proyecto y devuelve las líneas que coinciden (archivo:línea).",
     input_schema: obj(
-      { pattern: str("Texto o regex (sin barras)"), path_prefix: str("Limitar a rutas que empiecen así, p. ej. endpoints/"), ignore_case: { type: "boolean" } },
+      { pattern: str("Texto o regex (sin barras)"), path_prefix: str("Limitar a rutas que empiecen así, p. ej. endpoints/"), ignore_case: { type: "boolean", description: "Sin distinguir mayúsculas" } },
       ["pattern"],
     ),
     async run(i: { pattern: string; path_prefix?: string; ignore_case?: boolean }, ctx) {
@@ -221,10 +239,10 @@ export const builderTools: BuilderTool[] = [
       "Llama a un endpoint de la vista previa para comprobar que funciona, como visitante anónimo o como un usuario existente (as_user_email). Devuelve el estado HTTP y el cuerpo. Usa datos reales: no lo uses para borrar datos del dueño.",
     input_schema: obj(
       {
-        method: { type: "string", enum: ["GET", "POST"] },
+        method: { type: "string", enum: ["GET", "POST"], description: "GET para lecturas, POST para escrituras" },
         route: str("Ruta del endpoint sin /_api/, p. ej. todos/list"),
-        query: { type: "object", description: "Parámetros de la URL (GET)" },
-        body: { type: "object", description: "Cuerpo JSON (POST)" },
+        query: { type: "object", additionalProperties: true, description: 'Parámetros de la URL para GET, p. ej. {"q": "pan"}' },
+        body: { type: "object", additionalProperties: true, description: 'Cuerpo JSON para POST, p. ej. {"title": "Prueba"}' },
         as_user_email: str("Correo de un usuario de la app para llamar con su sesión"),
       },
       ["method", "route"],
@@ -339,7 +357,10 @@ export const builderTools: BuilderTool[] = [
     name: "get_logs",
     description:
       "Lee los registros recientes: peticiones a endpoints, errores del servidor, errores de la consola del navegador de la vista previa, correos y tareas. Primer paso ante un 500 o una pantalla en blanco.",
-    input_schema: obj({ errors_only: { type: "boolean" }, limit: { type: "number" } }),
+    input_schema: obj({
+      errors_only: { type: "boolean", description: "Solo errores" },
+      limit: { type: "integer", description: "Cuántas entradas, las más recientes (por defecto 60)" },
+    }),
     async run(i: { errors_only?: boolean; limit?: number }, ctx) {
       const logs = readLogs(ctx.projectId, { level: i.errors_only ? "error" : undefined, limit: i.limit ?? 60 });
       return clip(logs.map((l) => `${l.at} [${l.env}/${l.source}/${l.level}] ${l.message}`).join("\n") || "Sin registros.");
@@ -399,7 +420,7 @@ export const builderTools: BuilderTool[] = [
   {
     name: "run_job",
     description: "Ejecuta una tarea de jobs/<nombre>.ts una vez, ahora, con el código actual (sobre los datos reales).",
-    input_schema: obj({ name: str("Nombre de la tarea"), payload: { description: "Datos para ctx.payload" } }, ["name"]),
+    input_schema: obj({ name: str("Nombre de la tarea"), payload: { type: "object", additionalProperties: true, description: "Datos para ctx.payload (opcional)" } }, ["name"]),
     async run(i: { name: string; payload?: unknown }, ctx) {
       await runJob(ctx.projectId, "preview", i.name, i.payload ?? null, "manual");
       return `Tarea ${i.name} terminada. Revisa get_logs para su salida.`;
