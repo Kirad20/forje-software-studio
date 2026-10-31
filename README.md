@@ -40,13 +40,14 @@ apps generadas ──▶  pv-<id>.localhost   (vista previa, enlace con token)
 - **Modos del chat**: *Construir* (cambia la app), *Chat* (pregunta e investiga con herramientas de solo lectura, modelo barato) y *Plan* (el planificador prepara un plan que se revisa y se lanza con «Implementar plan», sin volver a planificar). Los mensajes escritos mientras trabaja se ponen en cola.
 - **GitHub** (`platform/github.ts`): sincronización en los dos sentidos solo con la API REST (sin git ni disco). Cada turno del constructor se sube como un commit con el nombre de la petición; otras ediciones, a los pocos segundos. Los commits hechos fuera entran al proyecto (por webhook firmado o consultando cada minuto) y aparecen en el chat con su resultado de compilación y «Intentar arreglar» si fallan. Solo se sincronizan las carpetas del proyecto; el resto del repositorio (README, CI…) no se toca. La cuenta se conecta con OAuth o con un token personal guardado cifrado.
 - **SDK**: el navegador usa `@forja/client` (router, `api`, `useApi`, `auth`, `storage`, `realtime`, `ai`); los endpoints y tareas reciben `ctx` (`db`, `user`, `storage`, `email`, `ai`, `jobs`, `realtime`, `payments`, `env`). El manual completo que lee el agente está en `server/builder/prompt.ts`.
+- **Paquetes npm** (`runtime/deps.ts`): además de `react`, `react-dom` y `zod`, cada app puede usar cualquier paquete de npm. El agente lo añade con `add_dependency`, que fija la versión exacta en el `package.json` del proyecto y lo instala sin ejecutar scripts. Cada conjunto de dependencias se instala una sola vez en `node_modules/.forja-deps/<hash>` y lo comparten todos los proyectos que lo usen. El navegador recibe los paquetes empaquetados, siempre con una única copia de React; los endpoints los cargan desde esa carpeta, dentro del entorno aislado. Importar un paquete sin instalarlo da un error de compilación. `FORJA_NPM=0` lo desactiva y `FORJA_NPM_REGISTRY` cambia el registro.
 
 ## Paridad con Floot
 
 | Floot | Forja | Estado |
 | --- | --- | --- |
 | Chat que construye la app, preview en vivo | Chat del studio + iframe con recarga en vivo | ✅ |
-| Conector MCP para Claude/ChatGPT/Cursor | `/mcp` Streamable HTTP, token Bearer, 22 herramientas | ✅ |
+| Conector MCP para Claude/ChatGPT/Cursor | `/mcp` Streamable HTTP, token Bearer, las mismas herramientas que el constructor | ✅ |
 | Postgres gestionado que se duerme | PGlite por proyecto, duerme a los 60 s | ✅ (embebido, no Neon) |
 | Pestaña Data: navegar, SQL, exportar | Datos: tablas, consola SQL, exportar | ✅ (export = tar del data dir, no pg_dump) |
 | Auth email/contraseña, bloqueo, reset con código de 8 dígitos, admin del dueño | Igual | ✅ |
@@ -75,4 +76,4 @@ El recorrido completo de la interfaz de Floot y qué se replicó está en [docs/
 - El código de los endpoints corre **dentro del proceso** de la plataforma: sirve para uso local o de confianza, no para alojar apps de terceros. Para multi-inquilino real hace falta aislar (contenedor o `isolated-vm` por app).
 - `check_build` detecta errores de sintaxis y de imports (esbuild), no errores de tipos.
 - Los registros viven en memoria (500 por proyecto) y se pierden al reiniciar.
-- Solo están instalados `react`, `react-dom` y `zod` para las apps generadas.
+- Los paquetes con código nativo o que necesitan scripts de instalación no funcionan (los scripts nunca se ejecutan). `check_build` no comprueba los tipos de los paquetes.

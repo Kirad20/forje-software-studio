@@ -8,6 +8,7 @@ import type { Account } from "../platform/accounts.js";
 import { readLogs } from "../platform/events.js";
 import * as projects from "../platform/projects.js";
 import { formatProblems, listProblems, recheckBuild, watchProblems } from "../platform/problems.js";
+import { ensureDeps, MANIFEST, readDeps, resolvePackage, withManifestLock, writeDeps } from "../runtime/deps.js";
 import { checkProject, compileServerModule, endpointRoutes, formatProblem, jobFiles, pageRoutes } from "../runtime/bundler.js";
 import { runInSandbox } from "../runtime/sandbox.js";
 import { publishProject } from "../runtime/publish.js";
@@ -189,6 +190,53 @@ export const builderTools: BuilderTool[] = [
       await projects.renameFile(ctx.projectId, i.from, i.to, ctx.author);
       noteWrite(ctx, i.from, i.to);
       return `Movido ${i.from} → ${i.to}`;
+    },
+  },
+  {
+    name: "add_dependency",
+    description:
+      "Instala un paquete de npm para la app (navegador o endpoints): fija la versión exacta en package.json y lo instala sin ejecutar scripts. Hazlo antes de importarlo. react, react-dom, zod y @forja/client ya vienen incluidos. Elige paquetes pequeños y conocidos; no instales nada que se resuelva con unas pocas líneas.",
+    input_schema: obj(
+      {
+        name: str("Nombre en npm, p. ej. date-fns o @tanstack/react-table"),
+        version: str("Versión exacta (3.6.0) o etiqueta (latest). Por defecto, la última."),
+      },
+      ["name"],
+    ),
+    async run(i: { name: string; version?: string }, ctx) {
+      const pkg = await resolvePackage(i.name.trim(), i.version?.trim() || undefined);
+      // package.json is shared by every agent of the turn: this tool may edit it whoever owns it.
+      const before = await withManifestLock(ctx.projectId, async () => {
+        const files = await projects.readAllFiles(ctx.projectId);
+        const deps = readDeps(files);
+        const prev = deps[pkg.name];
+        const next = { ...deps, [pkg.name]: pkg.version };
+        await ensureDeps(next);
+        await projects.writeFile(ctx.projectId, MANIFEST, writeDeps(files, next), ctx.author, ctx.actor);
+        noteWrite(ctx, MANIFEST);
+        return prev;
+      });
+      return [
+        `${before ? `Actualizado ${pkg.name} ${before} → ${pkg.version}` : `Instalado ${pkg.name}@${pkg.version}`}${pkg.description ? ` — ${pkg.description}` : ""}.`,
+        `Impórtalo con import … from "${pkg.name}".`,
+        ...pkg.warnings.map((w) => `Aviso: ${w}`),
+      ].join("\n");
+    },
+  },
+  {
+    name: "remove_dependency",
+    description: "Quita un paquete de npm de package.json. Antes elimina sus imports, o la compilación fallará.",
+    input_schema: obj({ name: str("Nombre del paquete") }, ["name"]),
+    async run(i: { name: string }, ctx) {
+      return withManifestLock(ctx.projectId, async () => {
+        const files = await projects.readAllFiles(ctx.projectId);
+        const deps = readDeps(files);
+        if (!(i.name in deps)) return `${i.name} no estaba instalado. Paquetes: ${Object.keys(deps).join(", ") || "ninguno"}.`;
+        delete deps[i.name];
+        await projects.writeFile(ctx.projectId, MANIFEST, writeDeps(files, deps), ctx.author, ctx.actor);
+        noteWrite(ctx, MANIFEST);
+        return `Quitado ${i.name}.`;
+      });
     },
   },
   {

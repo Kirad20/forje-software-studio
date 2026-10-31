@@ -74,6 +74,8 @@ export const ROLE_TOOLS: Record<"planner" | "data" | "backend" | "ui" | "qa", st
     "edit_file",
     "delete_file",
     "rename_file",
+    "add_dependency",
+    "remove_dependency",
     "check_build",
     "get_problems",
     "run_tests",
@@ -84,7 +86,7 @@ export const ROLE_TOOLS: Record<"planner" | "data" | "backend" | "ui" | "qa", st
     "setup_auth",
     "fetch_url",
   ],
-  ui: ["project_map", "read_files", "find_symbol", "related_files", "search_code", "write_file", "edit_file", "delete_file", "rename_file", "check_build", "get_problems", "get_logs", "call_endpoint"],
+  ui: ["project_map", "read_files", "find_symbol", "related_files", "search_code", "write_file", "edit_file", "delete_file", "rename_file", "add_dependency", "remove_dependency", "check_build", "get_problems", "get_logs", "call_endpoint"],
   qa: ["project_map", "read_files", "find_symbol", "related_files", "search_code", "describe_database", "query_database", "check_build", "get_problems", "run_tests", "call_endpoint", "get_logs"],
 };
 
