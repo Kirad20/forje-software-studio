@@ -13,8 +13,8 @@ Prioridad de lo que falta: **P1** núcleo del constructor (más valor, se apoya 
 | 30-oct-2026 | Ronda 1 · 1: paquetes npm (`add_dependency`, `remove_dependency`, `package.json` por proyecto) | Kirad20/clone-repos#51 |
 | 30-oct-2026 | Prompt y contexto: archivos relevantes precargados, guía de primera versión, reglas de alcance, diseño y SEO, `useHead` | Kirad20/clone-repos#51 |
 | 30-oct-2026 | Ronda 1 · 2: pruebas en navegador (`browser_test`) | Kirad20/clone-repos#52 |
-| 31-oct-2026 | CI en GitHub (`forja-ci`: tipos, unidad, build, e2e y agentes con Chromium) e imagen Docker que se construye y arranca en CI | pendiente |
-| 31-oct-2026 | Ronda 1 · 3: escaneo de seguridad (rápido al publicar, revisión profunda con un agente, vista Seguridad, `security_scan`) | pendiente |
+| 31-oct-2026 | CI en GitHub (`forja-ci`: tipos, unidad, build, e2e y agentes con Chromium) e imagen Docker que se construye y arranca en CI | Kirad20/clone-repos#53 |
+| 31-oct-2026 | Ronda 1 · 3: escaneo de seguridad (rápido al publicar, revisión profunda con un agente, vista Seguridad, `security_scan`) | Kirad20/clone-repos#53 |
 
 Siguiente: Ronda 1 · 4, memoria de proyecto.
 
