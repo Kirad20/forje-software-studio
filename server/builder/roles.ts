@@ -21,6 +21,7 @@ const SIGNIN = section("Sign-in");
 const DESIGN = section("Design");
 const CHECKLIST = section("Before you finish");
 const RULES = section("Rules");
+const MEMORY = section("Memory");
 
 /** The sign-in section with only the bullet for one side ("Server" or "Pages"). */
 const signIn = (side: "Server" | "Pages") =>
@@ -99,8 +100,8 @@ This request starts a new app. The owner will iterate on it, so:
 export const ROLE_PROMPTS: Record<"planner" | "data" | "backend" | "ui" | "qa" | "fast" | "chat" | "security", string> = {
   security: [INTRO, SECURITY_REVIEW, STRUCTURE, BACKEND, DATA, SECURITY, signIn("Server"), RULES].join("\n\n"),
   fast: BUILDER_SYSTEM_PROMPT,
-  chat: [INTRO, CHAT, STRUCTURE, FRONTEND, BACKEND, DATA, SECURITY, RULES].join("\n\n"),
-  planner: [INTRO, PLANNER, STRUCTURE, DATA, SECURITY, RULES].join("\n\n"),
+  chat: [INTRO, CHAT, MEMORY, STRUCTURE, FRONTEND, BACKEND, DATA, SECURITY, RULES].join("\n\n"),
+  planner: [INTRO, PLANNER, MEMORY, STRUCTURE, DATA, SECURITY, RULES].join("\n\n"),
   data: [INTRO, TEAM, DATA_ROLE, STRUCTURE, DATA, SECURITY, RULES].join("\n\n"),
   backend: [INTRO, TEAM, BACKEND_ROLE, STRUCTURE, BACKEND, DATA, SECURITY, JOBS, signIn("Server"), RULES].join("\n\n"),
   ui: [INTRO, TEAM, UI_ROLE, STRUCTURE, FRONTEND, signIn("Pages"), DESIGN, RULES].join("\n\n"),
@@ -113,7 +114,7 @@ export { TALK, WORK };
 /** Tools each role may use; special tools (submit_plan, report_review) are added by the orchestrator. */
 export const ROLE_TOOLS: Record<"planner" | "data" | "backend" | "ui" | "qa" | "chat" | "security", string[]> = {
   security: ["project_map", "read_files", "find_symbol", "related_files", "search_code", "describe_database", "security_scan"],
-  planner: ["read_files", "find_symbol", "related_files", "search_code", "describe_database", "fetch_url", "write_file", "edit_file"],
+  planner: ["read_files", "find_symbol", "related_files", "search_code", "describe_database", "fetch_url", "write_file", "edit_file", "remember", "forget"],
   data: ["project_map", "read_files", "find_symbol", "search_code", "describe_database", "execute_sql", "query_database", "write_file", "edit_file", "check_build", "get_problems", "run_tests"],
   backend: [
     "project_map",
@@ -143,7 +144,7 @@ export const ROLE_TOOLS: Record<"planner" | "data" | "backend" | "ui" | "qa" | "
   ],
   ui: ["project_map", "read_files", "find_symbol", "related_files", "search_code", "write_file", "edit_file", "delete_file", "rename_file", "add_dependency", "remove_dependency", "check_build", "get_problems", "get_logs", "call_endpoint", "browser_test"],
   qa: ["project_map", "read_files", "find_symbol", "related_files", "search_code", "describe_database", "query_database", "check_build", "get_problems", "run_tests", "call_endpoint", "browser_test", "security_scan", "get_logs"],
-  chat: ["project_map", "read_files", "find_symbol", "related_files", "search_code", "describe_database", "query_database", "get_problems", "get_logs", "list_secrets", "security_scan", "fetch_url"],
+  chat: ["project_map", "read_files", "find_symbol", "related_files", "search_code", "describe_database", "query_database", "get_problems", "get_logs", "list_secrets", "security_scan", "fetch_url", "remember", "forget"],
 };
 
 /** Tools of the full builder the fast agent does without: project_map covers the file list, and every turn checkpoints itself. */

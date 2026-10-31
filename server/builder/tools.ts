@@ -13,6 +13,7 @@ import { checkProject, compileServerModule, endpointRoutes, formatProblem, jobFi
 import { runBrowserTest, type BrowserStep } from "../runtime/browser.js";
 import { runQuickScan } from "../platform/security.js";
 import { formatFinding } from "../runtime/securityScan.js";
+import { addMemory, deleteMemory, memorySettings, updateMemory, MEMORY_KINDS } from "../platform/memory.js";
 import { runInSandbox } from "../runtime/sandbox.js";
 import { publishProject } from "../runtime/publish.js";
 import { previewOrigin, previewUrl } from "../runtime/urls.js";
@@ -374,6 +375,41 @@ export const builderTools: BuilderTool[] = [
     async run(_i, ctx) {
       const open = (await runQuickScan(ctx.projectId)).filter((f) => !f.ignored);
       return open.length ? `${open.length} hallazgo(s):\n${open.map(formatFinding).join("\n")}` : "Sin hallazgos en el escaneo rápido.";
+    },
+  },
+  {
+    name: "remember",
+    description:
+      "Guarda un hecho para las próximas conversaciones: una preferencia del dueño (tono, idioma, estilo), una decisión de diseño o de producto, un enfoque que rechazó (para no volver a proponerlo) o un dato del negocio (precios, horarios, zonas, palabras prohibidas). Un solo hecho por llamada, corto y concreto. No guardes lo que ya dice el código, tareas de este turno ni secretos. scope \"personal\" solo para preferencias de la persona que valen en todos sus proyectos; lo demás es del proyecto. Para corregir una memoria existente pasa su id en replaces.",
+    input_schema: obj(
+      {
+        text: str("El hecho, en una frase y en el idioma del dueño"),
+        kind: { type: "string", enum: MEMORY_KINDS, description: "preference, decision, rejected (enfoque descartado) o business (dato del negocio)" },
+        scope: { type: "string", enum: ["project", "personal"], description: "Por defecto project" },
+        replaces: str("Id de la memoria que este hecho corrige (opcional)"),
+      },
+      ["text", "kind"],
+    ),
+    async run(i: { text: string; kind: string; scope?: "project" | "personal"; replaces?: string }, ctx) {
+      const scope = i.scope === "personal" ? "personal" : "project";
+      const on = await memorySettings(ctx.projectId, ctx.account.id);
+      if (!(scope === "project" ? on.projectEnabled : on.personalEnabled)) return `La memoria ${scope === "project" ? "del proyecto" : "personal"} está apagada: no se guardó.`;
+      if (i.replaces) {
+        const m = await updateMemory(ctx.projectId, ctx.account.id, i.replaces, { text: i.text, kind: i.kind });
+        if (!m) throw new Error(`No hay ninguna memoria con id ${i.replaces}.`);
+        return `Memoria ${m.id} corregida.`;
+      }
+      const { memory, created } = await addMemory(ctx.projectId, ctx.account.id, { scope, kind: i.kind, text: i.text, source: "agent" });
+      return created ? `Guardado en memoria (${memory.id}).` : `Ya estaba en memoria (${memory.id}).`;
+    },
+  },
+  {
+    name: "forget",
+    description: "Borra una memoria que ya no es cierta o que el dueño pidió olvidar. Usa el id que aparece en la sección Memoria.",
+    input_schema: obj({ id: str("Id de la memoria") }, ["id"]),
+    async run(i: { id: string }, ctx) {
+      if (!(await deleteMemory(ctx.projectId, ctx.account.id, i.id))) throw new Error(`No hay ninguna memoria con id ${i.id}.`);
+      return `Memoria ${i.id} borrada.`;
     },
   },
   {

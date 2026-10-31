@@ -183,6 +183,12 @@ try {
   ok(chatTurn.some((e) => e.type === "text" && /Respuesta de chat/.test(e.text)), "chat mode replies");
   ok(JSON.stringify((await req("GET", `/api/projects/${project.id}/files`)).json.files.map((f) => f.path)) === filesBefore, "chat mode changes no files");
 
+  // Memory: asked to remember, the chat agent saves the fact; later turns get it in their prompt.
+  const remember = await req("POST", `/api/projects/${project.id}/chat`, { message: "Recuerda que los pedidos se cierran a las 20:00", mode: "chat" }, { stream: true });
+  ok(remember.some((e) => e.type === "tool_start" && e.name === "remember") && !remember.some((e) => e.type === "error"), "the chat agent saves what it is asked to remember", JSON.stringify(remember.filter((e) => e.type !== "text")));
+  const saved = (await req("GET", `/api/projects/${project.id}/memory`)).json;
+  ok(saved.project.some((m) => m.text === "Los pedidos se cierran a las 20:00" && m.kind === "business" && m.source === "agent"), "the fact is in project memory", JSON.stringify(saved));
+
   const callsBefore = llmLog.length;
   const planTurn = await req("POST", `/api/projects/${project.id}/chat`, { message: "Crea una app de notas con tabla en la base de datos, endpoint para usuarios registrados y una página con diseño.", mode: "plan" }, { stream: true });
   ok(planTurn.some((e) => e.type === "plan") && !planTurn.some((e) => e.type === "task_start" && e.role !== "planner"), "plan mode only plans", JSON.stringify(planTurn.filter((e) => e.type === "task_start")));
@@ -194,6 +200,8 @@ try {
   const roles = llmLog.slice(callsAfterPlan).map((l) => l.role);
   ok(implement.some((e) => e.type === "task_start" && e.role === "ui") && !roles.includes("planner") && llmLog.slice(callsBefore, callsAfterPlan).some((l) => l.role === "planner"), "implementing runs the approved plan without re-planning", roles.join(","));
   ok(!(await req("GET", `/api/projects/${project.id}/chat`)).json.pendingPlanTurn, "the plan is consumed");
+  const withMemory = llmLog.slice(callsBefore).filter((l) => ["planner", "data", "backend", "ui", "qa"].includes(l.role));
+  ok(withMemory.length > 0 && withMemory.every((l) => l.memory), "every agent of later turns gets the memory in its prompt", JSON.stringify(withMemory.map((l) => [l.role, l.memory])));
 
   const broken = await req("POST", `/api/projects/${project.id}/chat`, { message: "Rompe la portada", mode: "build" }, { stream: true });
   ok(broken.some((e) => e.type === "task_start" && e.taskId === "fix1"), "a change that breaks the build gets an automatic fix pass", JSON.stringify(broken.filter((e) => e.type === "task_start")));
@@ -207,7 +215,15 @@ try {
   ok(none.some((e) => e.type === "error" && /modelo permitido/.test(e.message)), "empty whitelist gives a clear error", JSON.stringify(none));
   await req("PUT", "/api/models/account", { enabled: null });
 
-  // 4. The next turn starts from a compact context, not the replayed transcript.
+  // 4. Older turns are folded into the summary, and the facts in them into project memory.
+  let extracted;
+  for (let i = 0; i < 50 && !extracted; i++) {
+    await new Promise((r) => setTimeout(r, 200));
+    extracted = (await req("GET", `/api/projects/${project.id}/memory`)).json.project.find((m) => m.source === "summary");
+  }
+  ok(extracted?.kind === "preference" && /verde/.test(extracted.text), "facts from older turns are extracted into project memory", JSON.stringify(extracted));
+
+  // The next turn starts from a compact context, not the replayed transcript.
   const lastFast = llmLog.filter((l) => l.role === "fast").length;
   ok(lastFast > 0, "fast turns were served");
 } finally {

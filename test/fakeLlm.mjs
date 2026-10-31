@@ -21,6 +21,7 @@ function script(body) {
 
   if (sys.startsWith("Classify an app-builder request")) return { role: "router", res: reply('{"intent":"feature","complexity":2,"domains":["ui"]}') };
   if (sys.startsWith("Mantienes el resumen")) return { role: "summary", res: reply("El dueño pidió una app de notas.") };
+  if (sys.startsWith("Extraes la memoria")) return { role: "memory", res: reply('Esto es lo que vale la pena recordar:\n[{"kind": "preference", "text": "Al dueño le gusta el verde como color principal"}]') };
   if (sys.startsWith("Eres Forja. Escribe la respuesta final")) return { role: "final", res: reply("- Hice la app de notas.\n- Prueba /notes en la vista previa.") };
 
   if (sys.includes("# Your role: planner")) {
@@ -100,6 +101,11 @@ function script(body) {
       };
     return { role: "ui", res: reply("Página /notes lista.") };
   }
+  // Asked to remember something: saves it to memory.
+  if (sys.includes("# Chat mode") && userText.includes("Recuerda que")) {
+    if (step === 0) return { role: "chat", res: reply(null, [call("remember", { text: "Los pedidos se cierran a las 20:00", kind: "business" })]) };
+    return { role: "chat", res: reply("Lo guardé en la memoria del proyecto.") };
+  }
   // Chat mode: reads, never writes.
   if (sys.includes("# Chat mode")) {
     if (step === 0) return { role: "chat", res: reply(null, [call("get_problems", {})]) };
@@ -139,7 +145,8 @@ export function startFakeLlm() {
       // What the agent was handed up front, so tests can check the context it got.
       // Screenshots from browser_test come back as an image part after the tool results.
       const sawImage = body.messages.some((m) => m.role === "user" && Array.isArray(m.content) && m.content.some((p) => p.type === "image_url"));
-      log.push({ model: body.model, role, at: Date.now(), sawImage, hasMap: text.includes("# Mapa del proyecto"), firstBuild: text.includes("# First version of the app"), preloaded: text.includes("# Archivos relevantes") });
+      const system = body.messages.find((m) => m.role === "system")?.content ?? "";
+      log.push({ model: body.model, role, at: Date.now(), sawImage, memory: system.includes("# Memoria") && system.includes("pedidos se cierran"), hasMap: text.includes("# Mapa del proyecto"), firstBuild: text.includes("# First version of the app"), preloaded: text.includes("# Archivos relevantes") });
       // Specialists take a while, so parallel lanes visibly overlap.
       const delay = ["data", "backend", "ui"].includes(role) ? 400 : 30;
       setTimeout(() => {

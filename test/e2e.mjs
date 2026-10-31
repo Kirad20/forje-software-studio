@@ -343,6 +343,35 @@ ok(miss[0]?.text?.includes("Falló en el paso 2") && miss[1]?.type === "image", 
 const noauth = await req("POST", "/mcp", { headers: { accept: "application/json, text/event-stream" }, body: { jsonrpc: "2.0", id: 1, method: "tools/list" } });
 ok(noauth.status === 401, "mcp requires token");
 
+// Memory: the agent's remember/forget tools, and the owner's view in Settings.
+const tool = async (name, args) =>
+  (await req("POST", "/mcp", { headers: mcpH, body: { jsonrpc: "2.0", id: 5, method: "tools/call", params: { name, arguments: { projectId: project.id, ...args } } } })).json?.result;
+const memText = (r) => r?.content?.[0]?.text ?? "";
+ok(/Guardado en memoria \(([0-9a-f]{10})\)/.test(memText(await tool("remember", { text: "Los precios se muestran con IVA incluido", kind: "business" }))), "remember saves a project memory");
+ok(/Ya estaba/.test(memText(await tool("remember", { text: "los precios se muestran con IVA incluido.", kind: "business" }))), "the same fact again is not duplicated");
+const leaky = await tool("remember", { text: "La clave es sk_live_" + "a1B2c3D4e5F6g7H8i9J0", kind: "business" });
+ok(leaky?.isError && /Secretos/.test(memText(leaky)), "remember refuses secrets", JSON.stringify(leaky));
+await tool("remember", { text: "Responde siempre en tono informal", kind: "preference", scope: "personal" });
+let mem = (await req("GET", `/api/projects/${project.id}/memory`)).json;
+ok(mem.project.length === 1 && mem.project[0].source === "agent" && mem.personal.length === 1 && mem.projectEnabled && mem.personalEnabled, "memory lists project and personal facts", JSON.stringify(mem));
+const priceId = mem.project[0].id;
+ok(/corregida/.test(memText(await tool("remember", { text: "Los precios se muestran sin IVA", kind: "business", replaces: priceId }))), "remember can correct a memory");
+mem = (await req("POST", `/api/projects/${project.id}/memory`, { body: { text: "No usar la palabra «barato»", kind: "rejected" } })).json;
+ok(mem.project.some((m) => m.id === priceId && m.text.endsWith("sin IVA")) && mem.project.some((m) => m.source === "owner" && m.kind === "rejected"), "owner adds memories in Settings", JSON.stringify(mem.project));
+ok((await req("POST", `/api/projects/${project.id}/memory`, { body: { text: "x".repeat(301), kind: "decision" } })).status === 400, "memories are short");
+ok((await req("POST", `/api/projects/${project.id}/memory`, { body: { text: "algo", kind: "otra" } })).status === 400, "memory kinds are checked");
+const edited = await req("PATCH", `/api/projects/${project.id}/memory/${priceId}`, { body: { text: "Precios en euros, sin IVA", kind: "decision" } });
+ok(edited.json.project.some((m) => m.id === priceId && m.kind === "decision" && m.text === "Precios en euros, sin IVA"), "owner edits a memory");
+mem = (await req("POST", `/api/projects/${project.id}/memory/settings`, { body: { project: false } })).json;
+ok(!mem.projectEnabled && /apagada/.test(memText(await tool("remember", { text: "Otra cosa", kind: "decision" }))), "with project memory off the agent saves nothing");
+await req("POST", `/api/projects/${project.id}/memory/settings`, { body: { project: true } });
+const otherProject = (await req("POST", "/api/projects", { body: { prompt: "Otra app" } })).json.project;
+const otherMem = (await req("GET", `/api/projects/${otherProject.id}/memory`)).json;
+ok(otherMem.project.length === 0 && otherMem.personal.length === 1, "personal memory follows the person to other projects, project memory does not", JSON.stringify(otherMem));
+const rejectedId = mem.project.find((m) => m.kind === "rejected").id;
+ok((await req("DELETE", `/api/projects/${otherProject.id}/memory/${rejectedId}`)).status === 404, "a project memory cannot be deleted from another project");
+ok(/borrada/.test(memText(await tool("forget", { id: rejectedId }))), "forget deletes a memory");
+
 // Collaborators: invite before sign-up, claimed on first sign-in; editors build, owners manage.
 const ownerCookie = jar.localhost;
 async function signInAs(email) {
@@ -362,6 +391,9 @@ ok((await req("PUT", `/api/projects/${project.id}/file`, { body: { path: "pages/
 ok((await req("DELETE", `/api/projects/${project.id}`)).status === 403, "editor cannot delete the project");
 ok((await req("POST", `/api/projects/${project.id}/members`, { body: { email: "eve@example.com" } })).status === 403, "editor cannot invite");
 ok((await req("GET", `/api/projects/${project.id}/changes`)).json.changes[0].actor === "bob@example.com", "editor writes are logged with who made them");
+const bobMem = (await req("GET", `/api/projects/${project.id}/memory`)).json;
+ok(bobMem.project.some((m) => m.id === priceId) && bobMem.personal.length === 0, "editors share project memory but not the owner's personal memory", JSON.stringify(bobMem));
+ok((await req("PATCH", `/api/projects/${project.id}/memory/${mem.personal[0].id}`, { body: { text: "hack" } })).status === 404, "an editor cannot change the owner's personal memory");
 await signInAs("carol@example.com");
 ok((await req("GET", `/api/projects/${project.id}`)).status === 404, "strangers cannot see the project");
 jar.localhost = ownerCookie;

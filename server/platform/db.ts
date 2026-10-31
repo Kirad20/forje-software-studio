@@ -349,6 +349,25 @@ create table if not exists security_ignores (
   primary key (project_id, finding_id)
 );
 
+-- What the builder keeps between conversations: preferences, decisions, rejected approaches and
+-- business facts. Project memories are shared by everyone who edits the project; personal ones
+-- follow one person across all their projects.
+create table if not exists memories (
+  id text primary key,
+  scope text not null check (scope in ('project', 'personal')),
+  project_id text references projects(id) on delete cascade,
+  account_id text not null references accounts(id) on delete cascade,
+  kind text not null check (kind in ('preference', 'decision', 'rejected', 'business')),
+  text text not null,
+  source text not null check (source in ('agent', 'owner', 'summary')),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create index if not exists memories_project on memories (project_id);
+create index if not exists memories_account on memories (account_id);
+alter table projects add column if not exists memory_enabled boolean not null default true;
+alter table accounts add column if not exists memory_enabled boolean not null default true;
+
 alter table ai_usage add column if not exists cache_read_tokens integer not null default 0;
 alter table ai_usage add column if not exists cache_write_tokens integer not null default 0;
 alter table ai_usage add column if not exists usd double precision not null default 0;

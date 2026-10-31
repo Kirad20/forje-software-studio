@@ -15,8 +15,9 @@ Prioridad de lo que falta: **P1** núcleo del constructor (más valor, se apoya 
 | 30-oct-2026 | Ronda 1 · 2: pruebas en navegador (`browser_test`) | Kirad20/clone-repos#52 |
 | 31-oct-2026 | CI en GitHub (`forja-ci`: tipos, unidad, build, e2e y agentes con Chromium) e imagen Docker que se construye y arranca en CI | Kirad20/clone-repos#53 |
 | 31-oct-2026 | Ronda 1 · 3: escaneo de seguridad (rápido al publicar, revisión profunda con un agente, vista Seguridad, `security_scan`) | Kirad20/clone-repos#53 |
+| 31-oct-2026 | Ronda 1 · 4: memoria de proyecto y personal (`remember`, `forget`, extracción al resumir, sección Memoria en Ajustes) | (pendiente) |
 
-Siguiente: Ronda 1 · 4, memoria de proyecto.
+Siguiente: Ronda 1 · 5, preguntas al dueño con opciones (`ask_owner`).
 
 ## 1. Chat y agente del constructor
 
@@ -33,7 +34,7 @@ Siguiente: Ronda 1 · 4, memoria de proyecto.
 | Contexto precargado | El agente recibe de entrada los archivos relevantes y no los vuelve a leer | ✅ mapa del proyecto y archivos elegidos por `selectContext`, también en el agente rápido | — |
 | Primera versión cuidada | En una app nueva: decidir público, funciones y estilo, empezar por el sistema de diseño, sustituir la plantilla, datos de ejemplo | ✅ guía de primera versión (`FIRST_BUILD`), solo en la petición que crea la app | — |
 | Alcance y autonomía | Hacer solo lo pedido; no pedir al dueño lo que el agente puede hacer con sus herramientas | ✅ reglas del prompt | — |
-| Memoria | El agente guarda solo preferencias, enfoques descartados, decisiones de diseño y datos del negocio (precios, horarios, palabras prohibidas) y los aplica en conversaciones futuras. Hay memoria de proyecto (compartida por los editores) y memoria personal; se pueden ver, editar y apagar | ⚠️ resumen acumulado de la conversación; no son hechos estructurados ni editables | P1 |
+| Memoria | El agente guarda solo preferencias, enfoques descartados, decisiones de diseño y datos del negocio (precios, horarios, palabras prohibidas) y los aplica en conversaciones futuras. Hay memoria de proyecto (compartida por los editores) y memoria personal; se pueden ver, editar y apagar | ✅ memoria de proyecto (compartida por los editores) y personal (sigue a la persona en todos sus proyectos). El agente guarda con `remember` y corrige o borra con `forget`; al resumir el chat, un modelo barato extrae hasta 5 hechos nuevos. Se inyecta en el prompt de todos los agentes del turno; en Ajustes → Memoria se ve, se edita, se añade a mano y se apaga por separado. Rechaza secretos y textos largos | — |
 | Skills | Playbooks en markdown (nombre, descripción, instrucciones) que se cargan bajo demanda o con `/comando`; se importan de GitHub o ZIP; incluye skills propias (accesibilidad, SEO, rediseño) | ❌ | P2 |
 | Referencias entre proyectos | Reutilizar código, archivos o el chat de otro proyecto (`@proyecto`) | ❌ | P3 |
 | Generar archivos y analizar datos | Ejecutar código en el chat (CSV → gráficas, PDF, XLSX) y construir a partir del resultado | ❌ | P3 |
@@ -171,7 +172,7 @@ Siguiente: Ronda 1 · 4, memoria de proyecto.
 1. ✅ **Paquetes npm** para las apps: `add_dependency` y `remove_dependency` fijan la versión exacta en el `package.json` del proyecto. Cada conjunto de dependencias se instala una vez, sin ejecutar scripts, en `node_modules/.forja-deps/<hash>`; esbuild lo empaqueta para el navegador y los endpoints lo cargan desde ahí.
 2. ✅ **Pruebas en navegador** del agente: herramienta `browser_test` (Chromium sin interfaz contra la vista previa: pasos de clic/escritura/navegación, captura de pantalla que se devuelve como imagen, consola y red, tamaño de pantalla, sesión de un usuario de la app).
 3. ✅ **Escaneo de seguridad**: rápido y determinista al publicar, y profundo con un agente de solo lectura. Vista Seguridad con los hallazgos y «Arreglar».
-4. **Memoria de proyecto**: hechos y preferencias estructurados (herramienta `remember`, más extracción en `updateSummary`) que se inyectan en el prompt y se pueden ver y editar en Ajustes.
+4. ✅ **Memoria de proyecto**: hechos y preferencias estructurados (herramientas `remember` y `forget`, más extracción en `updateSummary`) que se inyectan en el prompt y se pueden ver, editar y apagar en Ajustes. También memoria personal, por cuenta.
 5. **Preguntas al dueño con opciones** (`ask_owner`), incluidas las preguntas de diseño del primer build (paleta, tipografía, layout).
 6. **Objetivos largos** (`/goal`): turno sin límite de pasos fijo, con pausas por créditos y un cierre con resumen; **seguimientos en caliente** inyectados en el turno en curso.
 7. **Barra de la vista previa**: multi-selección, edición de texto inline sin LLM (que se aplica como `edit_file` directo).

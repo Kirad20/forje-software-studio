@@ -5,6 +5,7 @@ import { emptyUsage, addUsage, textOf, type Block, type LlmMessage, type Usage }
 import { describeSchema } from "../baas/projectDb.js";
 import { getAccount, type Account } from "../platform/accounts.js";
 import { one, q } from "../platform/db.js";
+import { addMemory, memorySection, memorySettings, MEMORY_KINDS } from "../platform/memory.js";
 import { createCheckpoint, getProject, readAllFiles, type Project } from "../platform/projects.js";
 import { imageBlocks, runAgent, save, UPLOADS, type AgentEvent, type AgentResult } from "./agent.js";
 import { formatProblems, listProblems, recheckBuild, watchProblems } from "../platform/problems.js";
@@ -124,6 +125,37 @@ async function updateSummary(projectId: string, billing: Billing, scope: { accou
      on conflict (project_id) do update set upto_message_id = excluded.upto_message_id, summary = excluded.summary, updated_at = now()`,
     [projectId, cutoff, summary],
   );
+  await extractMemories(projectId, billing, scope, transcript);
+}
+
+/**
+ * The same turns, read once more for the few facts worth keeping as project memory (the
+ * agents also save them with remember while they work). Only new ones, at most five a pass.
+ */
+async function extractMemories(projectId: string, billing: Billing, scope: { accountId: string; projectId: string }, transcript: string) {
+  if (!(await memorySettings(projectId, scope.accountId)).projectEnabled) return;
+  const known = await q<{ text: string }>(`select text from memories where scope = 'project' and project_id = $1`, [projectId]);
+  const res = await callModel(
+    scope,
+    "summarizer",
+    { complexity: 1, domains: [], needsVision: false },
+    {
+      system: `Extraes la memoria de un proyecto a partir de una conversación entre su dueño y el constructor de la app. Devuelve solo un array JSON, sin texto alrededor, con como mucho 5 objetos {"kind": "${MEMORY_KINDS.join('" | "')}", "text": "…"}: preferencias del dueño, decisiones de diseño o de producto, enfoques que rechazó y datos del negocio (precios, horarios, zonas, palabras prohibidas) que sigan importando en conversaciones futuras. Una frase corta por hecho, en el idioma del dueño. Nada de lo que ya está en la memoria, de tareas puntuales, de suposiciones ni de secretos. Si no hay nada, devuelve [].`,
+      messages: [{ role: "user", content: `Memoria actual:\n${known.map((k) => `- ${k.text}`).join("\n") || "(vacía)"}\n\nConversación:\n${transcript}` }],
+      maxTokens: 600,
+    },
+    { billing },
+  );
+  let facts: { kind?: string; text?: string }[] = [];
+  try {
+    facts = JSON.parse(/\[[\s\S]*\]/.exec(textOf(res.response.content))?.[0] ?? "[]");
+  } catch {
+    return;
+  }
+  for (const f of Array.isArray(facts) ? facts.slice(0, 5) : []) {
+    if (typeof f?.text !== "string" || typeof f.kind !== "string") continue;
+    await addMemory(projectId, scope.accountId, { scope: "project", kind: f.kind, text: f.text, source: "summary" }).catch(() => {});
+  }
 }
 
 // --- Plan validation -------------------------------------------------------------------------------
@@ -194,6 +226,8 @@ interface TurnState {
   request: string;
   images: Block[];
   context: string;
+  /** The "# Memoria" block, loaded once per turn. */
+  memory: string;
   signal: AbortSignal;
   emit: (e: AgentEvent) => void;
   wrote: boolean;
@@ -202,11 +236,13 @@ interface TurnState {
   credits: number;
 }
 
-function projectSection(p: Project, account: Account) {
+function projectSection(s: TurnState) {
+  const p = s.project;
   return [
-    `# This project\nName: ${p.name}\nDescription: ${p.description || "(none)"}\nOwner email: ${account.email}`,
+    `# This project\nName: ${p.name}\nDescription: ${p.description || "(none)"}\nOwner email: ${s.account.email}`,
     p.systemPrompt ? `# Owner's project instructions\n${p.systemPrompt}` : "",
     p.designPrompt ? `# Owner's design guidelines\n${p.designPrompt}` : "",
+    s.memory,
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -324,7 +360,7 @@ async function runFast(s: TurnState): Promise<void> {
     s,
     { id: "fast", role: "fast", goal: s.request.slice(0, 500), files: [], dependsOn: [] },
     {
-      system: `${ROLE_PROMPTS.fast}\n\n${projectSection(s.project, s.account)}`,
+      system: `${ROLE_PROMPTS.fast}\n\n${projectSection(s)}`,
       messages: [
         {
           role: "user",
@@ -350,7 +386,7 @@ async function runFast(s: TurnState): Promise<void> {
       s,
       { id: `fix${round}`, role: "fast", goal: "Arreglar los errores de compilación", files: [], dependsOn: [] },
       {
-        system: `${ROLE_PROMPTS.fast}\n\n${projectSection(s.project, s.account)}`,
+        system: `${ROLE_PROMPTS.fast}\n\n${projectSection(s)}`,
         messages: [
           {
             role: "user",
@@ -377,7 +413,7 @@ async function runChat(s: TurnState): Promise<void> {
     s,
     { id: "chat", role: "chat", goal: s.request.slice(0, 500), files: [], dependsOn: [] },
     {
-      system: `${ROLE_PROMPTS.chat}\n\n${projectSection(s.project, s.account)}`,
+      system: `${ROLE_PROMPTS.chat}\n\n${projectSection(s)}`,
       messages: [{ role: "user", content: [{ type: "text", text: [s.context, `## Pregunta\n${s.request}`].filter(Boolean).join("\n\n") }, ...s.images] }],
       tools: tools(ROLE_TOOLS.chat),
       ctx,
@@ -410,7 +446,7 @@ export async function pendingPlan(projectId: string): Promise<{ turnId: string; 
 async function runTeam(s: TurnState, opts: { given?: Plan; planOnly?: boolean } = {}): Promise<boolean> {
   const files = await readAllFiles(s.project.id);
   const map = projectMap(files, await describeSchema(s.project.id, true));
-  const head = projectSection(s.project, s.account);
+  const head = projectSection(s);
 
   // 1. Plan.
   let plan: Plan | null = opts.given ?? null;
@@ -693,6 +729,7 @@ export async function runBuilderTurn(
     request: userText,
     images: [],
     context: "",
+    memory: "",
     signal: abort.signal,
     emit,
     wrote: false,
@@ -709,6 +746,7 @@ export async function runBuilderTurn(
     await save(projectId, { role: "user", content: [{ type: "text", text }] }, turnId);
     s.images = await imageBlocks(projectId, text);
     s.context = await turnContext(projectId, turnId);
+    s.memory = await memorySection(projectId, account.id);
     // Like a developer glancing at the console first: what is broken in the preview right now.
     watchProblems(projectId);
     await recheckBuild(projectId).catch(() => {});

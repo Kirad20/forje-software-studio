@@ -38,6 +38,9 @@ const SECRETS: { name: string; re: RegExp }[] = [
   { name: "clave de Resend", re: /\bre_[A-Za-z0-9]{8,}_[A-Za-z0-9]{16,}/ },
 ];
 
+/** The kind of secret key found in a text (for refusing to store it), or null. */
+export const findSecret = (text: string) => SECRETS.find((s) => s.re.test(text))?.name ?? null;
+
 const WRITE_SQL = /\b(insert\s+into|update\s+\w+\s+set|delete\s+from)\b/i;
 const SQL_TEMPLATE = /\.(query|one|exec)\s*(<[^>]*>)?\s*\(\s*`[^`]*\$\{/g;
 const SQL_CONCAT = /\.(query|one|exec)\s*(<[^>]*>)?\s*\(\s*(["'])[^"'\n]*\3\s*\+/g;
