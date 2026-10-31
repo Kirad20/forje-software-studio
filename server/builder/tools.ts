@@ -10,6 +10,7 @@ import * as projects from "../platform/projects.js";
 import { formatProblems, listProblems, recheckBuild, watchProblems } from "../platform/problems.js";
 import { ensureDeps, MANIFEST, readDeps, resolvePackage, withManifestLock, writeDeps } from "../runtime/deps.js";
 import { checkProject, compileServerModule, endpointRoutes, formatProblem, jobFiles, pageRoutes } from "../runtime/bundler.js";
+import { runBrowserTest, type BrowserStep } from "../runtime/browser.js";
 import { runInSandbox } from "../runtime/sandbox.js";
 import { publishProject } from "../runtime/publish.js";
 import { previewOrigin, previewUrl } from "../runtime/urls.js";
@@ -51,11 +52,14 @@ const noteWrite = (ctx: ToolContext, ...paths: string[]) => {
   for (const p of paths) (ctx.written ??= new Set()).add(p);
 };
 
+/** A tool's answer: text, optionally with images the model gets to see (screenshots). */
+export type ToolOutput = string | { text: string; images: { media_type: string; data: string }[] };
+
 export interface BuilderTool {
   name: string;
   description: string;
   input_schema: Record<string, unknown>;
-  run(input: any, ctx: ToolContext): Promise<string>;
+  run(input: any, ctx: ToolContext): Promise<ToolOutput>;
 }
 
 const obj = (properties: Record<string, unknown>, required: string[] = []) => ({ type: "object", properties, required });
@@ -312,6 +316,49 @@ export const builderTools: BuilderTool[] = [
         const res = await serveApp(req, { project, env: "preview", base: "" }, `/_api/${route}`);
         const text = await res.text();
         return clip(`${i.method} /_api/${route}${qs}${session ? ` (como ${session.user.email})` : " (anónimo)"} → ${res.status}\n${text}`);
+      } finally {
+        if (session) await endTestSession(ctx.projectId, session.token);
+      }
+    },
+  },
+  {
+    name: "browser_test",
+    description:
+      "Abre la vista previa en un navegador real (Chromium sin interfaz) y la usa como un visitante: navega, hace clic, escribe y comprueba textos. Devuelve el resultado de cada paso, los errores de consola, las peticiones fallidas, el texto visible y capturas de pantalla que puedes ver. Úsalo para probar flujos de interfaz (formularios, navegación, estados vacíos y de error) y el diseño en móvil; para la API sola, call_endpoint es más rápido. Se para en el primer paso que falla y adjunta una captura. Usa datos de prueba claramente marcados: la base de datos es real.",
+    input_schema: obj(
+      {
+        steps: {
+          type: "array",
+          description:
+            'Pasos en orden (máx. 25). Selectores: CSS o de Playwright, p. ej. "button:has-text(Guardar)", "text=Entrar", "input[name=email]". Ejemplo: [{"action":"goto","path":"/login"},{"action":"fill","selector":"input[type=email]","text":"ana@ejemplo.com"},{"action":"click","selector":"button[type=submit]"},{"action":"expect_text","text":"Hola"},{"action":"screenshot"}]',
+          items: {
+            type: "object",
+            properties: {
+              action: { type: "string", enum: ["goto", "click", "fill", "press", "select", "wait_for", "expect_text", "screenshot"] },
+              path: str("goto: ruta de la app, p. ej. /notes?filtro=hoy"),
+              selector: str("click, fill, press, select, wait_for: el elemento"),
+              text: str("fill: lo que se escribe; wait_for y expect_text: el texto que debe aparecer"),
+              key: str("press: tecla, p. ej. Enter o Escape"),
+              value: str("select: valor de la opción"),
+              full_page: { type: "boolean", description: "screenshot: la página entera en vez de la pantalla visible" },
+            },
+            required: ["action"],
+          },
+        },
+        viewport: { type: "string", enum: ["desktop", "tablet", "mobile"], description: "Tamaño de pantalla (por defecto desktop)" },
+        as_user_email: str("Correo de un usuario de la app para navegar con su sesión iniciada"),
+      },
+      ["steps"],
+    ),
+    async run(i: { steps: BrowserStep[]; viewport?: "desktop" | "tablet" | "mobile"; as_user_email?: string }, ctx) {
+      const project = (await projects.getProject(ctx.projectId))!;
+      const session = i.as_user_email ? await testSession(ctx.projectId, i.as_user_email) : null;
+      try {
+        return await runBrowserTest(project, {
+          steps: i.steps,
+          viewport: i.viewport,
+          session: session ? { name: sessionCookie(ctx.projectId), token: session.token } : undefined,
+        });
       } finally {
         if (session) await endTestSession(ctx.projectId, session.token);
       }

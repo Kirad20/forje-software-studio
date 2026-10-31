@@ -42,8 +42,11 @@ function script(body) {
     return { role: "planner", res: reply("Plan entregado.") };
   }
   if (sys.includes("# Your role: reviewer")) {
-    if (step === 0) return { role: "qa", res: reply(null, [call("check_build", {})]) };
-    if (step === 1) return { role: "qa", res: reply(null, [call("report_review", { ok: lastTool.startsWith("Compila"), summary: "Compila y el endpoint responde.", issues: [] })]) };
+    if (step === 0) return { role: "qa", res: reply(null, [call("check_build", {}), call("browser_test", { steps: [{ action: "goto", path: "/notes" }, { action: "screenshot" }] })]) };
+    if (step === 1) {
+      const built = body.messages.some((m) => m.role === "tool" && m.content.startsWith("Compila"));
+      return { role: "qa", res: reply(null, [call("report_review", { ok: built, summary: "Compila y el endpoint responde.", issues: [] })]) };
+    }
     return { role: "qa", res: reply("Revisión terminada.") };
   }
   const task = /# Tu tarea \((\w+)/.exec(userText)?.[1];
@@ -120,7 +123,9 @@ export function startFakeLlm() {
       const first = body.messages?.find((m) => m.role === "user");
       const text = typeof first?.content === "string" ? first.content : (first?.content ?? []).map((p) => p.text ?? "").join("\n");
       // What the agent was handed up front, so tests can check the context it got.
-      log.push({ model: body.model, role, at: Date.now(), hasMap: text.includes("# Mapa del proyecto"), firstBuild: text.includes("# First version of the app"), preloaded: text.includes("# Archivos relevantes") });
+      // Screenshots from browser_test come back as an image part after the tool results.
+      const sawImage = body.messages.some((m) => m.role === "user" && Array.isArray(m.content) && m.content.some((p) => p.type === "image_url"));
+      log.push({ model: body.model, role, at: Date.now(), sawImage, hasMap: text.includes("# Mapa del proyecto"), firstBuild: text.includes("# First version of the app"), preloaded: text.includes("# Archivos relevantes") });
       // Specialists take a while, so parallel lanes visibly overlap.
       const delay = ["data", "backend", "ui"].includes(role) ? 400 : 30;
       setTimeout(() => {

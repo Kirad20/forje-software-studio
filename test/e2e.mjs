@@ -313,6 +313,15 @@ const tl = await req("POST", "/mcp", { headers: mcpH, body: { jsonrpc: "2.0", id
 ok(tl.json?.result?.tools?.length > 15, `mcp tools/list (${tl.json?.result?.tools?.length})`, tl.text.slice(0, 300));
 const call = await req("POST", "/mcp", { headers: mcpH, body: { jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "check_build", arguments: { projectId: project.id } } } });
 ok(call.json?.result?.content?.[0]?.text?.includes("Compila"), "mcp check_build", call.text.slice(0, 300));
+// browser_test: a real headless Chromium against the preview, anonymous and signed in.
+const browse = async (args) =>
+  (await req("POST", "/mcp", { headers: mcpH, body: { jsonrpc: "2.0", id: 4, method: "tools/call", params: { name: "browser_test", arguments: { projectId: project.id, ...args } } } })).json?.result?.content ?? [];
+const anon = await browse({ steps: [{ action: "goto", path: "/" }, { action: "expect_text", text: "Entrar" }, { action: "click", selector: "text=Entrar" }, { action: "screenshot" }] });
+ok(anon[0]?.text?.includes("pasos pasaron") && anon[0].text.includes("URL final: /login") && anon[1]?.type === "image", "browser_test walks a flow and returns a screenshot", anon[0]?.text?.slice(0, 600));
+const signed = await browse({ steps: [{ action: "goto", path: "/" }, { action: "expect_text", text: "Tareas" }], viewport: "mobile", as_user_email: "ana@example.com" });
+ok(signed[0]?.text?.includes("pasos pasaron") && signed[0].text.includes("con sesión") && signed[0].text.includes("390×844"), "browser_test as an app user on mobile", signed[0]?.text?.slice(0, 600));
+const miss = await browse({ steps: [{ action: "goto", path: "/" }, { action: "expect_text", text: "Esto no existe" }] });
+ok(miss[0]?.text?.includes("Falló en el paso 2") && miss[1]?.type === "image", "browser_test stops at the failing step with a screenshot", miss[0]?.text?.slice(0, 600));
 const noauth = await req("POST", "/mcp", { headers: { accept: "application/json, text/event-stream" }, body: { jsonrpc: "2.0", id: 1, method: "tools/list" } });
 ok(noauth.status === 401, "mcp requires token");
 

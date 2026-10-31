@@ -30,7 +30,7 @@ Prioridad de lo que falta: **P1** núcleo del constructor (más valor, se apoya 
 
 | Lovable | Qué hace | Forja | Prio |
 | --- | --- | --- | --- |
-| Browser testing | El agente abre la vista previa en un navegador remoto: hace clic, rellena formularios, navega, captura pantallas, lee consola y red, prueba móvil/tablet/escritorio y usa la sesión del usuario que tenga iniciada | ❌ solo `call_endpoint` y errores enviados por la vista previa | **P1** |
+| Browser testing | El agente abre la vista previa en un navegador remoto: hace clic, rellena formularios, navega, captura pantallas, lee consola y red, prueba móvil/tablet/escritorio y usa la sesión del usuario que tenga iniciada | ✅ `browser_test` (Chromium sin interfaz contra la vista previa: pasos, capturas que el modelo ve, consola, red, móvil/tablet/escritorio, sesión de un usuario de la app); lo usan ui, QA y el agente rápido | — |
 | Pruebas escritas solas | Cuando cambia una regla (precio, límite, permiso, fecha) escribe una prueba pequeña y la ejecuta antes de dar el trabajo por terminado; no prueba textos ni estilos | ⚠️ `helpers/*.spec.ts` + `run_tests`, pero no se exige | P1 |
 | Pruebas de funciones backend | Llamar la función directamente y añadir un «edge test» | ✅ `call_endpoint` · ❌ pruebas de endpoints persistentes | P2 |
 | Logs y red durante la verificación | Consola, peticiones y errores de build como señales | ✅ `get_problems` / `get_logs` | — |
@@ -152,7 +152,7 @@ Prioridad de lo que falta: **P1** núcleo del constructor (más valor, se apoya 
 
 **Ronda 1 (P1, núcleo del constructor)**
 1. **Paquetes npm** para las apps: una lista permitida resuelta con esbuild (o importada de un CDN y fijada en un lockfile) y una herramienta `add_dependency`. Es la brecha que más limita lo que el agente puede construir.
-2. **Pruebas en navegador** del agente: herramienta `browser_test` (Chromium sin interfaz contra la vista previa: pasos de clic/escritura/navegación, captura de pantalla que se devuelve como imagen, consola y red, tamaño de pantalla, sesión de un usuario de la app).
+2. ✅ **Pruebas en navegador** del agente: herramienta `browser_test` (Chromium sin interfaz contra la vista previa: pasos de clic/escritura/navegación, captura de pantalla que se devuelve como imagen, consola y red, tamaño de pantalla, sesión de un usuario de la app).
 3. **Escaneo de seguridad**: rápido y determinista al publicar, y profundo con un agente de solo lectura. Vista Seguridad con los hallazgos y «Arreglar».
 4. **Memoria de proyecto**: hechos y preferencias estructurados (herramienta `remember`, más extracción en `updateSummary`) que se inyectan en el prompt y se pueden ver y editar en Ajustes.
 5. **Preguntas al dueño con opciones** (`ask_owner`), incluidas las preguntas de diseño del primer build (paleta, tipografía, layout).

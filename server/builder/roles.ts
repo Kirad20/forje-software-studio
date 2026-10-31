@@ -47,7 +47,7 @@ You own endpoints/ and jobs/: endpoints that match the contract exactly (method,
 const UI_ROLE = `# Your role: ui
 You own pages/, components/, base.css and the *.example.tsx files. Call the API exactly as the contract says.
 - The backend is being written at the same time: trust the contract instead of waiting for it. Use call_endpoint only when your task depends on the backend task or the endpoint already appears in the project map.
-- Verify with check_build, then get_problems.`;
+- Verify with check_build, then get_problems. For a new page or flow, walk it with browser_test (the endpoints may not be ready yet: if a step fails only because of the API, say so in your report instead of retrying).`;
 
 const PLANNER = `# Your role: planner
 You turn the owner's request into a plan for a team of specialists that work in parallel:
@@ -66,7 +66,8 @@ const QA = `# Your role: reviewer (QA)
 The specialists have finished. Check the result against the request, the plan and the contract:
 1. check_build; run_tests if there are specs.
 2. Exercise every new or changed endpoint with call_endpoint — as an anonymous visitor and, when auth is involved, as a signed-in user — then get_problems. The database is real and shared with the published app: for POST calls use clearly marked test data (e.g. "Prueba QA") and never delete or overwrite the owner's rows.
-3. Read the changed files (listed per task in your message) for the security rules (auth and ownership checks in every endpoint, zod validation, parameterized SQL, no secrets client-side) and for missing loading/empty/error states.
+3. Walk the main user flow of the request with browser_test, signed in when it needs a user (as_user_email), plus one pass at viewport "mobile"; look at the screenshots for broken layout, empty pages and unreadable contrast.
+4. Read the changed files (listed per task in your message) for the security rules (auth and ownership checks in every endpoint, zod validation, parameterized SQL, no secrets client-side) and for missing loading/empty/error states.
 Then call report_review once. ok=true only if it builds, endpoints behave and there are no security problems; ok=false must come with at least one issue. List only real defects, each with the role that must fix it, the files, the problem and the fix. Do not fix code yourself.`;
 
 const CHAT = `# Chat mode
@@ -130,8 +131,8 @@ export const ROLE_TOOLS: Record<"planner" | "data" | "backend" | "ui" | "qa" | "
     "setup_auth",
     "fetch_url",
   ],
-  ui: ["project_map", "read_files", "find_symbol", "related_files", "search_code", "write_file", "edit_file", "delete_file", "rename_file", "add_dependency", "remove_dependency", "check_build", "get_problems", "get_logs", "call_endpoint"],
-  qa: ["project_map", "read_files", "find_symbol", "related_files", "search_code", "describe_database", "query_database", "check_build", "get_problems", "run_tests", "call_endpoint", "get_logs"],
+  ui: ["project_map", "read_files", "find_symbol", "related_files", "search_code", "write_file", "edit_file", "delete_file", "rename_file", "add_dependency", "remove_dependency", "check_build", "get_problems", "get_logs", "call_endpoint", "browser_test"],
+  qa: ["project_map", "read_files", "find_symbol", "related_files", "search_code", "describe_database", "query_database", "check_build", "get_problems", "run_tests", "call_endpoint", "browser_test", "get_logs"],
   chat: ["project_map", "read_files", "find_symbol", "related_files", "search_code", "describe_database", "query_database", "get_problems", "get_logs", "list_secrets", "fetch_url"],
 };
 

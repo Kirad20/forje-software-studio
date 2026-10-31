@@ -124,6 +124,7 @@ try {
   const teamCalls = llmLog.filter((l) => ["planner", "data", "backend", "ui"].includes(l.role));
   ok(teamCalls.some((l) => l.role === "planner" && l.firstBuild) && teamCalls.some((l) => l.role === "ui" && l.firstBuild), "a new app gets the first-version guidance", JSON.stringify(teamCalls.map((l) => [l.role, l.firstBuild])));
   ok(!teamCalls.some((l) => l.role === "backend" && l.firstBuild), "the backend does not get the design-only first-version guidance");
+  ok(llmLog.some((l) => l.role === "qa" && l.sawImage), "QA sees the browser_test screenshot", JSON.stringify(llmLog.filter((l) => l.role === "qa")));
 
   // Lanes: backend and ui overlapped in time (they only depend on data).
   const chat = (await req("GET", `/api/projects/${project.id}/chat`)).json;

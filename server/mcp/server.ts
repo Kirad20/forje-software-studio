@@ -89,7 +89,9 @@ function buildServer(account: Account) {
       if (!(await accessOf(account.id, project))) return text("Proyecto no encontrado en esta cuenta.", true);
       await countAction(account.id);
       // Every write lands in the project's change log as "mcp", so it can be undone from the studio.
-      return text(await tool.run(args, { account, projectId, author: "mcp" }));
+      const out = await tool.run(args, { account, projectId, author: "mcp" });
+      if (typeof out === "string") return text(out);
+      return { content: [{ type: "text" as const, text: out.text }, ...out.images.map((i) => ({ type: "image" as const, data: i.data, mimeType: i.media_type }))], isError: false };
     } catch (e) {
       return text(`Error: ${(e as Error).message}`, true);
     }

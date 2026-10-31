@@ -147,7 +147,9 @@ export async function runAgent(spec: AgentSpec): Promise<AgentResult> {
       continue;
     }
 
-    // Independent tool calls of one step run concurrently; results go back in one message.
+    // Independent tool calls of one step run concurrently; results go back in one message,
+    // followed by any images they returned (screenshots), which the model sees directly.
+    const images: Block[] = [];
     const results = await Promise.all(
       calls.map(async (c): Promise<Block> => {
         const summary = summarize(c.name, c.input);
@@ -158,7 +160,12 @@ export async function runAgent(spec: AgentSpec): Promise<AgentResult> {
         try {
           const tool = byName.get(c.name);
           if (!tool) throw new Error(`Herramienta no disponible para este agente: ${c.name}`);
-          output = await tool.run(c.input, spec.ctx);
+          const out = await tool.run(c.input, spec.ctx);
+          if (typeof out === "string") output = out;
+          else {
+            output = out.text;
+            for (const img of out.images) images.push({ type: "image", source: { type: "base64", ...img } });
+          }
         } catch (e) {
           ok = false;
           output = `Error: ${(e as Error).message}`;
@@ -171,9 +178,9 @@ export async function runAgent(spec: AgentSpec): Promise<AgentResult> {
         return { type: "tool_result", tool_use_id: c.id, content: output, is_error: !ok || undefined };
       }),
     );
-    const toolMsg: LlmMessage = { role: "user", content: results };
-    history.push(toolMsg);
-    if (spec.persist) await save(spec.persist.projectId, toolMsg, spec.turnId);
+    history.push({ role: "user", content: [...results, ...images] });
+    // Screenshots are only useful in this run; stored history keeps the text.
+    if (spec.persist) await save(spec.persist.projectId, { role: "user", content: results }, spec.turnId);
     if (step === maxSteps - 1) result.hitStepLimit = true;
   }
   result.written = [...(spec.ctx.written ?? [])];

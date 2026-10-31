@@ -54,6 +54,12 @@ export const config = {
     /** "0" turns project packages off: apps get only react, react-dom and zod. */
     enabled: env.FORJA_NPM !== "0",
   },
+  browser: {
+    /** "0" turns off browser_test (the builder's headless Chromium against the preview). */
+    enabled: env.FORJA_BROWSER !== "0",
+    /** A Chrome/Chromium binary to use instead of Playwright's own download. */
+    executablePath: env.FORJA_CHROMIUM ?? "",
+  },
   /** A project database closes after this long without queries ("sleeps"). */
   dbIdleMs: 60_000,
   /** Longest a single endpoint call or job run may take. */
