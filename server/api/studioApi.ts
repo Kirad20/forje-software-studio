@@ -12,6 +12,8 @@ import { isBuilding, penalizeTurn, pendingPlan, runBuilderTurn, stopBuilding, ty
 import * as accounts from "../platform/accounts.js";
 import { projectEvents, readLogs, type ProjectEvent } from "../platform/events.js";
 import { clearProblems, listProblems, recheckBuild, watchProblems } from "../platform/problems.js";
+import { getSecurity, runQuickScan, setIgnored } from "../platform/security.js";
+import { startSecurityReview } from "../builder/securityReview.js";
 import * as github from "../platform/github.js";
 import * as projects from "../platform/projects.js";
 import { publishProject, suggestSlug, unpublishProject } from "../runtime/publish.js";
@@ -416,6 +418,23 @@ studioApi.get("/projects/:id/services", async (c) => {
 });
 
 studioApi.get("/projects/:id/analytics", async (c) => c.json(await analyticsSummary(pid(c), Number(c.req.query("days") ?? 7))));
+
+// Security: the quick scan (rules, also run on publish) and the deep review (an agent, spends credits).
+studioApi.get("/projects/:id/security", async (c) => c.json(await getSecurity(pid(c))));
+studioApi.post("/projects/:id/security/scan", async (c) => {
+  await runQuickScan(pid(c));
+  return c.json(await getSecurity(pid(c)));
+});
+studioApi.post("/projects/:id/security/deep", async (c) => {
+  const started = await startSecurityReview(c.get("account"), pid(c));
+  return c.json({ started, ...(await getSecurity(pid(c))) }, started ? 202 : 409);
+});
+studioApi.post("/projects/:id/security/ignore", async (c) => {
+  const { id, ignored } = await c.req.json<{ id?: string; ignored?: boolean }>();
+  if (!id || !/^[0-9a-f]{12}$/.test(id)) return c.json({ error: "Hallazgo no válido" }, 400);
+  await setIgnored(pid(c), id, ignored !== false);
+  return c.json(await getSecurity(pid(c)));
+});
 
 // Share links: Floot-style 7-day development links, and revoking every link at once.
 studioApi.post("/projects/:id/share-link", async (c) => {

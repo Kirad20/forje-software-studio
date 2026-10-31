@@ -11,6 +11,8 @@ import { formatProblems, listProblems, recheckBuild, watchProblems } from "../pl
 import { ensureDeps, MANIFEST, readDeps, resolvePackage, withManifestLock, writeDeps } from "../runtime/deps.js";
 import { checkProject, compileServerModule, endpointRoutes, formatProblem, jobFiles, pageRoutes } from "../runtime/bundler.js";
 import { runBrowserTest, type BrowserStep } from "../runtime/browser.js";
+import { runQuickScan } from "../platform/security.js";
+import { formatFinding } from "../runtime/securityScan.js";
 import { runInSandbox } from "../runtime/sandbox.js";
 import { publishProject } from "../runtime/publish.js";
 import { previewOrigin, previewUrl } from "../runtime/urls.js";
@@ -362,6 +364,16 @@ export const builderTools: BuilderTool[] = [
       } finally {
         if (session) await endTestSession(ctx.projectId, session.token);
       }
+    },
+  },
+  {
+    name: "security_scan",
+    description:
+      "Pasa el escaneo rápido de seguridad al código actual: secretos en páginas o escritos en el código, SQL construido con texto, endpoints que cambian datos sin sesión, endpoints de admin sin rol, POST sin validar, importes que vienen del navegador, HTML sin escapar. Es el mismo que bloquea la publicación (solo los críticos bloquean). Úsalo tras tocar endpoints o antes de publicar, y arregla lo que encuentre.",
+    input_schema: obj({}),
+    async run(_i, ctx) {
+      const open = (await runQuickScan(ctx.projectId)).filter((f) => !f.ignored);
+      return open.length ? `${open.length} hallazgo(s):\n${open.map(formatFinding).join("\n")}` : "Sin hallazgos en el escaneo rápido.";
     },
   },
   {

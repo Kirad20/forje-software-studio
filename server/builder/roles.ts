@@ -64,11 +64,18 @@ Rules for the plan:
 
 const QA = `# Your role: reviewer (QA)
 The specialists have finished. Check the result against the request, the plan and the contract:
-1. check_build; run_tests if there are specs.
+1. check_build; run_tests if there are specs; security_scan.
 2. Exercise every new or changed endpoint with call_endpoint — as an anonymous visitor and, when auth is involved, as a signed-in user — then get_problems. The database is real and shared with the published app: for POST calls use clearly marked test data (e.g. "Prueba QA") and never delete or overwrite the owner's rows.
 3. Walk the main user flow of the request with browser_test, signed in when it needs a user (as_user_email), plus one pass at viewport "mobile"; look at the screenshots for broken layout, empty pages and unreadable contrast.
 4. Read the changed files (listed per task in your message) for the security rules (auth and ownership checks in every endpoint, zod validation, parameterized SQL, no secrets client-side) and for missing loading/empty/error states.
 Then call report_review once. ok=true only if it builds, endpoints behave and there are no security problems; ok=false must come with at least one issue. List only real defects, each with the role that must fix it, the files, the problem and the fix. Do not fix code yourself.`;
+
+const SECURITY_REVIEW = `# Your role: security reviewer
+You audit this app's code for security problems, the way an attacker would look at it. You cannot change anything.
+1. Start with security_scan (the quick rules) and the project map. Then read every endpoint, job and helper they use, and the pages that handle sign-in, payments or user content.
+2. For each endpoint ask: can someone signed out call it? Can a signed-in user read, change or delete another user's rows (ids taken from the request without "and user_id = $n")? Can a normal user reach admin actions? Is every input validated? Are prices, roles or user ids trusted from the browser? Can it be abused at volume (email, AI, row creation) without a limit?
+3. Check the tables (describe_database) for user-owned data without user_id, and pages for secrets, dangerouslySetInnerHTML and private data shown to the wrong user.
+Then call report_security once. Report only real, specific problems you can point to in the code, each with the file, what an attacker would do, and the concrete fix. Do not repeat the quick scan's findings unless you add something. No problems found is a valid result.`;
 
 const CHAT = `# Chat mode
 The owner wants to talk, not build. Answer, explain, investigate (code, data, logs, problems) and propose; you cannot change files or data in this mode.
@@ -89,7 +96,8 @@ This request starts a new app. The owner will iterate on it, so:
 - If the app shows data, add a few realistic sample rows so the preview is not empty, and tell the owner they are samples they can delete.
 - It must build and run with no errors before you finish.`;
 
-export const ROLE_PROMPTS: Record<"planner" | "data" | "backend" | "ui" | "qa" | "fast" | "chat", string> = {
+export const ROLE_PROMPTS: Record<"planner" | "data" | "backend" | "ui" | "qa" | "fast" | "chat" | "security", string> = {
+  security: [INTRO, SECURITY_REVIEW, STRUCTURE, BACKEND, DATA, SECURITY, signIn("Server"), RULES].join("\n\n"),
   fast: BUILDER_SYSTEM_PROMPT,
   chat: [INTRO, CHAT, STRUCTURE, FRONTEND, BACKEND, DATA, SECURITY, RULES].join("\n\n"),
   planner: [INTRO, PLANNER, STRUCTURE, DATA, SECURITY, RULES].join("\n\n"),
@@ -103,7 +111,8 @@ export const ROLE_PROMPTS: Record<"planner" | "data" | "backend" | "ui" | "qa" |
 export { TALK, WORK };
 
 /** Tools each role may use; special tools (submit_plan, report_review) are added by the orchestrator. */
-export const ROLE_TOOLS: Record<"planner" | "data" | "backend" | "ui" | "qa" | "chat", string[]> = {
+export const ROLE_TOOLS: Record<"planner" | "data" | "backend" | "ui" | "qa" | "chat" | "security", string[]> = {
+  security: ["project_map", "read_files", "find_symbol", "related_files", "search_code", "describe_database", "security_scan"],
   planner: ["read_files", "find_symbol", "related_files", "search_code", "describe_database", "fetch_url", "write_file", "edit_file"],
   data: ["project_map", "read_files", "find_symbol", "search_code", "describe_database", "execute_sql", "query_database", "write_file", "edit_file", "check_build", "get_problems", "run_tests"],
   backend: [
@@ -126,14 +135,15 @@ export const ROLE_TOOLS: Record<"planner" | "data" | "backend" | "ui" | "qa" | "
     "call_endpoint",
     "run_job",
     "get_logs",
+    "security_scan",
     "request_secret",
     "list_secrets",
     "setup_auth",
     "fetch_url",
   ],
   ui: ["project_map", "read_files", "find_symbol", "related_files", "search_code", "write_file", "edit_file", "delete_file", "rename_file", "add_dependency", "remove_dependency", "check_build", "get_problems", "get_logs", "call_endpoint", "browser_test"],
-  qa: ["project_map", "read_files", "find_symbol", "related_files", "search_code", "describe_database", "query_database", "check_build", "get_problems", "run_tests", "call_endpoint", "browser_test", "get_logs"],
-  chat: ["project_map", "read_files", "find_symbol", "related_files", "search_code", "describe_database", "query_database", "get_problems", "get_logs", "list_secrets", "fetch_url"],
+  qa: ["project_map", "read_files", "find_symbol", "related_files", "search_code", "describe_database", "query_database", "check_build", "get_problems", "run_tests", "call_endpoint", "browser_test", "security_scan", "get_logs"],
+  chat: ["project_map", "read_files", "find_symbol", "related_files", "search_code", "describe_database", "query_database", "get_problems", "get_logs", "list_secrets", "security_scan", "fetch_url"],
 };
 
 /** Tools of the full builder the fast agent does without: project_map covers the file list, and every turn checkpoints itself. */

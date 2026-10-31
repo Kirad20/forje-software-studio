@@ -264,6 +264,7 @@ export function Chat({
   onClearSelection = () => {},
   problems = [],
   fixNonce = 0,
+  outbox = null,
   reloadKey = 0,
 }: {
   projectId: string;
@@ -275,6 +276,8 @@ export function Chat({
   problems?: Problem[];
   /** Bumped when the preview's "Intentar arreglar" button is pressed. */
   fixNonce?: number;
+  /** A message to send now in build mode, from another panel; a new nonce sends it. */
+  outbox?: { nonce: number; text: string } | null;
   /** Bumped when something outside a turn adds to the chat (a commit from GitHub). */
   reloadKey?: number;
 }) {
@@ -343,6 +346,11 @@ export function Chat({
     if (fixNonce > 0 && problems.length) void send(fixMessage(problems.filter((p) => p.kind === "build").length ? problems.filter((p) => p.kind === "build") : problems), { mode: "build" });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fixNonce]);
+
+  useEffect(() => {
+    if (outbox) void send(outbox.text, { mode: "build" });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [outbox?.nonce]);
 
   useEffect(() => {
     void load().then((r) => {

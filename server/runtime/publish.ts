@@ -1,6 +1,8 @@
 import { scheduleProject } from "../baas/jobs.js";
 import { getProject, isSlugTaken, readAllFiles, recordPublish, unpublish, type Author, type Project } from "../platform/projects.js";
+import { runQuickScan } from "../platform/security.js";
 import { checkProject, formatProblem } from "./bundler.js";
+import { formatFinding } from "./securityScan.js";
 import { appUrl, RESERVED_SLUG } from "./urls.js";
 
 export function suggestSlug(name: string) {
@@ -16,7 +18,8 @@ export function suggestSlug(name: string) {
 }
 
 /**
- * Publishing checks that everything compiles, then snapshots the files. A failed publish
+ * Publishing checks that everything compiles and passes the quick security scan (only
+ * critical findings, such as a secret key in a page, block it), then snapshots the files. A failed publish
  * leaves the live version untouched. The database is shared and is not part of a publish.
  */
 export async function publishProject(projectId: string, requestedSlug?: string, author: Author = "owner"): Promise<{ url: string; slug: string }> {
@@ -28,6 +31,8 @@ export async function publishProject(projectId: string, requestedSlug?: string, 
   const files = await readAllFiles(projectId);
   const problems = await checkProject(files);
   if (problems.length) throw new Error(`No se publicó: la app tiene errores.\n${problems.map(formatProblem).join("\n")}`);
+  const critical = (await runQuickScan(projectId, files)).filter((f) => f.severity === "critical" && !f.ignored);
+  if (critical.length) throw new Error(`No se publicó: hay problemas de seguridad críticos.\n${critical.map(formatFinding).join("\n")}`);
   await recordPublish(projectId, slug, files, author);
   await scheduleProject(projectId);
   return { slug, url: appUrl(slug) };

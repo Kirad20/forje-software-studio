@@ -13,8 +13,10 @@ Prioridad de lo que falta: **P1** núcleo del constructor (más valor, se apoya 
 | 30-oct-2026 | Ronda 1 · 1: paquetes npm (`add_dependency`, `remove_dependency`, `package.json` por proyecto) | Kirad20/clone-repos#51 |
 | 30-oct-2026 | Prompt y contexto: archivos relevantes precargados, guía de primera versión, reglas de alcance, diseño y SEO, `useHead` | Kirad20/clone-repos#51 |
 | 30-oct-2026 | Ronda 1 · 2: pruebas en navegador (`browser_test`) | Kirad20/clone-repos#52 |
+| 31-oct-2026 | CI en GitHub (`forja-ci`: tipos, unidad, build, e2e y agentes con Chromium) e imagen Docker que se construye y arranca en CI | pendiente |
+| 31-oct-2026 | Ronda 1 · 3: escaneo de seguridad (rápido al publicar, revisión profunda con un agente, vista Seguridad, `security_scan`) | pendiente |
 
-Siguiente: Ronda 1 · 3, escaneo de seguridad.
+Siguiente: Ronda 1 · 4, memoria de proyecto.
 
 ## 1. Chat y agente del constructor
 
@@ -131,9 +133,9 @@ Siguiente: Ronda 1 · 3, escaneo de seguridad.
 
 | Lovable | Forja | Prio |
 | --- | --- | --- |
-| Quick scan al publicar (reglas de acceso de la BD, dependencias vulnerables, MCP sin auth) | ❌ | **P1** (versión Forja: endpoints sin `requireUser`, SQL concatenado, secretos en páginas o `static/`, `dangerouslySetInnerHTML`, endpoints de escritura sin zod) |
-| Deep scan (lectura de todo el código por un agente: autorización, abuso sin autenticar, datos de otros) | ⚠️ QA revisa la seguridad solo en la vía de equipo | P1 |
-| Vista Seguridad del proyecto (resultados, arreglar, ignorar) | ❌ | P1 |
+| Quick scan al publicar (reglas de acceso de la BD, dependencias vulnerables, MCP sin auth) | ✅ reglas propias en cada publicación: secretos en páginas (crítico, bloquea) o escritos en el código, `ctx.env` en páginas, SQL construido con texto, `eval`, secretos registrados o devueltos, importes del navegador, endpoints que escriben sin sesión (salvo `// forja:public`), admin sin rol, POST sin zod, `dangerouslySetInnerHTML` · ❌ dependencias vulnerables | P2 (auditoría de dependencias npm) |
+| Deep scan (lectura de todo el código por un agente: autorización, abuso sin autenticar, datos de otros) | ✅ revisión profunda en segundo plano con un agente de solo lectura (gasta créditos); el QA del equipo y el agente rápido usan `security_scan` | — |
+| Vista Seguridad del proyecto (resultados, arreglar, ignorar) | ✅ Servicios → Seguridad: ambos escaneos, «Arreglar» manda el hallazgo al constructor, «Ignorar»/«Reabrir» | — |
 | Trust center (`/.well-known/trust.html` y `trust.json`) | ❌ | P3 |
 | Integraciones Aikido / Wiz | ⏭️ terceros | — |
 | Escaneo de datos sensibles (PII) | ❌ | P4 |
@@ -144,7 +146,7 @@ Siguiente: Ronda 1 · 3, escaneo de seguridad.
 | --- | --- | --- |
 | Publicar, despublicar, quién puede ver la app, metadatos del sitio | ✅ | — |
 | Dominio propio: comprar, conectar, verificar, transferir | ❌ | P3 |
-| Hosting global con HTTPS | ⚠️ local (`*.localhost`) | ⏭️ depende del despliegue |
+| Hosting global con HTTPS | ⚠️ local (`*.localhost`); imagen Docker lista para desplegar (con Chromium, `/healthz`, volumen de datos) | ⏭️ depende del despliegue |
 | SEO/AEO: revisión, Search Console, palabras clave | ⚠️ robots/sitemap/meta, `useHead` (título, descripción y canónica por página) y reglas de SEO en el prompt | P3 |
 | Analítica (tráfico, búsqueda, anuncios) y «qué mejorar» | ✅ analítica sin cookies · ❌ países y recomendaciones | P4 |
 | Anuncios en Google y Meta | ⏭️ | — |
@@ -168,7 +170,7 @@ Siguiente: Ronda 1 · 3, escaneo de seguridad.
 **Ronda 1 (P1, núcleo del constructor)**
 1. ✅ **Paquetes npm** para las apps: `add_dependency` y `remove_dependency` fijan la versión exacta en el `package.json` del proyecto. Cada conjunto de dependencias se instala una vez, sin ejecutar scripts, en `node_modules/.forja-deps/<hash>`; esbuild lo empaqueta para el navegador y los endpoints lo cargan desde ahí.
 2. ✅ **Pruebas en navegador** del agente: herramienta `browser_test` (Chromium sin interfaz contra la vista previa: pasos de clic/escritura/navegación, captura de pantalla que se devuelve como imagen, consola y red, tamaño de pantalla, sesión de un usuario de la app).
-3. **Escaneo de seguridad**: rápido y determinista al publicar, y profundo con un agente de solo lectura. Vista Seguridad con los hallazgos y «Arreglar».
+3. ✅ **Escaneo de seguridad**: rápido y determinista al publicar, y profundo con un agente de solo lectura. Vista Seguridad con los hallazgos y «Arreglar».
 4. **Memoria de proyecto**: hechos y preferencias estructurados (herramienta `remember`, más extracción en `updateSummary`) que se inyectan en el prompt y se pueden ver y editar en Ajustes.
 5. **Preguntas al dueño con opciones** (`ask_owner`), incluidas las preguntas de diseño del primer build (paleta, tipografía, layout).
 6. **Objetivos largos** (`/goal`): turno sin límite de pasos fijo, con pausas por créditos y un cierre con resumen; **seguimientos en caliente** inyectados en el turno en curso.

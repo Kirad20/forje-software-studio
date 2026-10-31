@@ -203,6 +203,24 @@ ok(pub2.status === 400 && pub2.json.error.includes("broken.tsx"), "publish block
 ok((await req("GET", "/", { host: "tareas-equipo.localhost" })).status === 200, "live app untouched after failed publish");
 await req("PUT", `/api/projects/${project.id}/file`, { body: { path: "pages/broken.tsx", content: "export default () => <p>arreglada</p>;" } });
 
+// Security: the quick scan runs on publish; critical findings block it until fixed or ignored.
+const sec0 = await req("GET", `/api/projects/${project.id}/security`);
+ok(sec0.json.quick?.status === "done", "publish ran the quick security scan", sec0.text.slice(0, 300));
+const leakKey = "sk_live_" + "Zx9Yw8Vu7Ts6Rq5Po4Nm3";
+await req("PUT", `/api/projects/${project.id}/file`, { body: { path: "pages/leak.tsx", content: `const key = "${leakKey}";\nexport default () => <p>{key.length}</p>;` } });
+const pubLeak = await req("POST", `/api/projects/${project.id}/publish`, {});
+ok(pubLeak.status === 400 && pubLeak.json.error.includes("seguridad") && pubLeak.json.error.includes("pages/leak.tsx"), "publish blocked by a secret key in a page", pubLeak.text.slice(0, 300));
+const secLeak = await req("POST", `/api/projects/${project.id}/security/scan`, {});
+const leak = secLeak.json.quick.findings.find((f) => f.rule === "secret-in-client");
+ok(leak?.severity === "critical" && leak.file === "pages/leak.tsx" && !leak.ignored, "security scan lists the leaked key", secLeak.text.slice(0, 300));
+const ign = await req("POST", `/api/projects/${project.id}/security/ignore`, { body: { id: leak.id, ignored: true } });
+ok(ign.json.quick.findings.find((f) => f.id === leak.id)?.ignored === true, "a finding can be ignored");
+ok((await req("POST", `/api/projects/${project.id}/publish`, {})).status === 200, "an ignored finding no longer blocks publishing");
+await req("POST", `/api/projects/${project.id}/security/ignore`, { body: { id: leak.id, ignored: false } });
+await req("PUT", `/api/projects/${project.id}/file`, { body: { path: "pages/leak.tsx", content: "export default () => <p>sin claves</p>;" } });
+ok(!(await req("POST", `/api/projects/${project.id}/security/scan`, {})).json.quick.findings.some((f) => f.rule === "secret-in-client"), "the finding goes away once fixed");
+ok((await req("POST", `/api/projects/${project.id}/security/ignore`, { body: { id: "nope" } })).status === 400, "ignore rejects bad ids");
+
 // SEO, analytics and code export on the published app
 await req("PATCH", `/api/projects/${project.id}`, { body: { seo: { siteName: "Tareas del equipo", robots: true, sitemap: true } } });
 const robots = await req("GET", "/robots.txt", { host: "tareas-equipo.localhost" });

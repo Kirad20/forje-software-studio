@@ -126,6 +126,20 @@ try {
   ok(!teamCalls.some((l) => l.role === "backend" && l.firstBuild), "the backend does not get the design-only first-version guidance");
   ok(llmLog.some((l) => l.role === "qa" && l.sawImage), "QA sees the browser_test screenshot", JSON.stringify(llmLog.filter((l) => l.role === "qa")));
 
+  // Deep security review: a read-only agent in the background; its findings land in the Security view.
+  const deep = await req("POST", `/api/projects/${project.id}/security/deep`, {});
+  ok(deep.status === 202 && deep.json.deep?.status === "running", "deep security review starts in the background", JSON.stringify(deep.json).slice(0, 300));
+  ok((await req("POST", `/api/projects/${project.id}/security/deep`, {})).status === 409, "only one deep review at a time");
+  let sec = deep.json;
+  for (let i = 0; i < 50 && sec.deep?.status === "running"; i++) {
+    await new Promise((r) => setTimeout(r, 200));
+    sec = (await req("GET", `/api/projects/${project.id}/security`)).json;
+  }
+  const deepFinding = sec.deep?.findings?.[0];
+  ok(sec.deep?.status === "done" && deepFinding?.source === "deep" && deepFinding.severity === "high" && /^[0-9a-f]{12}$/.test(deepFinding.id), "deep review reports its findings", JSON.stringify(sec.deep).slice(0, 400));
+  ok(sec.deep.summary.includes("Revisé"), "deep review keeps the reviewer's summary");
+  ok(sec.quick?.status === "done", "the reviewer ran the quick scan as a tool");
+
   // Lanes: backend and ui overlapped in time (they only depend on data).
   const chat = (await req("GET", `/api/projects/${project.id}/chat`)).json;
   const lane = (id) => chat.tasks.find((t) => t.id.endsWith(`:${id}`));

@@ -119,7 +119,7 @@ Ship something that looks finished and intentional, not a template:
 - Keep files focused: pages compose components; split anything beyond ~200 lines.
 
 # Before you finish a turn (checklist)
-check_build passes · new endpoints exercised with call_endpoint · business logic covered by helpers/*.spec.ts and run_tests is green · get_problems is clean · new or changed user flows walked once with browser_test · empty/loading/error states exist (and have examples for non-trivial components) · works at 375px · no secrets client-side · todos.md updated on multi-step builds.
+check_build passes · new endpoints exercised with call_endpoint · business logic covered by helpers/*.spec.ts and run_tests is green · get_problems is clean · new or changed user flows walked once with browser_test · empty/loading/error states exist (and have examples for non-trivial components) · works at 375px · no secrets client-side and security_scan clean when endpoints changed · todos.md updated on multi-step builds.
 
 # Rules
 - Call tools only through the tool-calling interface, never by writing a tool call as text or JSON in your reply.

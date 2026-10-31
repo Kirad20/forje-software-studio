@@ -12,9 +12,16 @@ npm run build          # compila el studio
 npm start              # http://localhost:4100
 ```
 
+Con Docker (incluye Chromium para `browser_test`; `--build-arg BROWSER=0` lo quita):
+
+```bash
+docker build -t forja forja/
+docker run -p 4100:4100 -v forja-data:/app/data -e SECRETS_KEY=... -e ANTHROPIC_API_KEY=... forja
+```
+
 Desarrollo con recarga: `npm run dev` (servidor en :4100 + studio Vite en :5173). Sin SMTP, el código de acceso al studio aparece en la consola del servidor.
 
-Pruebas: `npm run typecheck`, `npm test` (unidad: enrutador, aprendizaje, índice), `npm run test:e2e` (studio, todos los servicios BaaS, vista previa, publicación, tiempo real y MCP, sin LLM) `npm run test:agents` (equipo de agentes contra un modelo simulado: plan, paralelismo, propiedad de archivos, revisión, listas blancas, respaldo, costes, modos Chat/Plan y arreglo automático) y `npm run test:github` (sincronización con una API de GitHub simulada y el registro de problemas).
+Pruebas: `npm run typecheck`, `npm test` (unidad: enrutador, aprendizaje, índice), `npm run test:e2e` (studio, todos los servicios BaaS, vista previa, publicación, tiempo real y MCP, sin LLM) `npm run test:agents` (equipo de agentes contra un modelo simulado: plan, paralelismo, propiedad de archivos, revisión, listas blancas, respaldo, costes, modos Chat/Plan y arreglo automático) y `npm run test:github` (sincronización con una API de GitHub simulada y el registro de problemas). En GitHub, `.github/workflows/forja-ci.yml` pasa tipos, unidad, build, e2e y agentes (con Chromium) en cada PR que toca `forja/`, y construye y arranca la imagen Docker.
 
 ## Cómo está hecho
 
@@ -42,6 +49,7 @@ apps generadas ──▶  pv-<id>.localhost   (vista previa, enlace con token)
 - **SDK**: el navegador usa `@forja/client` (router, `api`, `useApi`, `auth`, `storage`, `realtime`, `ai`); los endpoints y tareas reciben `ctx` (`db`, `user`, `storage`, `email`, `ai`, `jobs`, `realtime`, `payments`, `env`). El manual completo que lee el agente está en `server/builder/prompt.ts`.
 - **Paquetes npm** (`runtime/deps.ts`): además de `react`, `react-dom` y `zod`, cada app puede usar cualquier paquete de npm. El agente lo añade con `add_dependency`, que fija la versión exacta en el `package.json` del proyecto y lo instala sin ejecutar scripts. Cada conjunto de dependencias se instala una sola vez en `node_modules/.forja-deps/<hash>` y lo comparten todos los proyectos que lo usen. El navegador recibe los paquetes empaquetados, siempre con una única copia de React; los endpoints los cargan desde esa carpeta, dentro del entorno aislado. Importar un paquete sin instalarlo da un error de compilación. `FORJA_NPM=0` lo desactiva y `FORJA_NPM_REGISTRY` cambia el registro.
 - **Pruebas en navegador** (`runtime/browser.ts`): con `browser_test`, el agente abre la vista previa en un Chromium sin interfaz (Playwright), navega, hace clic, escribe y comprueba textos, como visitante anónimo o con la sesión de un usuario de la app, y en tamaño móvil, tablet o escritorio. Recibe el resultado de cada paso, los errores de consola, las peticiones fallidas, el texto visible y hasta tres capturas que el modelo ve. Solo puede pedir la propia vista previa y recursos https públicos; el estudio, otras apps y las redes privadas quedan bloqueados. Las capturas no se guardan en el historial. Necesita Chromium (`npx playwright-core install chromium-headless-shell`) o `FORJA_CHROMIUM` con la ruta de un Chrome; `FORJA_BROWSER=0` lo desactiva.
+- **Seguridad** (`runtime/securityScan.ts`, `builder/securityReview.ts`): un escaneo rápido de reglas fijas se pasa en cada publicación (los hallazgos críticos, como una clave secreta en una página, la bloquean) y está disponible para el agente como `security_scan`. Busca secretos en páginas o escritos en el código, SQL construido con texto, endpoints que cambian datos sin sesión o de admin sin rol, POST sin validar, importes que vienen del navegador y HTML sin escapar; un endpoint abierto a propósito se marca con `// forja:public`. La revisión profunda la hace en segundo plano un agente de solo lectura que lee el código como un atacante. Ambos resultados se ven en Servicios → Seguridad, donde cada hallazgo se puede mandar al constructor («Arreglar») o ignorar.
 
 ## Paridad con Floot
 

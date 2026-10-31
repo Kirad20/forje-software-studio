@@ -41,6 +41,20 @@ function script(body) {
       };
     return { role: "planner", res: reply("Plan entregado.") };
   }
+  if (sys.includes("# Your role: security reviewer")) {
+    if (step === 0) return { role: "security", res: reply(null, [call("security_scan", {})]) };
+    if (step === 1)
+      return {
+        role: "security",
+        res: reply(null, [
+          call("report_security", {
+            summary: "Revisé los endpoints: uno lista notas de todos sin pedir sesión.",
+            findings: [{ severity: "high", title: "notes/list devuelve las notas de todos", file: "endpoints/notes/list_GET.ts", detail: "Cualquiera sin cuenta puede leer todas las notas.", fix: "Pide ctx.requireUser() y filtra por user_id." }],
+          }),
+        ]),
+      };
+    return { role: "security", res: reply("Revisión entregada.") };
+  }
   if (sys.includes("# Your role: reviewer")) {
     if (step === 0) return { role: "qa", res: reply(null, [call("check_build", {}), call("browser_test", { steps: [{ action: "goto", path: "/notes" }, { action: "screenshot" }] })]) };
     if (step === 1) {

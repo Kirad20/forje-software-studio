@@ -330,6 +330,25 @@ create table if not exists conversation_summaries (
   updated_at timestamptz not null default now()
 );
 
+-- Latest security scan of each kind (quick: rules on publish; deep: an agent's review).
+create table if not exists security_scans (
+  project_id text not null references projects(id) on delete cascade,
+  kind text not null check (kind in ('quick', 'deep')),
+  status text not null default 'done' check (status in ('running', 'done', 'failed')),
+  findings jsonb not null default '[]',
+  summary text not null default '',
+  scanned_at timestamptz not null default now(),
+  primary key (project_id, kind)
+);
+
+-- Findings the owner reviewed and chose to keep as they are.
+create table if not exists security_ignores (
+  project_id text not null references projects(id) on delete cascade,
+  finding_id text not null,
+  created_at timestamptz not null default now(),
+  primary key (project_id, finding_id)
+);
+
 alter table ai_usage add column if not exists cache_read_tokens integer not null default 0;
 alter table ai_usage add column if not exists cache_write_tokens integer not null default 0;
 alter table ai_usage add column if not exists usd double precision not null default 0;
