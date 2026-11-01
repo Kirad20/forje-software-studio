@@ -31,6 +31,20 @@ export function studioOrigins(): string[] {
   return [new URL(config.publicUrl).origin, "http://localhost:5173"];
 }
 
+/**
+ * The client's address. Behind `config.trustProxy` proxies, each one appends the address it saw
+ * to X-Forwarded-For, so the N-th entry from the right is what the outermost trusted proxy saw;
+ * anything further left is client-supplied and spoofable.
+ */
+export function clientIp(socketAddress: string | undefined, forwardedFor: string | null | undefined, trustProxy = config.trustProxy): string {
+  if (trustProxy > 0 && forwardedFor) {
+    const hops = forwardedFor.split(",").map((s) => s.trim()).filter(Boolean);
+    const ip = hops[Math.max(0, hops.length - trustProxy)];
+    if (ip) return ip;
+  }
+  return socketAddress ?? "unknown";
+}
+
 export const isHttps = () => config.publicUrl.startsWith("https://");
 
 /** Headers for the studio itself: it must never be framed, and sniffing is off. */

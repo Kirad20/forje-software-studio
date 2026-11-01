@@ -57,7 +57,7 @@ import { metricsReport } from "../builder/metrics.js";
 import { TOOL_HINTS } from "../mcp/server.js";
 import { taskClassOf, type Role } from "../llm/router.js";
 import { accessOf, inviteMember, listMembers, removeMember, sharedProjectIds, type Access } from "../platform/members.js";
-import { isHttps, rateLimit, RateLimitError, studioOrigins } from "../lib/security.js";
+import { clientIp, isHttps, rateLimit, RateLimitError, studioOrigins } from "../lib/security.js";
 
 const quoteIdent = (name: string) => `"${name.replace(/"/g, '""')}"`;
 
@@ -106,7 +106,7 @@ const sse = (start: (send: (data: unknown) => void, close: () => void) => () => 
 };
 
 export const ipOf = (c: Context) =>
-  (c.env as { incoming?: { socket?: { remoteAddress?: string } } })?.incoming?.socket?.remoteAddress ?? "unknown";
+  clientIp((c.env as { incoming?: { socket?: { remoteAddress?: string } } })?.incoming?.socket?.remoteAddress, c.req.header("x-forwarded-for"));
 
 /**
  * CSRF defence for the studio API. State-changing requests must come from the studio's

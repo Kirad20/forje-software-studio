@@ -18,7 +18,7 @@ import { cookie, parseCookies, serveApp } from "./runtime/appServer.js";
 import { stopAllSandboxes } from "./runtime/sandbox.js";
 import { startCatalogSync } from "./llm/catalog.js";
 import { startGithubSync } from "./platform/github.js";
-import { rateLimit, STUDIO_HEADERS } from "./lib/security.js";
+import { clientIp as ipOfClient, rateLimit, STUDIO_HEADERS } from "./lib/security.js";
 import { langfuse } from "./builder/tracing.js";
 import { closeBrowser } from "./runtime/browser.js";
 import { checkShareToken, parseAppHost, SHARE_COOKIE } from "./runtime/urls.js";
@@ -65,7 +65,9 @@ app.use("*", async (c, next) => {
       },
     });
   }
-  const clientIp = (c.env as { incoming?: { socket?: { remoteAddress?: string } } })?.incoming?.socket?.remoteAddress;
+  const socketIp = (c.env as { incoming?: { socket?: { remoteAddress?: string } } })?.incoming?.socket?.remoteAddress;
+  const ip = ipOfClient(socketIp, c.req.header("x-forwarded-for"));
+  const clientIp = ip === "unknown" ? undefined : ip;
   return serveApp(c.req.raw, { project: resolved.project, env: resolved.env, base: "", clientIp }, url.pathname);
 });
 
