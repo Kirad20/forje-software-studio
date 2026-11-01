@@ -193,6 +193,19 @@ async function logChange(
 }
 
 /** `actor` is the email of the person behind the change, for the timeline. */
+/**
+ * The project's code version: the id of its latest change to files. Checkpoints and
+ * publishes do not count, since they change no code. MCP clients pass it back as
+ * expected_version so a write fails instead of silently overwriting someone else's edit.
+ */
+export async function projectVersion(projectId: string): Promise<number> {
+  const r = await one<{ v: number | null }>(
+    `select max(id) as v from project_changes where project_id = $1 and kind not in ('checkpoint', 'publish')`,
+    [projectId],
+  );
+  return Number(r?.v ?? 0);
+}
+
 export async function writeFile(projectId: string, path: string, content: string, author: Author = "owner", actor?: string) {
   assertValidPath(path);
   const before = await readFile(projectId, path);

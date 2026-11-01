@@ -48,7 +48,7 @@ function kindOf(p: string): FileFacts["kind"] {
   return "other";
 }
 
-function resolveImport(from: string, spec: string, files: FileMap): string | null {
+export function resolveImport(from: string, spec: string, files: FileMap): string | null {
   let target: string;
   if (/^(~|@)\//.test(spec)) target = spec.slice(2);
   else if (spec.startsWith(".")) target = path.posix.normalize(path.posix.join(path.posix.dirname(from), spec));

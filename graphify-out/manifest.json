@@ -102,9 +102,9 @@
     "semantic_hash": ""
   },
   "server/builder/index.ts": {
-    "mtime": 1793552499.6941667,
-    "seen": 1793552520.6077895,
-    "ast_hash": "e1c6a63eab7f3ed64f5e049ff8630d0a",
+    "mtime": 1793553093.8721194,
+    "seen": 1793553266.716027,
+    "ast_hash": "337e16a1116ca4fcb28c205da9c02882",
     "semantic_hash": ""
   },
   "server/builder/orchestrator.ts": {
@@ -138,9 +138,9 @@
     "semantic_hash": ""
   },
   "server/builder/tools.ts": {
-    "mtime": 1793552666.4278915,
-    "seen": 1793552837.6984859,
-    "ast_hash": "27587e56399b3f650ca139b2ebbe178f",
+    "mtime": 1793553112.234937,
+    "seen": 1793553266.7160397,
+    "ast_hash": "8383ca1945e462334de564aae927a088",
     "semantic_hash": ""
   },
   "server/config.ts": {
@@ -222,9 +222,9 @@
     "semantic_hash": ""
   },
   "server/mcp/server.ts": {
-    "mtime": 1793552656.639291,
-    "seen": 1793552837.6985092,
-    "ast_hash": "4f32d80727bfb35fe39830793d11d3c5",
+    "mtime": 1793553196.3497422,
+    "seen": 1793553266.716067,
+    "ast_hash": "767699ea366bc45d99ed4fdf179bba2b",
     "semantic_hash": ""
   },
   "server/platform/accounts.ts": {
@@ -276,9 +276,9 @@
     "semantic_hash": ""
   },
   "server/platform/projects.ts": {
-    "mtime": 1793552499.6959116,
-    "seen": 1793552520.6078303,
-    "ast_hash": "c56d636f9a085b6e139204eebc70bfa9",
+    "mtime": 1793553146.50547,
+    "seen": 1793553266.7160826,
+    "ast_hash": "00e5df370b33562f44bc512e927c560b",
     "semantic_hash": ""
   },
   "server/platform/security.ts": {
@@ -528,9 +528,9 @@
     "semantic_hash": ""
   },
   "test/e2e.mjs": {
-    "mtime": 1793552796.271472,
-    "seen": 1793552837.6985822,
-    "ast_hash": "d95b4af847cd8501296504035d28c55d",
+    "mtime": 1793553222.1182227,
+    "seen": 1793553266.7161405,
+    "ast_hash": "c90a5968e020336e95c1f1d5b14d8714",
     "semantic_hash": ""
   },
   "test/fakeGithub.mjs": {
@@ -630,15 +630,39 @@
     "semantic_hash": ""
   },
   "server/mcp/guides.ts": {
-    "mtime": 1793552614.568386,
-    "seen": 1793552837.6985075,
+    "mtime": 1793553057.254969,
+    "seen": 1793553059.5349996,
     "ast_hash": "81ee18c90a9239a1fe8b5c6a354988f4",
     "semantic_hash": ""
   },
   "test/unit/mcp.test.ts": {
-    "mtime": 1793552679.570079,
-    "seen": 1793552837.6985922,
-    "ast_hash": "98cc5c70e4a04f78bbb70e81d99b0ea4",
+    "mtime": 1793553210.418328,
+    "seen": 1793553266.7161515,
+    "ast_hash": "abc32e97d058a71e1b9fbd41d53c5f70",
+    "semantic_hash": ""
+  },
+  "server/builder/rename.ts": {
+    "mtime": 1793553093.8752382,
+    "seen": 1793553266.716032,
+    "ast_hash": "469fe08a43aede081058af4279fef268",
+    "semantic_hash": ""
+  },
+  "server/mcp/jobs.ts": {
+    "mtime": 1793553181.9524198,
+    "seen": 1793553266.716065,
+    "ast_hash": "3e3a8b70ef62bf7d374bd6176b41f300",
+    "semantic_hash": ""
+  },
+  "test/unit/mcpJobs.test.ts": {
+    "mtime": 1793553181.9559608,
+    "seen": 1793553266.7161527,
+    "ast_hash": "022b1fc42205dcbed90ba93676b17318",
+    "semantic_hash": ""
+  },
+  "test/unit/rename.test.ts": {
+    "mtime": 1793553093.8764145,
+    "seen": 1793553266.7161539,
+    "ast_hash": "9416c047cd4d4970e87e046f37870f0f",
     "semantic_hash": ""
   },
   "package-lock.json": {

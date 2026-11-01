@@ -36,7 +36,7 @@ describe("MCP guides", () => {
 
 describe("MCP tool hints", () => {
   it("annotates every tool the server exposes", () => {
-    for (const name of [...builderTools.map((t) => t.name), "list_projects", "create_project", "get_guides"]) {
+    for (const name of [...builderTools.map((t) => t.name), "list_projects", "create_project", "get_guides", "get_job_status"]) {
       expect(TOOL_HINTS[name], `falta TOOL_HINTS.${name}`).toBeDefined();
     }
   });

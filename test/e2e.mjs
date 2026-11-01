@@ -350,6 +350,21 @@ const overview = await mcpCall(21, "get_guides", { topic: "forja-overview" });
 ok(overview?.content?.[0]?.text?.includes("# Project structure"), "mcp get_guides returns a topic", JSON.stringify(overview).slice(0, 300));
 const lf = await mcpCall(22, "list_files", { projectId: project.id });
 ok(lf?.content?.[0]?.text?.includes("<project-context>"), "mcp list_files ends with the project context", JSON.stringify(lf).slice(-300));
+const version = Number(/Versión del proyecto: (\d+)/.exec(lf?.content?.[0]?.text ?? "")?.[1]);
+ok(version > 0, "mcp list_files reports the project version", String(version));
+const w1 = await mcpCall(23, "write_file", { projectId: project.id, path: "helpers/mcpVersion.ts", content: "export const v = 1;\n", expected_version: version });
+const v2 = Number(/Versión del proyecto: (\d+)/.exec(w1?.content?.[0]?.text ?? "")?.[1]);
+ok(!w1?.isError && v2 > version, "mcp write with the current version succeeds and returns the new one", JSON.stringify(w1).slice(0, 300));
+const stale = await mcpCall(24, "write_file", { projectId: project.id, path: "helpers/mcpVersion.ts", content: "export const v = 2;\n", expected_version: version });
+ok(stale?.isError && stale?.content?.[0]?.text?.includes("VERSION_CONFLICT"), "mcp write with a stale version is refused", JSON.stringify(stale).slice(0, 300));
+await mcpCall(25, "write_file", { projectId: project.id, path: "pages/mcpuses.tsx", content: 'import { v } from "../helpers/mcpVersion";\nexport default function P() { return <p>{v}</p>; }\n' });
+const mv = await mcpCall(26, "rename_file", { projectId: project.id, from: "helpers/mcpVersion.ts", to: "helpers/sub/mcpVersion2.ts" });
+const usesAfter = await mcpCall(27, "read_files", { projectId: project.id, paths: ["pages/mcpuses.tsx"] });
+ok(mv?.content?.[0]?.text?.includes("pages/mcpuses.tsx") && usesAfter?.content?.[0]?.text?.includes('"../helpers/sub/mcpVersion2"'), "mcp rename_file rewrites importers", JSON.stringify(mv).slice(0, 300));
+await mcpCall(28, "delete_file", { projectId: project.id, path: "pages/mcpuses.tsx" });
+await mcpCall(29, "delete_file", { projectId: project.id, path: "helpers/sub/mcpVersion2.ts" });
+const jobRes = await mcpCall(30, "get_job_status", { jobId: "job_nope" });
+ok(jobRes?.isError && jobRes?.content?.[0]?.text?.includes("Job desconocido"), "mcp get_job_status rejects unknown jobs", JSON.stringify(jobRes).slice(0, 300));
 // browser_test: a real headless Chromium against the preview, anonymous and signed in.
 const browse = async (args) =>
   (await req("POST", "/mcp", { headers: mcpH, body: { jsonrpc: "2.0", id: 4, method: "tools/call", params: { name: "browser_test", arguments: { projectId: project.id, ...args } } } })).json?.result?.content ?? [];
