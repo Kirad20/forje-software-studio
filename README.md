@@ -5,7 +5,6 @@ Constructor de apps full-stack por chat, con su propio BaaS incluido. Es una rei
 ## Arranque
 
 ```bash
-cd forja
 npm install
 cp .env.example .env   # pon SECRETS_KEY y al menos un proveedor: ANTHROPIC_API_KEY, OPENROUTER_API_KEY u OPENAI_BASE_URL
 npm run build          # compila el studio
@@ -15,13 +14,13 @@ npm start              # http://localhost:4100
 Con Docker (incluye Chromium para `browser_test`; `--build-arg BROWSER=0` lo quita):
 
 ```bash
-docker build -t forja forja/
+docker build -t forja .
 docker run -p 4100:4100 -v forja-data:/app/data -e SECRETS_KEY=... -e ANTHROPIC_API_KEY=... forja
 ```
 
 Desarrollo con recarga: `npm run dev` (servidor en :4100 + studio Vite en :5173). Sin SMTP, el código de acceso al studio aparece en la consola del servidor.
 
-Pruebas: `npm run typecheck`, `npm test` (unidad: enrutador, aprendizaje, índice), `npm run test:e2e` (studio, todos los servicios BaaS, vista previa, publicación, tiempo real y MCP, sin LLM) `npm run test:agents` (equipo de agentes contra un modelo simulado: plan, paralelismo, propiedad de archivos, revisión, listas blancas, respaldo, costes, modos Chat/Plan y arreglo automático) y `npm run test:github` (sincronización con una API de GitHub simulada y el registro de problemas). En GitHub, `.github/workflows/forja-ci.yml` pasa tipos, unidad, build, e2e y agentes (con Chromium) en cada PR que toca `forja/`, y construye y arranca la imagen Docker.
+Pruebas: `npm run typecheck`, `npm test` (unidad: enrutador, aprendizaje, índice), `npm run test:e2e` (studio, todos los servicios BaaS, vista previa, publicación, tiempo real y MCP, sin LLM) `npm run test:agents` (equipo de agentes contra un modelo simulado: plan, paralelismo, propiedad de archivos, revisión, listas blancas, respaldo, costes, modos Chat/Plan y arreglo automático) y `npm run test:github` (sincronización con una API de GitHub simulada y el registro de problemas). En GitHub, `.github/workflows/ci.yml` pasa tipos, unidad, build, e2e y agentes (con Chromium) en cada PR y push a `main`, y construye y arranca la imagen Docker.
 
 ## Cómo está hecho
 

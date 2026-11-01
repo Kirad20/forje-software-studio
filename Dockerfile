@@ -1,5 +1,5 @@
 # Forja: studio + app server in one image.
-#   docker build -t forja forja/
+#   docker build -t forja .
 #   docker run -p 4100:4100 -v forja-data:/app/data -e SECRETS_KEY=... -e ANTHROPIC_API_KEY=... forja
 # BROWSER=0 leaves out Chromium (browser_test then reports it is unavailable): a ~300 MB smaller image.
 

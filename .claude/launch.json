@@ -1,0 +1,13 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "forja",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["--env-file-if-exists=.env", "--env-file-if-exists=.env.preview", "--import", "tsx", "server/index.ts"],
+      "cwd": ".",
+      "port": 4200,
+      "autoPort": false
+    }
+  ]
+}
