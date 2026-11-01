@@ -26,7 +26,10 @@ services:
       # --- Coolify: dominio, proxy y secretos generados ---
       # Coolify crea el dominio del studio y lo enruta al puerto 4100 del contenedor.
       - SERVICE_URL_FORJA_4100
-      - PUBLIC_URL=${SERVICE_URL_FORJA_4100}
+      # URL pública del studio. Vacía: Forja usa SERVICE_URL_FORJA_4100 y, si Coolify no la define,
+      # https://FORJA_DOMAIN. Rellénala solo si el studio vive en otra dirección.
+      - PUBLIC_URL=${PUBLIC_URL:-}
+      - FORJA_DOMAIN=${FORJA_DOMAIN:-}
       # 64 caracteres hex (32 bytes) generados una vez y guardados por Coolify. Cifra los secretos
       # de los proyectos: si se pierde o cambia, esos secretos dejan de poder leerse. Respáldala.
       - SECRETS_KEY=${SERVICE_HEX_64_SECRETSKEY}

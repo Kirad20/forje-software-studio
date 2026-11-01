@@ -21,6 +21,12 @@ describe("resolvePublicUrl", () => {
     expect(resolvePublicUrl({ PUBLIC_URL: "http://localhost:4100", FORJA_TRUST_PROXY: "0" })).toBe("http://localhost:4100");
   });
 
+  it("falls back to https://FORJA_DOMAIN when Coolify does not set the service URL", () => {
+    expect(resolvePublicUrl({ PUBLIC_URL: "", SERVICE_URL_FORJA_4100: "", FORJA_DOMAIN: "forja-abc.example.com", FORJA_TRUST_PROXY: "1" })).toBe("https://forja-abc.example.com");
+    expect(resolvePublicUrl({ FORJA_DOMAIN: "https://forja-abc.example.com/" })).toBe("https://forja-abc.example.com");
+    expect(resolvePublicUrl({ PUBLIC_URL: "https://studio.example.com", FORJA_DOMAIN: "apps.example.com" })).toBe("https://studio.example.com");
+  });
+
   it("defaults to localhost on PORT and rejects garbage", () => {
     expect(resolvePublicUrl({ PORT: "4300" })).toBe("http://localhost:4300");
     expect(() => resolvePublicUrl({ PUBLIC_URL: "not a url" })).toThrow(/PUBLIC_URL/);
