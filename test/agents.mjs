@@ -8,11 +8,13 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { log as llmLog, startFakeLlm } from "./fakeLlm.mjs";
+import { freshDatabase } from "./helpers/pg.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const { server: llm, port: llmPort } = await startFakeLlm();
 const PORT = 4800 + Math.floor(Math.random() * 400);
 const DATA = mkdtempSync(path.join(tmpdir(), "forja-agents-"));
+const pgdb = await freshDatabase();
 const MODELS = [
   { provider: "openai", model: "fake-strong", label: "Fuerte", tier: 5, inPrice: 2, outPrice: 10, cacheReadPrice: 0.2, speed: 2, vision: true },
   { provider: "openai", model: "fake-mid", label: "Mediano", tier: 3, inPrice: 0.1, outPrice: 0.5, cacheReadPrice: 0.01, speed: 5, vision: true },
@@ -26,6 +28,7 @@ const app = spawn(process.execPath, ["--import", "tsx", "server/index.ts"], {
     PORT: String(PORT),
     PUBLIC_URL: `http://localhost:${PORT}`,
     DATA_DIR: DATA,
+    DATABASE_URL: pgdb.url,
     SECRETS_KEY: "cd".repeat(32),
     ANTHROPIC_API_KEY: "",
     OPENROUTER_API_KEY: "",
@@ -48,7 +51,10 @@ app.stderr.on("data", (d) => (serverLog += d));
 const finish = () => {
   app.kill();
   llm.close();
-  setTimeout(() => rmSync(DATA, { recursive: true, force: true }), 500);
+  setTimeout(() => {
+    rmSync(DATA, { recursive: true, force: true });
+    pgdb.drop().catch(() => {});
+  }, 500);
 };
 
 let cookie = "";

@@ -10,6 +10,18 @@ jobs:
     runs-on: ubuntu-latest
     env:
       PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.ms-playwright
+      # Each test creates and drops its own database on this server (test/helpers/pg.mjs).
+      TEST_DATABASE_URL: postgres://forja:forja@127.0.0.1:5432/postgres
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: forja
+          POSTGRES_PASSWORD: forja
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U forja" --health-interval 5s --health-timeout 5s --health-retries 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -46,7 +58,10 @@ jobs:
           cache-to: type=gha,mode=max
       - name: Arrancar y comprobar /healthz
         run: |
-          docker run -d --name forja -p 4100:4100 -e SECRETS_KEY=$(openssl rand -hex 32) forja:ci
+          docker network create forja
+          docker run -d --name pg --network forja -e POSTGRES_USER=forja -e POSTGRES_PASSWORD=forja -e POSTGRES_DB=forja postgres:17-alpine
+          until docker exec pg pg_isready -U forja; do sleep 1; done
+          docker run -d --name forja --network forja -p 4100:4100 -e SECRETS_KEY=$(openssl rand -hex 32) -e DATABASE_URL=postgres://forja:forja@pg:5432/forja forja:ci
           for i in $(seq 1 30); do
             if curl -fsS http://localhost:4100/healthz; then echo; break; fi
             sleep 2

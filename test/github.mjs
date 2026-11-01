@@ -7,11 +7,13 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { startFakeGithub } from "./fakeGithub.mjs";
+import { freshDatabase } from "./helpers/pg.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const gh = await startFakeGithub();
 const PORT = 5200 + Math.floor(Math.random() * 400);
 const DATA = mkdtempSync(path.join(tmpdir(), "forja-github-"));
+const pgdb = await freshDatabase();
 let serverLog = "";
 const app = spawn(process.execPath, ["--import", "tsx", "server/index.ts"], {
   cwd: ROOT,
@@ -20,6 +22,7 @@ const app = spawn(process.execPath, ["--import", "tsx", "server/index.ts"], {
     PORT: String(PORT),
     PUBLIC_URL: `http://localhost:${PORT}`,
     DATA_DIR: DATA,
+    DATABASE_URL: pgdb.url,
     SECRETS_KEY: "ef".repeat(32),
     ANTHROPIC_API_KEY: "",
     OPENROUTER_API_KEY: "",
@@ -195,5 +198,8 @@ try {
   if (process.exitCode) console.log("\n--- server log ---\n" + serverLog.slice(-4000));
   app.kill();
   gh.server.close();
-  setTimeout(() => rmSync(DATA, { recursive: true, force: true }), 500);
+  setTimeout(() => {
+    rmSync(DATA, { recursive: true, force: true });
+    pgdb.drop().catch(() => {});
+  }, 500);
 }

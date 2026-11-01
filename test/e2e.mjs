@@ -8,20 +8,25 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocket } from "ws";
+import { freshDatabase } from "./helpers/pg.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PORT = 4300 + Math.floor(Math.random() * 500);
 const DATA = mkdtempSync(path.join(tmpdir(), "forja-e2e-"));
+const pgdb = await freshDatabase();
 let serverLog = "";
 const server = spawn(process.execPath, ["--import", "tsx", "server/index.ts"], {
   cwd: ROOT,
-  env: { ...process.env, PORT: String(PORT), PUBLIC_URL: `http://localhost:${PORT}`, DATA_DIR: DATA, SECRETS_KEY: "ab".repeat(32), SMTP_URL: "", FORJA_BOOTSTRAP_TOKEN: "e2e-bootstrap-token-0123456789" },
+  env: { ...process.env, PORT: String(PORT), PUBLIC_URL: `http://localhost:${PORT}`, DATA_DIR: DATA, DATABASE_URL: pgdb.url, FORJA_SEED_FILE: "", SECRETS_KEY: "ab".repeat(32), FORJA_BOOTSTRAP_TOKEN: "e2e-bootstrap-token-0123456789" },
 });
 server.stdout.on("data", (d) => (serverLog += d));
 server.stderr.on("data", (d) => (serverLog += d));
 const finish = () => {
   server.kill();
-  setTimeout(() => rmSync(DATA, { recursive: true, force: true }), 500);
+  setTimeout(() => {
+    rmSync(DATA, { recursive: true, force: true });
+    pgdb.drop().catch(() => {});
+  }, 500);
 };
 const jar = {}; // host -> cookie string
 

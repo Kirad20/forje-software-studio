@@ -2,11 +2,14 @@ import { mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { freshDatabase } from "../helpers/pg.mjs";
 
-// The platform database lives under DATA_DIR, read when config loads: point it at a temp dir first.
+// Config is read when it loads: point DATA_DIR and DATABASE_URL at throwaway ones first.
 const dir = mkdtempSync(path.join(os.tmpdir(), "forja-metrics-"));
 process.env.DATA_DIR = dir;
-const { q } = await import("../../server/platform/db.js");
+const pgdb = await freshDatabase();
+process.env.DATABASE_URL = pgdb.url;
+const { q, closePlatformDb } = await import("../../server/platform/db.js");
 const m = await import("../../server/builder/metrics.js");
 
 const usage = (input: number) => ({ input, output: 10, cacheRead: 0, cacheWrite: 0 });
@@ -17,7 +20,11 @@ beforeAll(async () => {
   await q(`insert into accounts (id, email) values ('a1', 'a@x.test')`);
   await q(`insert into projects (id, owner_id, name) values ('p1', 'a1', 'Demo'), ('p2', 'a1', 'Otro')`);
 });
-afterAll(() => rmSync(dir, { recursive: true, force: true }));
+afterAll(async () => {
+  rmSync(dir, { recursive: true, force: true });
+  await closePlatformDb();
+  await pgdb.drop();
+});
 
 describe("agent metrics", () => {
   it("estimates tokens at about four characters each", () => {

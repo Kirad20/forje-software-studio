@@ -1,13 +1,15 @@
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { freshDatabase } from "../helpers/pg.mjs";
 
 // A throwaway data dir and a known bootstrap token, set before anything imports the config.
 process.env.DATA_DIR = mkdtempSync(path.join(tmpdir(), "forja-auth-"));
 process.env.FORJA_BOOTSTRAP_TOKEN = "bootstrap-token-for-tests";
 process.env.SECRETS_KEY = "ab".repeat(32);
-process.env.SMTP_URL = "";
+const pgdb = await freshDatabase();
+process.env.DATABASE_URL = pgdb.url;
 
 const crypto = await import("../../server/lib/crypto.js");
 const accounts = await import("../../server/platform/accounts.js");
@@ -15,7 +17,11 @@ const bootstrap = await import("../../server/platform/bootstrap.js");
 const orgs = await import("../../server/platform/orgs.js");
 const members = await import("../../server/platform/members.js");
 const projects = await import("../../server/platform/projects.js");
-const { platformDb, q, one } = await import("../../server/platform/db.js");
+const { platformDb, q, one, closePlatformDb } = await import("../../server/platform/db.js");
+afterAll(async () => {
+  await closePlatformDb();
+  await pgdb.drop();
+});
 
 describe("password hashing", () => {
   it("round-trips, embeds its parameters and salts every hash", async () => {

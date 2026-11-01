@@ -14,6 +14,8 @@ export const config = {
   port: Number(env.PORT ?? 4100),
   publicUrl: (env.PUBLIC_URL ?? `http://localhost:${env.PORT ?? 4100}`).replace(/\/$/, ""),
   dataDir: path.resolve(ROOT_DIR, env.DATA_DIR ?? "data"),
+  /** The platform database (Postgres). Project app databases stay in PGlite under dataDir. */
+  databaseUrl: env.DATABASE_URL ?? "",
   secretsKey: env.SECRETS_KEY ?? "",
   /**
    * Reverse proxies in front of Forja (Traefik in Coolify, nginx…). With N > 0 the client IP is
@@ -114,7 +116,6 @@ if (!config.secretsKey) {
 }
 
 export const paths = {
-  platformDb: path.join(config.dataDir, "platform"),
   projectDb: (projectId: string) => path.join(config.dataDir, "projects", projectId, "db"),
   projectStorage: (projectId: string) => path.join(config.dataDir, "projects", projectId, "storage"),
   // Compiled endpoints import npm packages by name, so they must live where Node resolves
