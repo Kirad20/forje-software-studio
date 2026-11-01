@@ -71,27 +71,33 @@ export async function startPlayground(input: { role?: string; modelId?: string; 
   if (prompt.length > 20_000) throw new PlaygroundError(400, "El prompt es demasiado largo (máx. 20 000 caracteres).");
   const files = Object.entries(input.files ?? {}).filter(([p, c]) => typeof p === "string" && typeof c === "string");
   if (files.some(([p]) => !/^[\w./[\]-]+$/.test(p) || p.includes(".."))) throw new PlaygroundError(400, "Hay rutas de archivo no válidas.");
-  if ([...runs.values()].some((r) => r.adminId === adminId && r.status === "running")) throw new PlaygroundError(409, "Ya tienes una ejecución en curso.");
-  // The evals pin the internal account's models for their run: both at once would fight over it.
+  // One run at a time on the whole platform, and never next to an eval run: they share the internal
+  // account, whose models and credit balance each of them sets for itself.
+  if (playgroundBusy()) throw new PlaygroundError(409, "Ya hay una ejecución del playground en curso.");
   if (activeRunId()) throw new PlaygroundError(409, "Hay una ejecución de evals en curso; espera a que termine.");
-
-  const room = config.evals.maxDailyUsd - (await spentLast24h());
-  if (room <= 0.01) throw new PlaygroundError(429, `Se alcanzó el tope diario de evals y playground ($${config.evals.maxDailyUsd}).`);
-  const budgetUsd = Math.round(Math.min(config.evals.maxRunUsd, room) * 100) / 100;
-
-  const account = await ensureEvalAccount();
-  await setAccountModels(account.id, null);
-  const model = (await allowedModels({ accountId: account.id })).find((m) => m.id === input.modelId);
-  if (!model) throw new PlaygroundError(400, "Ese modelo no está disponible o no está permitido en la plataforma.");
   const maxSteps = Math.min(MAX_STEPS[role], Math.max(1, Math.floor(Number(input.maxSteps ?? MAX_STEPS[role])) || 1));
-
+  // Registered before the first await, so a second request (a double click) sees it running.
   const id = newId();
-  const run = { id, status: "running" as const, role, modelId: model.id, prompt, startedAt: new Date().toISOString(), budgetUsd, events: [] as AgentEvent[], abort: new AbortController(), adminId };
+  const run = { id, status: "running" as PlaygroundView["status"], role, modelId: String(input.modelId ?? ""), prompt, startedAt: new Date().toISOString(), budgetUsd: 0, events: [] as AgentEvent[], abort: new AbortController(), adminId };
   runs.set(id, run);
-  void execute(run, account.id, files, maxSteps).catch(() => {});
+  try {
+    const room = config.evals.maxDailyUsd - (await spentLast24h());
+    if (room <= 0.01) throw new PlaygroundError(429, `Se alcanzó el tope diario de evals y playground ($${config.evals.maxDailyUsd}).`);
+    run.budgetUsd = Math.round(Math.min(config.evals.maxRunUsd, room) * 100) / 100;
+    const account = await ensureEvalAccount();
+    await setAccountModels(account.id, null);
+    if (!(await allowedModels({ accountId: account.id })).some((m) => m.id === run.modelId)) throw new PlaygroundError(400, "Ese modelo no está disponible o no está permitido en la plataforma.");
+    void execute(run, account.id, files, maxSteps).catch(() => {});
+  } catch (e) {
+    runs.delete(id);
+    throw e;
+  }
   prune();
   return id;
 }
+
+/** A playground run is going (the evals refuse to start meanwhile). */
+export const playgroundBusy = () => [...runs.values()].some((r) => r.status === "running");
 
 async function execute(run: PlaygroundView & { abort: AbortController }, accountId: string, files: [string, string][], maxSteps: number) {
   let projectId: string | null = null;
@@ -159,9 +165,14 @@ async function execute(run: PlaygroundView & { abort: AbortController }, account
   } finally {
     clearInterval(watch);
     if (projectId) {
+      // ai_usage rows go with their project (on delete cascade): detach them first, so the run's
+      // spend still counts against the daily cap (spentLast24h reads source = 'playground').
+      await q(`update ai_usage set project_id = null where project_id = $1`, [projectId]).catch(() => {});
       await deleteProject(projectId).catch(() => {});
       await removeProjectData(projectId).catch(() => {});
     }
+    // What the budget did not use is not left on the internal account.
+    await q(`update accounts set credits = 0 where id = $1`, [accountId]).catch(() => {});
     // Only now: a finished run means its throwaway project is already gone.
     run.status = status;
   }

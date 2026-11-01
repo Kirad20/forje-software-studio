@@ -85,4 +85,26 @@ describe("platform settings", () => {
     expect(config.emailFrom).toBe("file@forja.test");
     expect(await seedLocal(path.join(dir, "missing.json"))).toEqual([]);
   });
+
+  it("seed.local.json does not bring back what an admin removed", async () => {
+    await q(`insert into accounts (id, email) values ('adm1', 'adm1@forja.test')`);
+    const file = path.join(dir, "seed-secret.json");
+    writeFileSync(file, JSON.stringify({ settings: { stripeKey: "sk_test_from_file_000" } }));
+    await seedLocal(file);
+    expect(config.stripeKey).toBe("sk_test_from_file_000");
+    await store.updateSettings({ stripeKey: null }, "adm1"); // rotated out by an admin
+    await seedLocal(file);
+    expect(config.stripeKey).toBe("");
+  });
+
+  it("never shows defaults to a reader while a save reloads the settings", async () => {
+    await store.updateSettings({ signup: "closed" }, null);
+    const seen = new Set<string>();
+    const sampler = setInterval(() => seen.add(config.signup), 0);
+    await Promise.all(Array.from({ length: 20 }, () => store.loadSettings()));
+    clearInterval(sampler);
+    seen.add(config.signup);
+    expect([...seen]).toEqual(["closed"]);
+    await store.resetSetting("signup", null);
+  });
 });

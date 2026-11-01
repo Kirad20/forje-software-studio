@@ -298,9 +298,10 @@ try {
   const playRoles = (await req("GET", "/api/admin/agents/roles")).json.roles;
   ok(playRoles.some((r) => r.role === "backend" && r.tools.includes("write_file")), "playground: lists the roles with their tools", JSON.stringify(playRoles?.map((r) => r.role)));
   const dirs2 = new Set(readdirSync(path.join(DATA, "projects")));
+  const spent0 = (await req("GET", "/api/admin/evals/config")).json.spentLast24hUsd;
   const play = await req("POST", "/api/admin/agents/runs", { role: "backend", modelId: "openai:fake-mid", prompt: "Endpoint GET notes/list" });
   ok(play.status === 202 && play.json.runId, "playground: a run starts", play.text);
-  ok((await req("POST", "/api/admin/agents/runs", { role: "ui", modelId: "openai:fake-mid", prompt: "otra" })).status === 409, "playground: one run at a time per admin");
+  ok((await req("POST", "/api/admin/agents/runs", { role: "ui", modelId: "openai:fake-mid", prompt: "otra" })).status === 409, "playground: one run at a time");
   ok((await req("POST", "/api/admin/agents/runs", { role: "planner", modelId: "openai:fake-mid", prompt: "x" })).status === 400, "playground: roles that need the orchestrator are refused");
   let pr;
   for (let i = 0; i < 120; i++) {
@@ -314,6 +315,8 @@ try {
   const dirs3 = readdirSync(path.join(DATA, "projects"));
   ok(dirs3.every((d) => dirs2.has(d)), "playground: the throwaway project is gone", JSON.stringify(dirs3.filter((d) => !dirs2.has(d))));
   ok((await req("GET", "/api/me")).json.account.credits === me1.credits, "playground: real accounts are not charged");
+  const spent1 = (await req("GET", "/api/admin/evals/config")).json.spentLast24hUsd;
+  ok(spent1 > spent0, "playground: its spend still counts against the daily cap once the project is gone", JSON.stringify({ spent0, spent1 }));
   const stats = (await req("GET", "/api/admin/router/stats")).json;
   ok(stats.classes.length > 0 && stats.classes[0].models[0].mean > 0 && stats.decisions.length > 0, "router: the panel shows what it learned and its decisions", JSON.stringify(stats.classes[0]));
   const reset = await req("POST", "/api/admin/router/reset", {});

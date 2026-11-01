@@ -7,10 +7,13 @@ import { updateSettings } from "../../settings/store.js";
 
 /**
  * seed.local.json (or FORJA_SEED_FILE): settings, providers and models for a machine, kept out
- * of git. By default it only fills what an admin has not set in the studio, so the panel wins:
- *  - a setting is applied when it has no stored value;
- *  - a provider, while nobody edited it in the panel (its updated_at is still its created_at);
- *  - a model, when it does not exist yet.
+ * of git. By default it only fills what an admin has not touched in the studio, so the panel wins,
+ * removals included (a reset setting, a removed secret, a deleted provider or model stay that way):
+ *  - a setting is applied when it has no stored value and no admin ever changed it;
+ *  - a provider, while nobody edited it in the panel (its updated_at is still its created_at) and
+ *    no admin deleted it;
+ *  - a model, when it does not exist yet and no admin ever changed or deleted it.
+ * "An admin changed it" = an entry in settings_audit with an actor (the seed writes without one).
  * `force` applies everything.
  */
 export const SeedFile = z.object({
@@ -67,20 +70,21 @@ export async function seedLocal(file: string, opts: { force?: boolean } = {}): P
   if (!seed) return [];
   const done: string[] = [];
 
+  const touched = new Set((await q<{ key: string }>(`select distinct key from settings_audit where actor_id is not null`)).map((r) => r.key));
   const stored = new Set((await q<{ key: string }>(`select key from settings`)).map((r) => r.key));
-  const settings = Object.fromEntries(Object.entries(seed.settings).filter(([k]) => opts.force || !stored.has(k)));
+  const settings = Object.fromEntries(Object.entries(seed.settings).filter(([k]) => opts.force || (!stored.has(k) && !touched.has(k))));
   done.push(...(await updateSettings(settings, null)).map((k) => `ajuste ${k}`));
 
   for (const p of seed.providers) {
     const row = await one<{ untouched: boolean }>(`select updated_at = created_at as untouched from providers where id = $1`, [p.id]);
-    if (row && !row.untouched && !opts.force) continue;
+    if (!opts.force && ((row && !row.untouched) || (!row && touched.has(`provider:${p.id}`)))) continue;
     await saveProvider(p, null, { create: !row, seed: !opts.force });
     done.push(`proveedor ${p.id}`);
   }
 
   for (const m of seed.models) {
     const exists = await one(`select 1 from model_catalog where id = $1`, [`${m.provider}:${m.model}`]);
-    if (exists && !opts.force) continue;
+    if (!opts.force && (exists || touched.has(`model:${m.provider}:${m.model}`))) continue;
     done.push(`modelo ${await saveModel(m, null, { create: !exists })}`);
   }
   return done;

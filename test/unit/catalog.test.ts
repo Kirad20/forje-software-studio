@@ -70,6 +70,13 @@ describe("providers and models", () => {
     expect(m).toMatchObject({ source: "custom", inPrice: 0, context: 128_000 });
     expect(catalog.platformAllows(m)).toBe(true); // "custom:*"
     expect(catalog.providerOf("lab")?.endpoint?.baseUrl).toBe("http://127.0.0.1:11434/v1");
+    // Some gateways authenticate with a header: stored encrypted, listed by name only.
+    await providers.saveProvider({ id: "lab", headers: { "api-key": "header-secret-123" } }, null);
+    expect(catalog.providerOf("lab")?.endpoint?.headers).toEqual({ "api-key": "header-secret-123" });
+    const labView = (await providers.listProviders()).find((p) => p.id === "lab")!;
+    expect(labView.headerNames).toEqual(["api-key"]);
+    expect(JSON.stringify(labView)).not.toContain("header-secret-123");
+    expect(JSON.stringify(await q(`select * from providers where id = 'lab'`))).not.toContain("header-secret-123");
     await expect(catalog.saveModel({ provider: "lab", model: "x", tier: 9 }, null, { create: true })).rejects.toThrow(/Calidad/);
     await expect(catalog.deleteModel("anthropic:claude-opus-5-5", null)).rejects.toThrow(/propios/);
     await expect(providers.deleteProvider("anthropic", null)).rejects.toThrow(/integrados/);

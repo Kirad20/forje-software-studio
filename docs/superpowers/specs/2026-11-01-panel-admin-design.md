@@ -64,7 +64,7 @@ Todos viven en `server/db/seeds/` y se lanzan con `server/db/seed.ts`.
 | Seeder | Cuándo corre | Qué hace |
 |---|---|---|
 | `defaults` | En cada arranque, tras las migraciones, y con `npm run db:seed` | Inserta (`on conflict do nothing`) los proveedores conocidos (`anthropic`, `openrouter`, `openai`) desactivados y sin clave, y los modelos de Anthropic del catálogo (`source = 'builtin'`). No escribe ajustes: sus valores por defecto viven en el registro (§2). |
-| `local` | En cada arranque si existe el archivo, y con `npm run db:seed` | Lee `FORJA_SEED_FILE` (por defecto `./seed.local.json`, en `.gitignore`). Rellena **solo lo que falta**: un ajuste sin fila, un proveedor sin clave o un modelo inexistente. Lo editado en el panel nunca se pisa. `npm run db:seed -- --force` sí sobrescribe. |
+| `local` | En cada arranque si existe el archivo, y con `npm run db:seed` | Lee `FORJA_SEED_FILE` (por defecto `./seed.local.json`, en `.gitignore`). Rellena **solo lo que un admin no ha tocado**: un ajuste sin fila, un proveedor nunca editado o un modelo inexistente. Lo editado, restablecido o borrado en el panel (con entrada en `settings_audit` con actor) nunca se pisa ni se recrea. `npm run db:seed -- --force` sí sobrescribe. |
 | `dev` | Solo con `npm run db:seed:dev` | Carga `server/db/seeds/dev.fixture.json`: un admin y un usuario con contraseña conocida, una organización de equipo y un proyecto de ejemplo. Se niega si `NODE_ENV=production`. |
 
 Formato de `seed.local.json` (se versiona `seed.local.example.json`):
@@ -174,7 +174,7 @@ pasan a la tabla de proveedores y modelos.
 
 ### Tablas (`002_admin.sql`)
 
-- `providers (id text pk, kind text check (kind in ('anthropic','openai')), label text, base_url text, api_key_enc text, headers jsonb default '{}', enabled boolean default false, builtin boolean default false, created_at, updated_at)`.
+- `providers (id text pk, kind text check (kind in ('anthropic','openai')), label text, base_url text, api_key_enc text, headers_enc text, enabled boolean default false, builtin boolean default false, created_at, updated_at)`.
   - `anthropic` (kind `anthropic`), `openrouter` (kind `openai`, URL fija, con sincronización de
     catálogo) y `openai` (kind `openai`, URL editable; sirve para OpenAI, Ollama, vLLM…) son
     `builtin`: se editan, pero no se borran.
@@ -239,7 +239,8 @@ ejecución de evals en curso no se puede lanzar (ambos fijan los modelos de la c
 
   Después se borra el proyecto.
 - Límites:
-  - Una ejecución de playground a la vez por admin.
+  - Una ejecución de playground a la vez en toda la plataforma, y nunca junto a una de evals (comparten la cuenta interna). Se registra antes del primer `await`.
+  - Antes de borrar el proyecto, sus filas de `ai_usage` se desligan (`project_id = null`) para que su gasto siga contando en el tope diario.
   - Tope de gasto por ejecución = `evals.maxRunUsd`, controlado con el mismo vigilante de saldo que
     los evals.
   - Cuenta para el tope diario de evals.

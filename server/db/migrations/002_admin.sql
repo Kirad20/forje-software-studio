@@ -28,7 +28,8 @@ create table if not exists providers (
   label text not null,
   base_url text,
   api_key_enc text,
-  headers jsonb not null default '{}',
+  -- Extra request headers as encrypted JSON: some gateways authenticate with one (api-key…).
+  headers_enc text,
   enabled boolean not null default false,
   builtin boolean not null default false,
   created_at timestamptz not null default now(),

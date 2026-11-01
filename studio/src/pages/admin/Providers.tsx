@@ -7,7 +7,7 @@ interface ProviderView {
   kind: "anthropic" | "openai";
   label: string;
   baseUrl: string | null;
-  headers: Record<string, string>;
+  headerNames: string[];
   enabled: boolean;
   builtin: boolean;
   keySet: boolean;

@@ -33,11 +33,15 @@ export const onSettingsChanged = (fn: (keys: string[]) => void) => void listener
 
 const hintOf = (secret: string) => (secret.length >= 8 ? `…${secret.slice(-4)}` : null);
 
-/** Puts every setting back to its default, then applies what is stored. Never throws on a bad row. */
+/**
+ * Every setting at its stored value, or its default when it has none. Never throws on a bad row.
+ * The values are worked out first and written onto `config` in one synchronous pass: a request
+ * served meanwhile never sees a mix of defaults (signup "open", no SMTP…) and stored values.
+ */
 export async function loadSettings(): Promise<void> {
-  for (const def of SETTINGS) setPath(config, def.key, structuredClone(def.default));
-  broken.clear();
   const rows = await q<{ key: string; value: unknown; value_enc: string | null }>(`select key, value, value_enc from settings`);
+  const next = new Map(SETTINGS.map((def) => [def.key, structuredClone(def.default)]));
+  const unreadable = new Set<string>();
   for (const row of rows) {
     const def = settingDef(row.key);
     if (!def) continue; // a setting a newer or older version knew about
@@ -45,13 +49,16 @@ export async function loadSettings(): Promise<void> {
       const raw = def.type === "secret" ? decrypt(row.value_enc ?? "") : row.value;
       const parsed = schemaOf(def).safeParse(raw);
       if (!parsed.success) throw new Error(parsed.error.issues[0]?.message ?? "valor no válido");
-      setPath(config, def.key, parsed.data ?? structuredClone(def.default));
+      if (parsed.data !== null && parsed.data !== undefined) next.set(def.key, parsed.data);
     } catch (e) {
-      broken.add(def.key);
+      unreadable.add(def.key);
       console.warn(`[forja] El ajuste ${def.key} guardado no se puede usar (${(e as Error).message}); se usa el valor por defecto. Vuelve a guardarlo en Administración.`);
     }
   }
+  for (const [key, value] of next) setPath(config, key, value);
   if (!browserAvailable) config.browser.enabled = false;
+  broken.clear();
+  for (const k of unreadable) broken.add(k);
 }
 
 export async function listSettings(): Promise<SettingView[]> {

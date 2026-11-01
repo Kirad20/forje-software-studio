@@ -153,6 +153,8 @@ export async function evalConfig(admin: Account) {
 export async function startRun(admin: Account, req: RunRequest): Promise<{ runId: string; jobs: number; budgetUsd: number }> {
   if (!config.evals.enabled) throw new EvalError(404, "Los evals están desactivados en este servidor (se activan en Administración → General → Evals de calidad).");
   if (active) throw new EvalError(409, "Ya hay una ejecución de evals en curso.");
+  // The playground (server/admin) uses the same internal account and sets its models and credits.
+  if ((await import("../admin/playground.js")).playgroundBusy()) throw new EvalError(409, "Hay una ejecución del playground de agentes en curso; espera a que termine.");
 
   const sizes = (req.sizes ?? []).filter((s) => ["small", "medium", "large"].includes(s));
   const cases: EvalCase[] = req.cases?.length ? req.cases.map((id) => caseById(id) ?? null).filter((c): c is EvalCase => !!c) : EVAL_CASES.filter((c) => !sizes.length || sizes.includes(c.size));

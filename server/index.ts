@@ -124,7 +124,9 @@ await initBootstrap();
 await startJobRunner();
 startCatalogSync();
 startGithubSync();
-if (config.evals.enabled) void import("./evals/runner.js").then((m) => m.recoverEvals()).catch(() => {});
+// Always, not only with evals on: a crash mid-run of the evals or the agent playground (which can run
+// with evals off) leaves throwaway projects of the internal account behind.
+void import("./evals/runner.js").then((m) => m.recoverEvals()).catch(() => {});
 
 const server = serve({ fetch: app.fetch, port: config.port }, (info) => {
   console.log(`[forja] plataforma en ${config.publicUrl} (puerto ${info.port})`);
