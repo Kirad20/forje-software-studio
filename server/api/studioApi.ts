@@ -11,6 +11,8 @@ import { loadHistory, type AgentEvent } from "../builder/agent.js";
 import { isBuilding, penalizeTurn, pendingPlan, runBuilderTurn, stopBuilding, type ChatMode } from "../builder/orchestrator.js";
 import { replaceVisibleText } from "../builder/textEdit.js";
 import * as accounts from "../platform/accounts.js";
+import { completeSetup, needsSetup } from "../platform/bootstrap.js";
+import * as orgs from "../platform/orgs.js";
 import { projectEvents, readLogs, type ProjectEvent } from "../platform/events.js";
 import { clearProblems, listProblems, recheckBuild, watchProblems } from "../platform/problems.js";
 import { getSecurity, runQuickScan, setIgnored } from "../platform/security.js";
@@ -77,7 +79,7 @@ async function removeProjectData(projectId: string) {
   await rm(path.join(config.dataDir, "projects", projectId), { recursive: true, force: true }).catch(() => {});
 }
 
-type Env = { Variables: { account: accounts.Account; project: projects.Project; access: Access } };
+type Env = { Variables: { account: accounts.Account; project: projects.Project; access: Access; orgRole: orgs.OrgRole } };
 
 export const SESSION_COOKIE = "forja_session";
 
@@ -130,13 +132,40 @@ studioApi.use("*", async (c, next) => {
 
 // --- Auth -------------------------------------------------------------------------
 
+const startSession = (c: Context<Env>, token: string) =>
+  setCookie(c, SESSION_COOKIE, token, { httpOnly: true, sameSite: "Lax", secure: isHttps(), path: "/", maxAge: 3600 * 24 * 30 });
+const validEmail = (email: unknown): email is string => typeof email === "string" && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email);
+
+/** What the sign-in screen needs before anyone is signed in. */
+studioApi.get("/auth/status", async (c) => c.json({ needsSetup: await needsSetup(), signup: config.signup }));
+
+/** First run: the one-time token from the server log creates the first administrator. */
+studioApi.post("/auth/setup", async (c) => {
+  const body = await c.req.json<{ token: string; email: string; password: string; name?: string }>();
+  rateLimit(`setup-ip:${ipOf(c)}`, 5, 15 * 60_000);
+  startSession(c, await completeSetup(body));
+  return c.json({ ok: true });
+});
+
+studioApi.post("/auth/login", async (c) => {
+  const { email, password } = await c.req.json<{ email: string; password: string }>();
+  if (!validEmail(email) || typeof password !== "string") return c.json({ error: "Correo o contraseña incorrectos" }, 401);
+  rateLimit(`pw-ip:${ipOf(c)}`, 30, 15 * 60_000);
+  rateLimit(`pw-email:${email.toLowerCase()}`, 10, 15 * 60_000);
+  const token = await accounts.loginWithPassword(email, password);
+  if (!token) return c.json({ error: "Correo o contraseña incorrectos" }, 401);
+  startSession(c, token);
+  return c.json({ ok: true });
+});
+
 studioApi.post("/auth/request", async (c) => {
   const { email } = await c.req.json<{ email: string }>();
-  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email ?? "")) return c.json({ error: "Correo no válido" }, 400);
+  if (!validEmail(email)) return c.json({ error: "Correo no válido" }, 400);
   rateLimit(`login-ip:${ipOf(c)}`, 20, 15 * 60_000);
   rateLimit(`login-email:${email.toLowerCase()}`, 5, 15 * 60_000);
-  const sent = await accounts.requestLoginCode(email);
-  return c.json({ ok: true, hint: sent ? "Te enviamos un código por correo." : "Sin SMTP configurado: el código está en la consola del servidor." });
+  // Same answer whether or not a code went out, so this cannot be used to probe who has an account.
+  if (await accounts.canSignUp(email)) await accounts.requestLoginCode(email);
+  return c.json({ ok: true, hint: "Si el correo puede entrar, recibirá un código. Sin SMTP configurado, el código está en la consola del servidor." });
 });
 
 studioApi.post("/auth/verify", async (c) => {
@@ -144,7 +173,23 @@ studioApi.post("/auth/verify", async (c) => {
   rateLimit(`verify-ip:${ipOf(c)}`, 30, 15 * 60_000);
   const token = await accounts.verifyLoginCode(email, code);
   if (!token) return c.json({ error: "Código incorrecto o caducado" }, 401);
-  setCookie(c, SESSION_COOKIE, token, { httpOnly: true, sameSite: "Lax", secure: isHttps(), path: "/", maxAge: 3600 * 24 * 30 });
+  startSession(c, token);
+  return c.json({ ok: true });
+});
+
+studioApi.post("/auth/password/forgot", async (c) => {
+  const { email } = await c.req.json<{ email: string }>();
+  if (!validEmail(email)) return c.json({ error: "Correo no válido" }, 400);
+  rateLimit(`reset-ip:${ipOf(c)}`, 10, 15 * 60_000);
+  rateLimit(`reset-email:${email.toLowerCase()}`, 3, 15 * 60_000);
+  await accounts.requestPasswordReset(email);
+  return c.json({ ok: true, hint: "Si el correo tiene cuenta, recibirá un código. Sin SMTP configurado, está en la consola del servidor." });
+});
+
+studioApi.post("/auth/password/reset", async (c) => {
+  const { email, code, password } = await c.req.json<{ email: string; code: string; password: string }>();
+  rateLimit(`reset-verify-ip:${ipOf(c)}`, 20, 15 * 60_000);
+  if (!(await accounts.resetPassword(email ?? "", code, password))) return c.json({ error: "Código incorrecto o caducado" }, 401);
   return c.json({ ok: true });
 });
 
@@ -178,6 +223,22 @@ studioApi.get("/me", async (c) => {
 studioApi.patch("/me", async (c) => {
   const { name } = await c.req.json<{ name: string }>();
   await accounts.updateAccountName(c.get("account").id, name ?? "");
+  return c.json({ ok: true });
+});
+studioApi.get("/me/security", async (c) => {
+  const r = await one<{ hasPassword: boolean; changedAt: string | null }>(
+    `select password_hash is not null as "hasPassword", password_changed_at as "changedAt" from accounts where id = $1`,
+    [c.get("account").id],
+  );
+  return c.json(r);
+});
+studioApi.put("/me/password", async (c) => {
+  const account = c.get("account");
+  const { current, password } = await c.req.json<{ current?: string; password: string }>();
+  rateLimit(`pw-change:${account.id}`, 5, 15 * 60_000);
+  await accounts.changePassword(account.id, current, password, account.email);
+  // Every session ended with the old password; this one continues under a fresh token.
+  startSession(c, await accounts.createSession(account.id));
   return c.json({ ok: true });
 });
 studioApi.post("/me/sign-out-others", async (c) =>
@@ -292,11 +353,71 @@ studioApi.delete("/integrations/:id", async (c) => {
 
 studioApi.get("/tokens", async (c) => c.json({ tokens: await accounts.listApiTokens(c.get("account").id) }));
 studioApi.post("/tokens", async (c) => {
-  const { name } = await c.req.json<{ name?: string }>();
-  return c.json({ token: await accounts.createApiToken(c.get("account").id, name || "Cliente MCP") });
+  const { name, orgId } = await c.req.json<{ name?: string; orgId?: string | null }>();
+  // A token may be limited to one organization: an agent wired to a client's workspace sees nothing else.
+  if (orgId && !(await orgs.orgRoleOf(orgId, c.get("account").id))) return c.json({ error: "Organización no encontrada" }, 404);
+  return c.json({ token: await accounts.createApiToken(c.get("account").id, name || "Cliente MCP", orgId || null) });
 });
 studioApi.delete("/tokens/:id", async (c) => {
   await accounts.deleteApiToken(c.get("account").id, c.req.param("id"));
+  return c.json({ ok: true });
+});
+
+// --- Organizations (tenants) and platform administration ------------------------------
+
+studioApi.get("/orgs", async (c) => c.json({ orgs: await orgs.listOrgs(c.get("account").id) }));
+studioApi.post("/orgs", async (c) => {
+  const { name } = await c.req.json<{ name: string }>();
+  return c.json({ org: await orgs.createOrg(c.get("account").id, name ?? "") });
+});
+
+/** Resolves :id to the caller's role in that organization; non-members get a 404, as if it did not exist. */
+studioApi.use("/orgs/:id/*", async (c, next) => {
+  const role = await orgs.orgRoleOf(c.req.param("id"), c.get("account").id);
+  if (!role) return c.json({ error: "Organización no encontrada" }, 404);
+  c.set("orgRole", role);
+  await next();
+});
+studioApi.get("/orgs/:id/members", async (c) => c.json({ members: await orgs.listOrgMembers(c.req.param("id")!), role: c.get("orgRole") }));
+studioApi.post("/orgs/:id/members", async (c) => {
+  const { email, role } = await c.req.json<{ email: string; role?: orgs.OrgRole }>();
+  await orgs.addOrgMember(c.req.param("id")!, c.get("orgRole"), email ?? "", role ?? "member");
+  return c.json({ ok: true });
+});
+studioApi.patch("/orgs/:id/members/:accountId", async (c) => {
+  const { role } = await c.req.json<{ role: orgs.OrgRole }>();
+  await orgs.setOrgMemberRole(c.req.param("id")!, c.get("orgRole"), c.req.param("accountId")!, role);
+  return c.json({ ok: true });
+});
+studioApi.delete("/orgs/:id/members/:accountId", async (c) => {
+  await orgs.removeOrgMember(c.req.param("id")!, c.get("orgRole"), c.get("account").id, c.req.param("accountId")!);
+  return c.json({ ok: true });
+});
+
+/** Platform administrators manage accounts; they get no access to other tenants' projects through this. */
+studioApi.use("/admin/*", async (c, next) => {
+  if (c.get("account").platformRole !== "admin") return c.json({ error: "Solo administradores de la plataforma." }, 403);
+  await next();
+});
+studioApi.get("/admin/users", async (c) =>
+  c.json({
+    users: await q(
+      `select id, email, name, platform_role as "platformRole", disabled, credits, created_at as "createdAt" from accounts order by created_at`,
+    ),
+  }),
+);
+studioApi.patch("/admin/users/:id", async (c) => {
+  const id = c.req.param("id")!;
+  const { disabled, platformRole } = await c.req.json<{ disabled?: boolean; platformRole?: "admin" | "user" }>();
+  const me = c.get("account").id;
+  if (!(await accounts.getAccount(id))) return c.json({ error: "Cuenta no encontrada" }, 404);
+  if (id === me && (disabled || platformRole === "user")) return c.json({ error: "No puedes quitarte el acceso ni el rol a ti misma." }, 400);
+  if (platformRole && platformRole !== "admin" && platformRole !== "user") return c.json({ error: "Rol no válido" }, 400);
+  if (platformRole) await q(`update accounts set platform_role = $2 where id = $1`, [id, platformRole]);
+  if (disabled !== undefined) {
+    await q(`update accounts set disabled = $2 where id = $1`, [id, !!disabled]);
+    if (disabled) await q(`delete from account_sessions where account_id = $1`, [id]);
+  }
   return c.json({ ok: true });
 });
 
@@ -331,9 +452,10 @@ studioApi.get("/agent-metrics", async (c) => {
 
 /** The dashboard's prompt box: the project is named from the idea, and the studio then sends the idea to the builder. */
 studioApi.post("/projects", async (c) => {
-  const { name, prompt } = await c.req.json<{ name?: string; prompt?: string }>();
+  const { name, prompt, orgId } = await c.req.json<{ name?: string; prompt?: string; orgId?: string }>();
+  if (orgId && !(await orgs.orgRoleOf(orgId, c.get("account").id))) return c.json({ error: "Organización no encontrada" }, 404);
   const title = (name ?? prompt ?? "").trim().split(/\s+/).slice(0, 5).join(" ").replace(/[.,;:]+$/, "") || "Proyecto nuevo";
-  const p = await projects.createProject(c.get("account").id, title.slice(0, 60), (prompt ?? "").slice(0, 2000));
+  const p = await projects.createProject(c.get("account").id, title.slice(0, 60), (prompt ?? "").slice(0, 2000), undefined, orgId);
   return c.json({ project: await projectView(p) });
 });
 

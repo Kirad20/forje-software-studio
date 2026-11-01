@@ -174,6 +174,8 @@ export async function projectContext(project: Project, accountId: string) {
 }
 
 function buildServer(account: Account) {
+  // A token limited to one organization sees only that organization's projects.
+  const inTokenScope = (p: { orgId: string | null }) => !account.tokenOrgId || p.orgId === account.tokenOrgId;
   const server = new Server(
     { name: "forja", version: "0.1.0" },
     {
@@ -211,12 +213,12 @@ function buildServer(account: Account) {
       switch (req.params.name) {
         case "list_projects": {
           const shared = (await Promise.all((await sharedProjectIds(account.id)).map((id) => getProject(id)))).filter((p) => !!p);
-          const list = [...(await listProjects(account.id)), ...shared];
+          const list = [...(await listProjects(account.id)), ...shared].filter(inTokenScope);
           return text(list.map((p) => `${p.id}  ${p.name}${p.slug ? `  (publicado: ${p.slug})` : ""}`).join("\n") || "Sin proyectos.");
         }
         case "create_project": {
           const initial = String(args.initial_prompt ?? "").trim();
-          const p = await createProject(account.id, String(args.name), String(args.description ?? ""));
+          const p = await createProject(account.id, String(args.name), String(args.description ?? ""), undefined, account.tokenOrgId ?? undefined);
           if (initial) await updateProject(p.id, { systemPrompt: initial });
           return text(
             [
@@ -246,7 +248,7 @@ function buildServer(account: Account) {
       if (!tool) return text(`Herramienta desconocida: ${req.params.name}`, true);
       const projectId = String(args.projectId ?? "");
       const project = await getProject(projectId);
-      if (!(await accessOf(account.id, project))) return text("Proyecto no encontrado en esta cuenta.", true);
+      if (!(await accessOf(account.id, project)) || !inTokenScope(project!)) return text("Proyecto no encontrado en esta cuenta.", true);
       if (VERSIONED_WRITES.has(tool.name) && args.expected_version !== undefined && args.expected_version !== null) {
         const current = await projectVersion(projectId);
         if (Number(args.expected_version) !== current) {

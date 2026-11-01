@@ -3,6 +3,7 @@ import { newId } from "../lib/crypto.js";
 import { starterFiles } from "../templates/starter.js";
 import { one, platformDb, q } from "./db.js";
 import { emitProject } from "./events.js";
+import { ensurePersonalOrg, personalOrgId } from "./orgs.js";
 
 export type FileMap = Record<string, string>;
 
@@ -21,6 +22,8 @@ export interface SeoSettings {
 export interface Project {
   id: string;
   ownerId: string;
+  /** The organization (tenant) the project belongs to. */
+  orgId: string | null;
   name: string;
   description: string;
   slug: string | null;
@@ -43,7 +46,7 @@ export interface Project {
   updatedAt: string;
 }
 
-const PROJECT_COLS = `id, owner_id as "ownerId", name, description, slug, visibility, ai_enabled as "aiEnabled",
+const PROJECT_COLS = `id, owner_id as "ownerId", org_id as "orgId", name, description, slug, visibility, ai_enabled as "aiEnabled",
   email_domain as "emailDomain", email_domain_verified as "emailDomainVerified",
   published_version_id as "publishedVersionId", published_at as "publishedAt",
   favorite, archived, folder_id as "folderId", last_opened_at as "lastOpenedAt",
@@ -62,12 +65,20 @@ export function assertValidPath(path: string) {
   }
 }
 
-export async function createProject(ownerId: string, name: string, description = "", files?: FileMap): Promise<Project> {
+/** `orgId` defaults to the owner's personal organization; the caller has checked the owner belongs to it. */
+export async function createProject(ownerId: string, name: string, description = "", files?: FileMap, orgId?: string): Promise<Project> {
   // Lowercase hex: the id is also a hostname label (pv-<id>.localhost).
   const id = randomBytes(8).toString("hex");
   const db = await platformDb();
   await db.transaction(async (tx) => {
-    await tx.query(`insert into projects (id, owner_id, name, description) values ($1, $2, $3, $4)`, [id, ownerId, name, description]);
+    if (!orgId) await ensurePersonalOrg(tx, ownerId);
+    await tx.query(`insert into projects (id, owner_id, org_id, name, description) values ($1, $2, $3, $4, $5)`, [
+      id,
+      ownerId,
+      orgId ?? personalOrgId(ownerId),
+      name,
+      description,
+    ]);
     for (const [path, content] of Object.entries(files ?? starterFiles(name))) {
       await tx.query(`insert into project_files (project_id, path, content) values ($1, $2, $3)`, [id, path, content]);
     }

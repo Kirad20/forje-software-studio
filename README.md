@@ -20,6 +20,10 @@ docker run -p 4100:4100 -v forja-data:/app/data -e SECRETS_KEY=... -e ANTHROPIC_
 
 Desarrollo con recarga: `npm run dev` (servidor en :4100 + studio Vite en :5173). Sin SMTP, el código de acceso al studio aparece en la consola del servidor.
 
+**Primer arranque (sin usuario por defecto).** Una instalación nueva no tiene cuentas ni contraseñas conocidas: el servidor imprime en su log un token de un solo uso (o usa `FORJA_BOOTSTRAP_TOKEN`, mínimo 16 caracteres) y con él se crea la primera cuenta de administración en la pantalla de configuración. Al existir una cuenta, el token deja de servir. Después se entra con correo + contraseña, o con un código por correo (que también crea cuentas nuevas). `FORJA_SIGNUP` controla quién puede crear cuenta: `open` (por defecto), `invite` (solo correos invitados) o `closed`.
+
+**Organizaciones (tenants).** Cada cuenta tiene una organización personal; se pueden crear organizaciones de equipo (`/api/orgs`) con roles `owner`/`admin`/`member`. Cada proyecto pertenece a una organización y sus miembros lo abren como editores. Los tokens MCP pueden limitarse a una organización. Los administradores de la plataforma (`/api/admin/users`) gestionan cuentas, no los proyectos de otros.
+
 Pruebas: `npm run typecheck`, `npm test` (unidad: enrutador, aprendizaje, índice), `npm run test:e2e` (studio, todos los servicios BaaS, vista previa, publicación, tiempo real y MCP, sin LLM) `npm run test:agents` (equipo de agentes contra un modelo simulado: plan, paralelismo, propiedad de archivos, revisión, listas blancas, respaldo, costes, modos Chat/Plan y arreglo automático) y `npm run test:github` (sincronización con una API de GitHub simulada y el registro de problemas). En GitHub, `.github/workflows/ci.yml` pasa tipos, unidad, build, e2e y agentes (con Chromium) en cada PR y push a `main`, y construye y arranca la imagen Docker.
 
 ## Cómo está hecho

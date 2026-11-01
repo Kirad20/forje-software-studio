@@ -11,6 +11,7 @@ import { closeAll } from "./baas/projectDb.js";
 import { attachSocket } from "./baas/realtime.js";
 import { handleMcp } from "./mcp/server.js";
 import { accountFromApiToken } from "./platform/accounts.js";
+import { initBootstrap } from "./platform/bootstrap.js";
 import { platformDb } from "./platform/db.js";
 import { getProject, getProjectBySlug, type Project } from "./platform/projects.js";
 import { cookie, parseCookies, serveApp } from "./runtime/appServer.js";
@@ -107,6 +108,7 @@ function page(title: string, body: string) {
 }
 
 await platformDb();
+await initBootstrap();
 await startJobRunner();
 startCatalogSync();
 startGithubSync();

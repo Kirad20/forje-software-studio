@@ -34,6 +34,13 @@ export const config = {
   /** 1 credit = $0.001 of model usage. */
   creditsPerUsd: Number(env.CREDITS_PER_USD ?? 1000),
   freeCredits: Number(env.FREE_CREDITS ?? 3000),
+  /**
+   * First-run setup. While there are no accounts, the server only accepts POST /api/auth/setup with this
+   * token. Unset, a random one is generated at startup and printed to the log.
+   */
+  bootstrapToken: env.FORJA_BOOTSTRAP_TOKEN ?? "",
+  /** Who may create an account: "open" (anyone, by email code), "invite" (only invited emails), "closed" (admins add people). */
+  signup: (["open", "invite", "closed"].includes(env.FORJA_SIGNUP ?? "") ? env.FORJA_SIGNUP : "open") as "open" | "invite" | "closed",
   smtpUrl: env.SMTP_URL ?? "",
   emailFrom: env.EMAIL_FROM ?? "noreply@forja.local",
   stripeKey: env.STRIPE_SECRET_KEY ?? "",

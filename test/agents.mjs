@@ -36,6 +36,7 @@ const app = spawn(process.execPath, ["--import", "tsx", "server/index.ts"], {
     FORJA_MODELS: JSON.stringify(MODELS),
     FORJA_MODELS_ALLOW: "",
     SMTP_URL: "",
+    FORJA_BOOTSTRAP_TOKEN: "e2e-bootstrap-token-0123456789",
   },
 });
 app.stdout.on("data", (d) => (serverLog += d));
@@ -85,6 +86,7 @@ try {
     } catch {}
     await new Promise((r) => setTimeout(r, 300));
   }
+  await req("POST", "/api/auth/setup", { token: "e2e-bootstrap-token-0123456789", email: "owner@example.com", password: "una contraseña larga" });
   await req("POST", "/api/auth/request", { email: "owner@example.com" });
   const code = [...serverLog.matchAll(/owner@example.com: (\d{6})/g)].pop()[1];
   await req("POST", "/api/auth/verify", { email: "owner@example.com", code });

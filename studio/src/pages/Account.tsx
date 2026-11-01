@@ -22,6 +22,55 @@ const Row = ({ title, hint, children }: { title: string; hint?: ReactNode; child
   </div>
 );
 
+/** Set or change the password. The code sign-in keeps working, so this is optional for code-created accounts. */
+function PasswordSection() {
+  const [sec, setSec] = useState<{ hasPassword: boolean } | null>(null);
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [msg, setMsg] = useState("");
+  const [err, setErr] = useState("");
+  useEffect(() => {
+    void api<{ hasPassword: boolean }>("/me/security").then(setSec);
+  }, []);
+  return (
+    <section className="card stack" style={{ padding: 18 }}>
+      <div>
+        <div className="section-title" style={{ margin: 0 }}>Contraseña</div>
+        <div className="small muted">
+          {sec?.hasPassword ? "Cambiarla cierra tus otras sesiones." : "Aún no tienes contraseña: entras con un código por correo. Puedes poner una."}
+        </div>
+      </div>
+      <form
+        className="stack"
+        onSubmit={async (e) => {
+          e.preventDefault();
+          setErr("");
+          setMsg("");
+          try {
+            await api("/me/password", { method: "PUT", body: { current: current || undefined, password: next } });
+            setCurrent("");
+            setNext("");
+            setSec({ hasPassword: true });
+            setMsg("Contraseña guardada.");
+          } catch (x) {
+            setErr((x as Error).message);
+          }
+        }}
+      >
+        {sec?.hasPassword && (
+          <input type="password" required placeholder="Contraseña actual" autoComplete="current-password" value={current} onChange={(e) => setCurrent(e.target.value)} />
+        )}
+        <input type="password" required minLength={10} placeholder="Contraseña nueva (mín. 10 caracteres)" autoComplete="new-password" value={next} onChange={(e) => setNext(e.target.value)} />
+        {err && <div className="error-box">{err}</div>}
+        {msg && <div className="small muted">{msg}</div>}
+        <div>
+          <button className="primary">Guardar contraseña</button>
+        </div>
+      </form>
+    </section>
+  );
+}
+
 export function Account({ me, onChange }: { me: Me; onChange: () => void }) {
   const [tokens, setTokens] = useState<Token[]>([]);
   const [fresh, setFresh] = useState("");
@@ -65,6 +114,8 @@ export function Account({ me, onChange }: { me: Me; onChange: () => void }) {
           <span>{me.email}</span>
         </Row>
       </section>
+
+      <PasswordSection />
 
       <section className="card stack" style={{ padding: 18 }}>
         <div>

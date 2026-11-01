@@ -407,6 +407,43 @@ create table if not exists agent_tool_calls (
   created_at timestamptz not null default now()
 );
 create index if not exists agent_tool_calls_project on agent_tool_calls (project_id, created_at);
+-- Users with passwords, platform roles, and organizations (tenants). Every project belongs to one
+-- organization; people reach it as members of that organization or as project collaborators.
+alter table accounts add column if not exists password_hash text;
+alter table accounts add column if not exists password_changed_at timestamptz;
+alter table accounts add column if not exists platform_role text not null default 'user';
+alter table accounts add column if not exists disabled boolean not null default false;
+create table if not exists organizations (
+  id text primary key,
+  name text not null,
+  slug text unique,
+  personal boolean not null default false,
+  created_at timestamptz not null default now()
+);
+create table if not exists org_members (
+  org_id text not null references organizations(id) on delete cascade,
+  account_id text not null references accounts(id) on delete cascade,
+  role text not null default 'member',
+  created_at timestamptz not null default now(),
+  primary key (org_id, account_id)
+);
+create index if not exists org_members_account on org_members (account_id);
+alter table projects add column if not exists org_id text references organizations(id) on delete cascade;
+alter table api_tokens add column if not exists org_id text references organizations(id) on delete cascade;
+create table if not exists password_resets (
+  account_id text primary key references accounts(id) on delete cascade,
+  code_hash text not null,
+  attempts integer not null default 0,
+  expires_at timestamptz not null
+);
+-- Backfill for installs that predate organizations: a personal org per account, projects moved
+-- into their owner's, and the oldest account promoted to platform admin if there is none.
+insert into organizations (id, name, personal)
+  select 'personal_' || a.id, coalesce(nullif(a.name, ''), split_part(a.email, '@', 1)), true from accounts a on conflict do nothing;
+insert into org_members (org_id, account_id, role) select 'personal_' || id, id, 'owner' from accounts on conflict do nothing;
+update projects set org_id = 'personal_' || owner_id where org_id is null;
+update accounts set platform_role = 'admin'
+  where id = (select id from accounts order by created_at, id limit 1) and not exists (select 1 from accounts where platform_role = 'admin');
 `;
 
 export async function platformDb(): Promise<PGlite> {
