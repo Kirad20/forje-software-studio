@@ -452,9 +452,14 @@ ok((await req("GET", `/api/projects/${project.id}/changes`)).json.changes[0].act
 const bobMem = (await req("GET", `/api/projects/${project.id}/memory`)).json;
 ok(bobMem.project.some((m) => m.id === priceId) && bobMem.personal.length === 0, "editors share project memory but not the owner's personal memory", JSON.stringify(bobMem));
 ok((await req("PATCH", `/api/projects/${project.id}/memory/${mem.personal[0].id}`, { body: { text: "hack" } })).status === 404, "an editor cannot change the owner's personal memory");
+// Evals spend real model credit: a normal member cannot reach them, and with FORJA_EVALS unset not even an admin can.
+ok((await req("GET", "/api/admin/evals/config")).status === 403, "a member cannot reach the evals");
 await signInAs("carol@example.com");
 ok((await req("GET", `/api/projects/${project.id}`)).status === 404, "strangers cannot see the project");
 jar.localhost = ownerCookie;
+const evalsOff = await req("GET", "/api/admin/evals/config");
+ok(evalsOff.status === 200 && evalsOff.json.enabled === false && evalsOff.json.models.length === 0, "evals are off by default", evalsOff.text.slice(0, 200));
+ok((await req("POST", "/api/admin/evals/runs", { body: { cases: ["small-cafe-landing"] } })).status === 404, "an admin cannot start evals while they are off");
 const members = await req("GET", `/api/projects/${project.id}/members`);
 ok(members.json.members.length === 1 && members.json.members[0].email === "bob@example.com", "owner sees bob as member", members.text);
 await req("DELETE", `/api/projects/${project.id}/members/bob%40example.com`);

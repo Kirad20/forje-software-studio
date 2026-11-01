@@ -73,6 +73,20 @@ export const config = {
     secretKey: env.LANGFUSE_SECRET_KEY ?? "",
     baseUrl: (env.LANGFUSE_BASE_URL ?? env.LANGFUSE_HOST ?? "https://cloud.langfuse.com").replace(/\/$/, ""),
   },
+  /**
+   * Quality evals (server/evals): run the builder on a fixed set of requests, in throwaway
+   * projects, and score the result. Off unless FORJA_EVALS=1: it spends real model credit.
+   * The limits are deploy-time on purpose; the admin UI can ask for less, never for more.
+   */
+  evals: {
+    enabled: env.FORJA_EVALS === "1",
+    /** Most one run may spend, in USD (model calls of the builder and the judge). */
+    maxRunUsd: Math.max(0.1, Number(env.FORJA_EVALS_MAX_RUN_USD ?? 5)),
+    /** Most all runs together may spend in a rolling 24 hours. */
+    maxDailyUsd: Math.max(0.1, Number(env.FORJA_EVALS_MAX_DAILY_USD ?? 20)),
+    /** Cases building at the same time (each one is a full builder turn plus a headless browser). */
+    concurrency: Math.min(4, Math.max(1, Math.floor(Number(env.FORJA_EVALS_CONCURRENCY ?? 2)) || 1)),
+  },
   /** A project database closes after this long without queries ("sleeps"). */
   dbIdleMs: 60_000,
   /** Longest a single endpoint call or job run may take. */

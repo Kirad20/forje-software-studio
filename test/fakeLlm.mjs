@@ -20,6 +20,8 @@ function script(body) {
   const lastTool = [...body.messages].reverse().find((m) => m.role === "tool")?.content ?? "";
 
   if (sys.startsWith("Classify an app-builder request")) return { role: "router", res: reply('{"intent":"feature","complexity":2,"domains":["ui"]}') };
+  if (sys.startsWith("Eres un revisor de diseño de producto"))
+    return { role: "judge", res: reply('{"scores":{"hierarchy":4,"spacing":3,"color":4,"typography":3.5,"states":3,"responsive":4,"copy":4,"fidelity":3},"issues":["El botón principal no destaca"]}') };
   if (sys.startsWith("Mantienes el resumen")) return { role: "summary", res: reply("El dueño pidió una app de notas.") };
   if (sys.startsWith("Extraes la memoria")) return { role: "memory", res: reply('Esto es lo que vale la pena recordar:\n[{"kind": "preference", "text": "Al dueño le gusta el verde como color principal"}]') };
   if (sys.startsWith("Eres Forja. Escribe la respuesta final")) return { role: "final", res: reply("- Hice la app de notas.\n- Prueba /notes en la vista previa.") };

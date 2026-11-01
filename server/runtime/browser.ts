@@ -137,23 +137,26 @@ async function runStep(page: Page, s: BrowserStep, origin: string, shots: Browse
 const describe = (s: BrowserStep) =>
   s.action === "goto" ? `goto ${s.path}` : s.action === "fill" ? `fill ${s.selector} = ${JSON.stringify(s.text)}` : `${s.action} ${"selector" in s && s.selector ? s.selector : "text" in s && s.text ? JSON.stringify(s.text) : "key" in s ? s.key : ""}`.trim();
 
-/** Runs the steps against the project's preview and reports what happened. Stops at the first failing step. */
-export async function runBrowserTest(project: ShareScope, input: BrowserTestInput): Promise<BrowserTestResult> {
-  if (!config.browser.enabled) throw new Error("Las pruebas en navegador están desactivadas en este servidor (FORJA_BROWSER=0).");
-  const steps = (input.steps ?? []).slice(0, MAX_STEPS);
-  if (!steps.length) throw new Error("Pasa al menos un paso, p. ej. [{action:'goto', path:'/'}, {action:'screenshot'}]");
-  if (steps[0]!.action !== "goto") steps.unshift({ action: "goto", path: "/" });
+interface PreviewPage {
+  context: BrowserContext;
+  page: Page;
+  origin: string;
+  vp: { width: number; height: number };
+  consoleLines: string[];
+  failed: string[];
+  blocked: Set<string>;
+}
 
-  running++;
-  let context: BrowserContext | undefined;
+/** A fresh browser context on the project's preview, with its console and network watched. */
+async function openPreview(project: ShareScope, viewport: BrowserTestInput["viewport"], session?: BrowserTestInput["session"]): Promise<PreviewPage> {
+  const b = await getBrowser();
+  const origin = previewOrigin(project.id);
+  const { hostname } = new URL(origin);
+  const vp = VIEWPORTS[viewport ?? "desktop"] ?? VIEWPORTS.desktop;
+  const context = await b.newContext({ viewport: vp, isMobile: viewport === "mobile", hasTouch: viewport === "mobile", locale: "es-ES" });
   try {
-    const b = await getBrowser();
-    const origin = previewOrigin(project.id);
-    const { hostname } = new URL(origin);
-    const vp = VIEWPORTS[input.viewport ?? "desktop"] ?? VIEWPORTS.desktop;
-    context = await b.newContext({ viewport: vp, isMobile: input.viewport === "mobile", hasTouch: input.viewport === "mobile", locale: "es-ES" });
     const cookies = [{ name: SHARE_COOKIE, value: shareToken(project, 1), domain: hostname, path: "/", httpOnly: true, sameSite: "Lax" as const }];
-    if (input.session) cookies.push({ name: input.session.name, value: input.session.token, domain: hostname, path: "/", httpOnly: true, sameSite: "Lax" });
+    if (session) cookies.push({ name: session.name, value: session.token, domain: hostname, path: "/", httpOnly: true, sameSite: "Lax" });
     await context.addCookies(cookies);
 
     const consoleLines: string[] = [];
@@ -176,6 +179,25 @@ export async function runBrowserTest(project: ShareScope, input: BrowserTestInpu
     page.on("requestfailed", (r) => {
       if (r.failure()?.errorText !== "net::ERR_BLOCKED_BY_CLIENT") failed.push(`${r.method()} ${r.url().replace(origin, "")} → ${r.failure()?.errorText}`);
     });
+    return { context, page, origin, vp, consoleLines, failed, blocked };
+  } catch (e) {
+    await context.close().catch(() => {});
+    throw e;
+  }
+}
+
+/** Runs the steps against the project's preview and reports what happened. Stops at the first failing step. */
+export async function runBrowserTest(project: ShareScope, input: BrowserTestInput): Promise<BrowserTestResult> {
+  if (!config.browser.enabled) throw new Error("Las pruebas en navegador están desactivadas en este servidor (FORJA_BROWSER=0).");
+  const steps = (input.steps ?? []).slice(0, MAX_STEPS);
+  if (!steps.length) throw new Error("Pasa al menos un paso, p. ej. [{action:'goto', path:'/'}, {action:'screenshot'}]");
+  if (steps[0]!.action !== "goto") steps.unshift({ action: "goto", path: "/" });
+
+  running++;
+  let opened: PreviewPage | undefined;
+  try {
+    opened = await openPreview(project, input.viewport, input.session);
+    const { page, origin, vp, consoleLines, failed, blocked } = opened;
 
     const images: BrowserTestResult["images"] = [];
     const log: string[] = [];
@@ -216,7 +238,62 @@ export async function runBrowserTest(project: ShareScope, input: BrowserTestInpu
     ];
     return { text: out.join("\n"), images };
   } finally {
-    await context?.close().catch(() => {});
+    await opened?.context.close().catch(() => {});
+    release();
+  }
+}
+
+/** What opening one page of the preview showed: for evals, which need data rather than the builder's prose. */
+export interface PageInspection {
+  path: string;
+  status: number | null;
+  /** Console errors and warnings, uncaught exceptions. */
+  consoleErrors: string[];
+  failedRequests: string[];
+  textChars: number;
+  /** The start of the visible text. */
+  text: string;
+  screenshot?: { media_type: string; data: string };
+  error?: string;
+}
+
+/** Opens each path once at the given viewport and reports console, network and a screenshot. Never throws for a page that fails. */
+export async function inspectPreview(
+  project: ShareScope,
+  opts: { paths: string[]; viewport?: BrowserTestInput["viewport"]; session?: BrowserTestInput["session"]; screenshot?: boolean },
+): Promise<PageInspection[]> {
+  if (!config.browser.enabled) throw new Error("Las pruebas en navegador están desactivadas en este servidor (FORJA_BROWSER=0).");
+  running++;
+  let opened: PreviewPage | undefined;
+  try {
+    opened = await openPreview(project, opts.viewport, opts.session);
+    const { page, origin, consoleLines, failed } = opened;
+    const out: PageInspection[] = [];
+    for (const path of opts.paths) {
+      consoleLines.length = 0;
+      failed.length = 0;
+      const r: PageInspection = { path, status: null, consoleErrors: [], failedRequests: [], textChars: 0, text: "" };
+      try {
+        const res = await page.goto(origin + path, { waitUntil: "load", timeout: STEP_TIMEOUT });
+        await page.waitForLoadState("networkidle", { timeout: 3_000 }).catch(() => {});
+        r.status = res?.status() ?? null;
+        const body = ((await page.locator("body").innerText({ timeout: 2_000 }).catch(() => "")) ?? "").trim();
+        r.textChars = body.length;
+        r.text = body.slice(0, 1500);
+        if (opts.screenshot) {
+          const buf = await page.screenshot({ type: "jpeg", quality: 70 }).catch(() => null);
+          if (buf) r.screenshot = { media_type: "image/jpeg", data: buf.toString("base64") };
+        }
+      } catch (e) {
+        r.error = (e as Error).message.split("\n")[0];
+      }
+      r.consoleErrors = [...new Set(consoleLines)].slice(0, 10);
+      r.failedRequests = [...new Set(failed)].slice(0, 10);
+      out.push(r);
+    }
+    return out;
+  } finally {
+    await opened?.context.close().catch(() => {});
     release();
   }
 }

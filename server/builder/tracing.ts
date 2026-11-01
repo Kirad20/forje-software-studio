@@ -25,7 +25,7 @@ export interface LangfuseOptions {
   fetch?: typeof fetch;
 }
 
-type Event = { id: string; timestamp: string; type: "trace-create" | "generation-create" | "span-create"; body: Record<string, unknown> };
+type Event = { id: string; timestamp: string; type: "trace-create" | "generation-create" | "span-create" | "score-create"; body: Record<string, unknown> };
 
 const BATCH = 100;
 
@@ -114,6 +114,26 @@ export function createLangfuse(o: LangfuseOptions) {
         level: r.ok ? "DEFAULT" : "ERROR",
         metadata: { step: r.step, role: r.role, inputChars: r.inputChars, resultChars: r.resultChars },
       });
+    },
+
+    /**
+     * One finished eval case (server/evals): a trace in the run's Langfuse session plus a score
+     * per measure, so cases can be compared across runs there. Numbers and ids only. The turn's
+     * own agent traces share `turnId` as their session, which is how to get from a score to the steps.
+     */
+    evalCase(r: { runId: string; caseId: string; size: string; repeat: number; turnId: string | null; scores: Record<string, number | null> }) {
+      const traceId = randomUUID();
+      push("trace-create", {
+        id: traceId,
+        name: `eval:${r.caseId}`,
+        sessionId: `eval:${r.runId}`,
+        tags: ["eval", r.size, r.caseId],
+        metadata: { runId: r.runId, caseId: r.caseId, repeat: r.repeat, turnId: r.turnId },
+      });
+      for (const [name, value] of Object.entries(r.scores)) {
+        if (value === null) continue;
+        push("score-create", { id: randomUUID(), traceId, name, value, dataType: "NUMERIC" });
+      }
     },
 
     flush,

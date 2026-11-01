@@ -3,7 +3,7 @@
 // whitelists, fallback and cost metrics.   npm run test:agents
 import http from "node:http";
 import { spawn } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -37,6 +37,10 @@ const app = spawn(process.execPath, ["--import", "tsx", "server/index.ts"], {
     FORJA_MODELS_ALLOW: "",
     SMTP_URL: "",
     FORJA_BOOTSTRAP_TOKEN: "e2e-bootstrap-token-0123456789",
+    FORJA_EVALS: "1",
+    FORJA_EVALS_MAX_RUN_USD: "1",
+    FORJA_EVALS_MAX_DAILY_USD: "5",
+    FORJA_EVALS_CONCURRENCY: "1",
   },
 });
 app.stdout.on("data", (d) => (serverLog += d));
@@ -243,6 +247,39 @@ try {
   // The next turn starts from a compact context, not the replayed transcript.
   const lastFast = llmLog.filter((l) => l.role === "fast").length;
   ok(lastFast > 0, "fast turns were served");
+
+  // 5. Quality evals: a real run end to end against the scripted model, in a throwaway project.
+  const evalCfg = (await req("GET", "/api/admin/evals/config")).json;
+  ok(evalCfg.enabled && evalCfg.cases.length >= 6 && evalCfg.models.length === 3 && evalCfg.limits.maxRunUsd === 1, "evals: config lists the cases, the models and the limits", JSON.stringify(evalCfg.limits));
+  const me0 = (await req("GET", "/api/me")).json.account;
+  const dirs0 = new Set(readdirSync(path.join(DATA, "projects")));
+  ok((await req("POST", "/api/admin/evals/runs", { cases: ["no-existe"] })).status === 400, "evals: unknown cases are refused");
+  const started = await req("POST", "/api/admin/evals/runs", { cases: ["small-cafe-landing"], repeats: 1, models: ["openai:fake-mid"], judge: true, budgetUsd: 99 });
+  ok(started.status === 202 && started.json.budgetUsd === 1, "evals: a run starts, with the budget capped by the server", JSON.stringify(started.json));
+  ok((await req("POST", "/api/admin/evals/runs", { cases: ["small-cafe-landing"] })).status === 409, "evals: only one run at a time");
+  let run;
+  for (let i = 0; i < 300; i++) {
+    run = (await req("GET", `/api/admin/evals/runs/${started.json.runId}`)).json;
+    if (run.status !== "running") break;
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  const res = run.results?.[0];
+  ok(run.status === "done" && run.results.length === 1, "evals: the run finishes with one result", JSON.stringify({ status: run.status, error: run.error, n: run.results?.length }));
+  ok(res?.checks.compile.ok && res.checks.types?.ok && res.checks.preview.some((c) => c.ok), "evals: it measures compile, types and the preview", JSON.stringify(res?.checks));
+  ok(res?.design.judge?.scores?.hierarchy === 4 && res.score.judge > 0.5 && res.score.total > 50, "evals: the design judge scores the screenshots", JSON.stringify(res?.design.judge));
+  ok(res?.turn.models.every((m) => m === "Mediano") && res.usd > 0 && run.spentUsd > 0 && run.spentUsd <= 1, "evals: the builder was pinned to the chosen model and its spend is recorded", JSON.stringify({ turn: res?.turn, spent: run.spentUsd }));
+  ok(run.summary.overall.runs === 1 && run.summary.bySize.small, "evals: the run has a summary");
+  const dirs1 = readdirSync(path.join(DATA, "projects"));
+  ok(dirs1.every((d) => dirs0.has(d)), "evals: the throwaway project and its data are gone", JSON.stringify(dirs1.filter((d) => !dirs0.has(d))));
+  const me1 = (await req("GET", "/api/me")).json.account;
+  ok(me1.credits === me0.credits, "evals: real accounts are not charged");
+  const users = (await req("GET", "/api/admin/users")).json.users;
+  ok(!users.some((u) => u.email === "evals@forja.internal"), "evals: the eval account is hidden from the user list");
+  const md = await req("GET", `/api/admin/evals/runs/${started.json.runId}/export?format=md`);
+  ok(md.status === 200 && md.text.includes("# Informe de evals") && md.text.includes("small-cafe-landing"), "evals: the report exports as Markdown");
+  const js = await req("GET", `/api/admin/evals/runs/${started.json.runId}/export`);
+  ok(js.json?.run?.id === started.json.runId && js.json.run.results.length === 1 && js.json.evalSetVersion >= 1, "evals: the run exports as JSON");
+  ok((await req("GET", "/api/admin/evals/runs")).json.runs.some((r) => r.id === started.json.runId && r.done === 1), "evals: past runs are listed");
 } finally {
   console.log(process.exitCode ? "\nSOME CHECKS FAILED" : "\nALL CHECKS PASSED");
   if (process.exitCode) console.log("\n--- server log ---\n" + serverLog.slice(-5000));

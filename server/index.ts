@@ -112,6 +112,7 @@ await initBootstrap();
 await startJobRunner();
 startCatalogSync();
 startGithubSync();
+if (config.evals.enabled) void import("./evals/runner.js").then((m) => m.recoverEvals()).catch(() => {});
 
 const server = serve({ fetch: app.fetch, port: config.port }, (info) => {
   console.log(`[forja] plataforma en ${config.publicUrl} (puerto ${info.port})`);

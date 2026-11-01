@@ -407,6 +407,28 @@ create table if not exists agent_tool_calls (
   created_at timestamptz not null default now()
 );
 create index if not exists agent_tool_calls_project on agent_tool_calls (project_id, created_at);
+-- Quality evals (server/evals): one row per run, one per case execution. Results are kept as
+-- JSON on purpose (they are exported whole); the throwaway projects they ran in are deleted.
+create table if not exists eval_runs (
+  id text primary key,
+  created_by text references accounts(id) on delete set null,
+  status text not null check (status in ('running', 'done', 'cancelled', 'failed', 'interrupted')),
+  config jsonb not null,
+  budget_usd double precision not null,
+  spent_usd double precision not null default 0,
+  error text,
+  created_at timestamptz not null default now(),
+  finished_at timestamptz
+);
+create table if not exists eval_results (
+  id serial primary key,
+  run_id text not null references eval_runs(id) on delete cascade,
+  case_id text not null,
+  repeat integer not null,
+  result jsonb not null,
+  created_at timestamptz not null default now()
+);
+create index if not exists eval_results_run on eval_results (run_id, id);
 -- Users with passwords, platform roles, and organizations (tenants). Every project belongs to one
 -- organization; people reach it as members of that organization or as project collaborators.
 alter table accounts add column if not exists password_hash text;

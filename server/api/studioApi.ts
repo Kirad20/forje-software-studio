@@ -20,9 +20,11 @@ import { startSecurityReview } from "../builder/securityReview.js";
 import { addMemory, deleteMemory, listMemories, setMemoryEnabled, updateMemory } from "../platform/memory.js";
 import * as github from "../platform/github.js";
 import * as projects from "../platform/projects.js";
+import { evalsApi } from "../evals/api.js";
+import { EVAL_EMAIL } from "../evals/runner.js";
+import { removeProjectData } from "../runtime/projectData.js";
 import { publishProject, suggestSlug, unpublishProject } from "../runtime/publish.js";
 import { appUrl, previewOrigin, previewUrl, shareToken } from "../runtime/urls.js";
-import { rm } from "node:fs/promises";
 import path from "node:path";
 import { config } from "../config.js";
 import { analyticsSummary } from "../baas/analytics.js";
@@ -68,15 +70,6 @@ async function primaryKeyOf(projectId: string, table: string): Promise<string | 
     [table],
   );
   return rows.length === 1 ? rows[0]!.column_name : null;
-}
-
-/** Removes a deleted project's database and uploaded files from disk. */
-async function removeProjectData(projectId: string) {
-  const { closeProject } = await import("../baas/projectDb.js");
-  const { stopSandbox } = await import("../runtime/sandbox.js");
-  stopSandbox(projectId);
-  await closeProject(projectId);
-  await rm(path.join(config.dataDir, "projects", projectId), { recursive: true, force: true }).catch(() => {});
 }
 
 type Env = { Variables: { account: accounts.Account; project: projects.Project; access: Access; orgRole: orgs.OrgRole } };
@@ -402,7 +395,8 @@ studioApi.use("/admin/*", async (c, next) => {
 studioApi.get("/admin/users", async (c) =>
   c.json({
     users: await q(
-      `select id, email, name, platform_role as "platformRole", disabled, credits, created_at as "createdAt" from accounts order by created_at`,
+      `select id, email, name, platform_role as "platformRole", disabled, credits, created_at as "createdAt" from accounts where email <> $1 order by created_at`,
+      [EVAL_EMAIL],
     ),
   }),
 );
@@ -420,6 +414,9 @@ studioApi.patch("/admin/users/:id", async (c) => {
   }
   return c.json({ ok: true });
 });
+
+// Quality evals (admin only, and only with FORJA_EVALS=1): see server/evals.
+studioApi.route("/admin/evals", evalsApi);
 
 // --- Projects -------------------------------------------------------------------------
 
