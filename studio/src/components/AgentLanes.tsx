@@ -53,6 +53,7 @@ const STEP_LABEL: Record<string, string> = {
   execute_sql: "SQL",
   query_database: "Consultó",
   check_build: "Comprobó que compila",
+  finish_gate: "Verificación automática",
   run_tests: "Pruebas",
   call_endpoint: "Probó",
   get_logs: "Leyó los registros",

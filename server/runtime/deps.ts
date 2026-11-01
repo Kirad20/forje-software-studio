@@ -14,7 +14,7 @@ import type { FileMap } from "../platform/projects.js";
  */
 
 /** Always available, from Forja's own node_modules; projects can't pin other versions. */
-export const BUILTIN_PACKAGES = ["react", "react-dom", "zod", "@forja/client"];
+export const BUILTIN_PACKAGES = ["react", "react-dom", "zod", "@forja/client", "@forja/server"];
 export const MANIFEST = "package.json";
 const MAX_DEPS = 40;
 const INSTALL_TIMEOUT_MS = 5 * 60_000;

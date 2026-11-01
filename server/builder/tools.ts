@@ -9,7 +9,8 @@ import { readLogs } from "../platform/events.js";
 import * as projects from "../platform/projects.js";
 import { formatProblems, listProblems, recheckBuild, watchProblems } from "../platform/problems.js";
 import { ensureDeps, MANIFEST, readDeps, resolvePackage, withManifestLock, writeDeps } from "../runtime/deps.js";
-import { checkProject, compileServerModule, endpointRoutes, formatProblem, jobFiles, pageRoutes } from "../runtime/bundler.js";
+import { compileServerModule, endpointRoutes, formatProblem, jobFiles, pageRoutes } from "../runtime/bundler.js";
+import { verifyBuild } from "../runtime/typecheck.js";
 import { runBrowserTest, type BrowserStep } from "../runtime/browser.js";
 import { runQuickScan } from "../platform/security.js";
 import { formatFinding } from "../runtime/securityScan.js";
@@ -571,12 +572,12 @@ export const builderTools: BuilderTool[] = [
   }),
   typed({
     name: "check_build",
-    description: "Compila la app completa (páginas, endpoints, tareas) y devuelve los errores. Úsalo después de cada tanda de cambios.",
+    description:
+      "Compila la app completa (páginas, endpoints, tareas) y comprueba los tipos de TypeScript; devuelve los errores (los de tipos empiezan por «Tipo:»). Úsalo después de cada tanda de cambios.",
     input_schema: obj({}),
     output_schema: out({ ok: B, problems: arr(out({ file: S, line: I, column: I, text: S }, ["line", "column"])) }),
     async data(_i: Record<string, never>, ctx) {
-      const problems = await checkProject(await projects.readAllFiles(ctx.projectId));
-      return { ok: !problems.length, problems };
+      return verifyBuild(await projects.readAllFiles(ctx.projectId));
     },
     format: (d) => (d.problems.length ? `${d.problems.length} problema(s):\n${d.problems.map(formatProblem).join("\n")}` : "Compila sin errores."),
   }),

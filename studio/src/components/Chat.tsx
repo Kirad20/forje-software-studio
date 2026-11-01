@@ -149,6 +149,7 @@ const TOOL_LABEL: Record<string, string> = {
   execute_sql: "SQL",
   query_database: "Consultó",
   check_build: "Comprobó que compila",
+  finish_gate: "Verificación automática",
   get_logs: "Leyó los registros",
   get_problems: "Revisó los problemas",
   list_secrets: "Revisó los secretos",

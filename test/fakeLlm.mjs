@@ -116,6 +116,17 @@ function script(body) {
     if (step === 0) return { role: "fix", res: reply(null, [call("write_file", { path: "pages/_index.tsx", content: "export default function Home() { return <h1>Portada</h1>; }\n" })]) };
     return { role: "fix", res: reply("Arreglé la portada.") };
   }
+  // Type error that compiles: the finish gate reports it, the agent fixes it once told.
+  if (userText.includes("## Petición") && userText.includes("Tipo roto")) {
+    const last = body.messages.at(-1);
+    const lastUser = last?.role === "user" ? last : null;
+    const lastUserText = typeof lastUser?.content === "string" ? lastUser.content : (lastUser?.content ?? []).map((p) => p.text ?? "").join("\n");
+    const page = (field) => `import { useApi } from "@forja/client";\nexport default function Home() { const { data } = useApi<{ title: string }>("x"); return <h1>{data?.${field}}</h1>; }\n`;
+    if (step === 0) return { role: "fast", res: reply(null, [call("write_file", { path: "pages/_index.tsx", content: page("titel") })]) };
+    if (lastUserText.includes("Comprobación automática") && lastUserText.includes("titel"))
+      return { role: "fast", res: reply(null, [call("write_file", { path: "pages/_index.tsx", content: page("title") })]) };
+    return { role: "fast", res: reply("Cambié el título.") };
+  }
   // Fast agent: the full manual, a single opening message with "## Petición".
   if (userText.includes("## Petición") && userText.includes("Rompe la portada")) {
     if (step === 0) return { role: "fast", res: reply(null, [call("write_file", { path: "pages/_index.tsx", content: "export default function Home() { return <h1>Portada</h1>\n" })]) };
