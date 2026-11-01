@@ -16,6 +16,7 @@ export interface Me {
   email: string;
   name: string | null;
   credits: number;
+  platformRole: "admin" | "user";
   sessions: number;
 }
 

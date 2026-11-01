@@ -15,7 +15,7 @@ const DATA = mkdtempSync(path.join(tmpdir(), "forja-e2e-"));
 let serverLog = "";
 const server = spawn(process.execPath, ["--import", "tsx", "server/index.ts"], {
   cwd: ROOT,
-  env: { ...process.env, PORT: String(PORT), PUBLIC_URL: `http://localhost:${PORT}`, DATA_DIR: DATA, SECRETS_KEY: "ab".repeat(32), SMTP_URL: "" },
+  env: { ...process.env, PORT: String(PORT), PUBLIC_URL: `http://localhost:${PORT}`, DATA_DIR: DATA, SECRETS_KEY: "ab".repeat(32), SMTP_URL: "", FORJA_BOOTSTRAP_TOKEN: "e2e-bootstrap-token-0123456789" },
 });
 server.stdout.on("data", (d) => (serverLog += d));
 server.stderr.on("data", (d) => (serverLog += d));
@@ -61,6 +61,30 @@ for (let i = 0; i < 60; i++) {
   try { if ((await req("GET", "/healthz")).status === 200) break; } catch {}
   await new Promise((r) => setTimeout(r, 500));
 }
+
+// First run: no users yet, so the code signup is closed and only the bootstrap token opens the studio.
+ok((await req("GET", "/api/auth/status")).json?.needsSetup === true, "fresh install asks for setup");
+await req("POST", "/api/auth/request", { body: { email: "intruder@example.com" } });
+ok(!/intruder@example.com: \d{6}/.test(serverLog), "no login code is issued before setup");
+ok((await req("POST", "/api/auth/setup", { body: { token: "wrong-token", email: "owner@example.com", password: "una contraseña larga" } })).status === 400, "setup rejects a wrong token");
+ok((await req("POST", "/api/auth/setup", { body: { token: "e2e-bootstrap-token-0123456789", email: "owner@example.com", password: "corta" } })).status === 400, "setup rejects a weak password");
+const setup = await req("POST", "/api/auth/setup", { body: { token: "e2e-bootstrap-token-0123456789", email: "owner@example.com", password: "una contraseña larga", name: "Dueña" } });
+ok(setup.status === 200, "setup creates the first admin", setup.text);
+ok((await req("GET", "/api/me")).json?.account?.platformRole === "admin", "first account is a platform admin");
+ok((await req("POST", "/api/auth/setup", { body: { token: "e2e-bootstrap-token-0123456789", email: "x@example.com", password: "otra contraseña larga" } })).status === 400, "setup token is single use");
+ok((await req("GET", "/api/auth/status")).json?.needsSetup === false, "setup is over");
+
+// Password sign-in: wrong password and unknown email look the same; the right one opens a session.
+const ownerJar = jar.localhost;
+jar.localhost = "";
+const badLogin0 = await req("POST", "/api/auth/login", { body: { email: "owner@example.com", password: "mala contraseña larga" } });
+const unknown = await req("POST", "/api/auth/login", { body: { email: "nadie@example.com", password: "mala contraseña larga" } });
+ok(badLogin0.status === 401 && unknown.status === 401 && badLogin0.text === unknown.text, "wrong password and unknown email answer the same");
+ok((await req("GET", "/api/me")).status === 401, "no session after a failed login");
+const good = await req("POST", "/api/auth/login", { body: { email: "OWNER@example.com", password: "una contraseña larga" } });
+ok(good.status === 200 && (await req("GET", "/api/me")).json?.account?.email === "owner@example.com", "password login");
+ok(/httponly/i.test(String(good.headers["set-cookie"] ?? "")), "session cookie is httpOnly");
+jar.localhost = ownerJar;
 
 // Studio sign-in
 await req("POST", "/api/auth/request", { body: { email: "owner@example.com" } });
