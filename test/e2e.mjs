@@ -341,6 +341,15 @@ const tl = await req("POST", "/mcp", { headers: mcpH, body: { jsonrpc: "2.0", id
 ok(tl.json?.result?.tools?.length > 15, `mcp tools/list (${tl.json?.result?.tools?.length})`, tl.text.slice(0, 300));
 const call = await req("POST", "/mcp", { headers: mcpH, body: { jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "check_build", arguments: { projectId: project.id } } } });
 ok(call.json?.result?.content?.[0]?.text?.includes("Compila"), "mcp check_build", call.text.slice(0, 300));
+const sqlTool = tl.json?.result?.tools?.find((t) => t.name === "execute_sql");
+ok(sqlTool?.annotations?.destructiveHint === true, "mcp marks execute_sql as destructive", JSON.stringify(sqlTool?.annotations));
+const mcpCall = async (id, name, args) => (await req("POST", "/mcp", { headers: mcpH, body: { jsonrpc: "2.0", id, method: "tools/call", params: { name, arguments: args } } })).json?.result;
+const guides = await mcpCall(20, "get_guides", {});
+ok(guides?.content?.[0]?.text?.includes("forja-overview"), "mcp get_guides lists topics", JSON.stringify(guides).slice(0, 300));
+const overview = await mcpCall(21, "get_guides", { topic: "forja-overview" });
+ok(overview?.content?.[0]?.text?.includes("# Project structure"), "mcp get_guides returns a topic", JSON.stringify(overview).slice(0, 300));
+const lf = await mcpCall(22, "list_files", { projectId: project.id });
+ok(lf?.content?.[0]?.text?.includes("<project-context>"), "mcp list_files ends with the project context", JSON.stringify(lf).slice(-300));
 // browser_test: a real headless Chromium against the preview, anonymous and signed in.
 const browse = async (args) =>
   (await req("POST", "/mcp", { headers: mcpH, body: { jsonrpc: "2.0", id: 4, method: "tools/call", params: { name: "browser_test", arguments: { projectId: project.id, ...args } } } })).json?.result?.content ?? [];
