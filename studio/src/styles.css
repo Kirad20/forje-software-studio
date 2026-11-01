@@ -209,3 +209,14 @@ table.grid td { max-width: 320px; overflow: hidden; text-overflow: ellipsis; whi
 .kv { display: grid; grid-template-columns: 140px 1fr; gap: 6px 12px; font-size: 13px; }
 .log-line { font-family: var(--mono); font-size: 12px; padding: 3px 0; border-bottom: 1px dashed var(--border); white-space: pre-wrap; word-break: break-word; }
 .log-line.error { color: var(--err); }
+
+/* Administración */
+.admin-tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border); overflow-x: auto; }
+.admin-tabs a { padding: 8px 12px; color: var(--muted); font-weight: 500; border-bottom: 2px solid transparent; margin-bottom: -1px; white-space: nowrap; }
+.admin-tabs a:hover { color: var(--text); }
+.admin-tabs a.active { color: var(--accent); border-bottom-color: var(--accent); }
+.setting-row { display: grid; grid-template-columns: minmax(180px, 280px) 1fr auto; gap: 8px 16px; align-items: start; padding: 12px 0; border-top: 1px solid var(--border); }
+.setting-row:first-of-type { border-top: 0; }
+@media (max-width: 720px) { .setting-row { grid-template-columns: 1fr; } }
+.bar { height: 6px; border-radius: 99px; background: var(--surface-2); overflow: hidden; min-width: 80px; }
+.bar > span { display: block; height: 100%; background: var(--accent); }
