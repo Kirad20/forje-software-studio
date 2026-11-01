@@ -185,6 +185,11 @@ ok(
 // Studio CSRF defence and headers
 const foreign = await req("POST", "/api/projects", { body: { prompt: "x" }, headers: { origin: "https://evil.example" } });
 ok(foreign.status === 403, "studio rejects writes from foreign origins");
+// Reached at an address PUBLIC_URL does not name (a proxy domain, 127.0.0.1): same-origin still works.
+const sameOrigin = await req("POST", "/api/auth/logout", { host: "127.0.0.1", body: {}, headers: { origin: `http://127.0.0.1:${PORT}` } });
+ok(sameOrigin.status === 200, "studio accepts writes from the origin the request was made to", sameOrigin.text);
+const spoofed = await req("POST", "/api/auth/logout", { host: "127.0.0.1", body: {}, headers: { origin: "https://evil.example", "x-forwarded-host": "evil.example", "x-forwarded-proto": "https" } });
+ok(spoofed.status === 403, "forwarded headers are ignored when no proxy is trusted");
 const formPost = await req("POST", "/api/projects", { body: "prompt=x", headers: { "content-type": "application/x-www-form-urlencoded" } });
 ok(formPost.status === 415, "studio rejects non-JSON writes");
 const studioHome = await req("GET", "/api/me");

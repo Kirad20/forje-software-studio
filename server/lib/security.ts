@@ -32,6 +32,24 @@ export function studioOrigins(): string[] {
 }
 
 /**
+ * The origin a request was addressed to, as the browser saw it: the Host header, or what the
+ * trusted proxy forwarded (X-Forwarded-Host / -Proto). An Origin equal to it is same-origin by
+ * definition, so it is no CSRF whatever PUBLIC_URL says; a cross-site page still sends its own
+ * Origin, which never matches (a browser cannot forge Origin or Host).
+ */
+export function requestOrigin(headers: { host?: string; forwardedHost?: string; forwardedProto?: string }, trustProxy = config.trustProxy): string | null {
+  const first = (v?: string) => v?.split(",")[0]?.trim() || undefined;
+  const host = (trustProxy > 0 && first(headers.forwardedHost)) || headers.host;
+  if (!host) return null;
+  const proto = (trustProxy > 0 && first(headers.forwardedProto)) || "http";
+  try {
+    return new URL(`${proto}://${host}`).origin;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * The client's address. Behind `config.trustProxy` proxies, each one appends the address it saw
  * to X-Forwarded-For, so the N-th entry from the right is what the outermost trusted proxy saw;
  * anything further left is client-supplied and spoofable.
