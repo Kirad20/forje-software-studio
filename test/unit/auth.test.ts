@@ -149,7 +149,9 @@ describe("password login, reset and sessions", () => {
   });
 });
 
-describe("organizations and project access", () => {
+// createProject initializes the project's PGlite in the background: several seconds of blocked
+// event loop per new project, which lands on whichever test is awaiting the platform database.
+describe("organizations and project access", { timeout: 30_000 }, () => {
   it("gives org members access to org projects, and outsiders none", async () => {
     const ana = await accounts.createAccount("ana@example.com", "Ana", null);
     const luis = await accounts.createAccount("luis@example.com", "Luis", null);
