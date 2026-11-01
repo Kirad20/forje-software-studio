@@ -117,6 +117,7 @@ export async function runAgent(spec: AgentSpec): Promise<AgentResult> {
   let reminded = false;
   for (let step = 0; step < maxSteps; step++) {
     if (spec.signal.aborted) throw new Error("Detenido.");
+    const callStarted = performance.now();
     const call = await callModel(
       spec.scope,
       spec.role,
@@ -130,7 +131,7 @@ export async function runAgent(spec: AgentSpec): Promise<AgentResult> {
       spec.onModel?.(call.model, call.failed.length ? `tras fallar ${call.failed.join("; ")}` : "");
     }
     result.usage = addUsage(result.usage, call.response.usage);
-    recordStep({ runId, projectId: spec.ctx.projectId, turnId: spec.turnId, taskId: spec.taskId, role: spec.role, step, modelId: call.model.id, usage: call.response.usage });
+    recordStep({ runId, projectId: spec.ctx.projectId, turnId: spec.turnId, taskId: spec.taskId, role: spec.role, step, modelId: call.model.id, usage: call.response.usage, ms: performance.now() - callStarted, usd: call.usd });
     result.usd += call.usd;
     result.credits += call.credits;
 
