@@ -18,6 +18,7 @@ import { runInSandbox } from "../runtime/sandbox.js";
 import { publishProject } from "../runtime/publish.js";
 import { previewOrigin, previewUrl } from "../runtime/urls.js";
 import { findSymbol, projectMap, relatedFiles } from "./index.js";
+import { rewriteImports } from "./rename.js";
 
 export { previewUrl };
 
@@ -209,14 +210,31 @@ export const builderTools: BuilderTool[] = [
   {
     name: "rename_file",
     description:
-      "Mueve o renombra un archivo. NO reescribe los imports: antes mira quién lo importa con related_files y actualízalos con edit_file; después corre check_build. Si la ruta nueva ya existe, la reemplaza.",
+      "Mueve o renombra un archivo y reescribe los imports que apuntan a él (y los imports relativos del propio archivo si cambia de carpeta). No mueve archivos hermanos como <Nombre>.module.css o <Nombre>.example.tsx: renómbralos con otra llamada si hace falta. Falla si la ruta nueva ya existe. Después corre check_build.",
     input_schema: obj({ from: str("Ruta actual"), to: str("Ruta nueva") }, ["from", "to"]),
     async run(i: { from: string; to: string }, ctx) {
       assertOwned(ctx, i.from);
       assertOwned(ctx, i.to);
+      if (i.from === i.to) return "La ruta nueva es igual a la actual; no se cambió nada.";
+      const files = await projects.readAllFiles(ctx.projectId);
+      if (!(i.from in files)) throw new Error(`No existe ${i.from}. Usa list_files para ver las rutas.`);
+      if (i.to in files) throw new Error(`Ya existe ${i.to}. Elige otra ruta o borra ese archivo primero con delete_file.`);
+      const rewrites = rewriteImports(files, i.from, i.to);
+      for (const p of Object.keys(rewrites)) if (p !== i.to) assertOwned(ctx, p);
       await projects.renameFile(ctx.projectId, i.from, i.to, ctx.author);
-      noteWrite(ctx, i.from, i.to);
-      return `Movido ${i.from} → ${i.to}`;
+      for (const [p, content] of Object.entries(rewrites)) await projects.writeFile(ctx.projectId, p, content, ctx.author, ctx.actor);
+      noteWrite(ctx, i.from, i.to, ...Object.keys(rewrites));
+      const stem = i.from.replace(/\.tsx?$/, "");
+      const siblings = Object.keys(files).filter((p) => p !== i.from && (p.startsWith(`${stem}.module.`) || p.startsWith(`${stem}.example.`)));
+      const updated = Object.keys(rewrites).filter((p) => p !== i.to);
+      return [
+        `Movido ${i.from} → ${i.to}`,
+        updated.length ? `Imports actualizados en: ${updated.join(", ")}` : "Ningún archivo lo importaba.",
+        rewrites[i.to] !== undefined ? "También se ajustaron sus imports relativos." : "",
+        siblings.length ? `No se movieron: ${siblings.join(", ")}.` : "",
+      ]
+        .filter(Boolean)
+        .join("\n");
     },
   },
   {

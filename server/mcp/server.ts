@@ -108,8 +108,8 @@ export const TOOL_HINTS: Record<string, Hints> = {
   setup_auth: { ...WRITE, idempotentHint: true },
   create_checkpoint: WRITE,
   fetch_url: { readOnlyHint: true, openWorldHint: true },
-  // Rename overwrites an existing target; the others delete code or touch real data.
-  rename_file: DESTRUCTIVE,
+  rename_file: WRITE,
+  // These delete code or touch real data.
   delete_file: DESTRUCTIVE,
   remove_dependency: DESTRUCTIVE,
   forget: DESTRUCTIVE,
