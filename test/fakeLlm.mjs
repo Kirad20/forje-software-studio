@@ -19,6 +19,8 @@ function script(body) {
   const step = body.messages.filter((m) => m.role === "assistant").length;
   const lastTool = [...body.messages].reverse().find((m) => m.role === "tool")?.content ?? "";
 
+  // Admin panel connection test (server/admin/probe.ts): plain text, then a forced tool call.
+  if (sys.startsWith("Prueba de conexión de Forja")) return { role: "probe", res: body.tools?.length ? reply(null, [call("echo", { text: "OK" })]) : reply("OK") };
   if (sys.startsWith("Classify an app-builder request")) return { role: "router", res: reply('{"intent":"feature","complexity":2,"domains":["ui"]}') };
   if (sys.startsWith("Eres un revisor de diseño de producto"))
     return { role: "judge", res: reply('{"scores":{"hierarchy":4,"spacing":3,"color":4,"typography":3.5,"states":3,"responsive":4,"copy":4,"fidelity":3},"issues":["El botón principal no destaca"]}') };
@@ -146,6 +148,10 @@ export function startFakeLlm() {
     let raw = "";
     req.on("data", (c) => (raw += c));
     req.on("end", () => {
+      if (req.method === "GET" && req.url.endsWith("/models")) {
+        res.writeHead(200, { "content-type": "application/json" });
+        return res.end(JSON.stringify({ data: [{ id: "fake-strong" }, { id: "fake-mid" }, { id: "fake-flaky" }] }));
+      }
       const body = JSON.parse(raw || "{}");
       if (body.model === "fake-flaky") {
         log.push({ model: body.model, role: "flaky", at: Date.now() });

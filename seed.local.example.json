@@ -1,0 +1,15 @@
+{
+  "settings": {
+    "signup": "invite",
+    "smtpUrl": "smtp://usuario:clave@smtp.example.com:587",
+    "emailFrom": "noreply@example.com"
+  },
+  "providers": [
+    { "id": "anthropic", "apiKey": "sk-ant-...", "enabled": true },
+    { "id": "openrouter", "apiKey": "sk-or-...", "enabled": false },
+    { "id": "openai", "baseUrl": "http://localhost:11434/v1", "enabled": false }
+  ],
+  "models": [
+    { "provider": "openai", "model": "qwen3.8:latest", "label": "Qwen 3.8 (Ollama)", "tier": 3, "inPrice": 0, "outPrice": 0 }
+  ]
+}

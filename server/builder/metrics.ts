@@ -45,7 +45,16 @@ export interface ToolCallRecord {
   ms: number;
 }
 
-const quiet = (p: Promise<unknown>) => void p.catch(() => {});
+const pending = new Set<Promise<unknown>>();
+const quiet = (p: Promise<unknown>) => {
+  const done = p.catch(() => {}).finally(() => pending.delete(done));
+  pending.add(done);
+};
+
+/** Resolves once every recorded row so far is written (tests, shutdown). */
+export async function metricsIdle() {
+  while (pending.size) await Promise.all(pending);
+}
 
 export function recordStep(r: StepRecord) {
   langfuse?.step(r);

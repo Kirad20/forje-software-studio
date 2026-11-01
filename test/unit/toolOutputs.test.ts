@@ -2,11 +2,19 @@ import { mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
+import { freshDatabase } from "../helpers/pg.mjs";
 
 const dir = mkdtempSync(path.join(os.tmpdir(), "forja-tools-"));
 process.env.DATA_DIR = dir;
+const pgdb = await freshDatabase();
+process.env.DATABASE_URL = pgdb.url;
 const { runFixture } = await import("./toolOutputs.fixture.js");
-afterAll(() => rmSync(dir, { recursive: true, force: true }));
+const { closePlatformDb } = await import("../../server/platform/db.js");
+afterAll(async () => {
+  rmSync(dir, { recursive: true, force: true });
+  await closePlatformDb();
+  await pgdb.drop();
+});
 
 /**
  * The text each typed tool returned BEFORE the data/format split, captured from the old code

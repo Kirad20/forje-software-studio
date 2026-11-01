@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
+import { go } from "../router";
 
 interface EvalCfg {
   enabled: boolean;
@@ -94,12 +95,18 @@ export function Evals() {
   if (!cfg) return <div className="empty"><span className="spinner" /></div>;
   if (!cfg.enabled)
     return (
-      <div className="page stack">
-        <h1 style={{ fontSize: 24 }}>Evals de calidad</h1>
-        <div className="card" style={{ padding: 16 }}>
-          Los evals están desactivados. Gastan crédito real de modelos, así que se activan al desplegar con <code>FORJA_EVALS=1</code>. Los topes se fijan con{" "}
-          <code>FORJA_EVALS_MAX_RUN_USD</code>, <code>FORJA_EVALS_MAX_DAILY_USD</code> y <code>FORJA_EVALS_CONCURRENCY</code>.
-        </div>
+      <div className="card" style={{ padding: 16 }}>
+        Los evals están desactivados. Gastan crédito real de modelos: actívalos y fija sus topes en{" "}
+        <a
+          href="/admin/general"
+          onClick={(e) => {
+            e.preventDefault();
+            go("/admin/general");
+          }}
+        >
+          General → Evals de calidad
+        </a>
+        .
       </div>
     );
 
@@ -131,8 +138,7 @@ export function Evals() {
   };
 
   return (
-    <div className="page stack" style={{ gap: 18 }}>
-      <h1 style={{ fontSize: 24 }}>Evals de calidad</h1>
+    <div className="stack" style={{ gap: 18 }}>
       <p className="muted small" style={{ margin: 0 }}>
         Ejecutan el constructor con peticiones fijas en proyectos desechables (cuenta interna, sin tocar datos ni créditos de nadie) y puntúan compilación, tipos, vista previa y diseño.
         Topes: {money(cfg.limits.maxRunUsd)} por ejecución, {money(cfg.limits.maxDailyUsd)} al día (llevas {money(cfg.spentLast24hUsd)}), {cfg.limits.concurrency} en paralelo.

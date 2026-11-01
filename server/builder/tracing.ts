@@ -142,6 +142,13 @@ export function createLangfuse(o: LangfuseOptions) {
 
 export type Langfuse = ReturnType<typeof createLangfuse>;
 
-/** null when LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY are not set: tracing is off. */
-export const langfuse: Langfuse | null =
-  config.langfuse.publicKey && config.langfuse.secretKey ? createLangfuse(config.langfuse) : null;
+const fromConfig = () => (config.langfuse.publicKey && config.langfuse.secretKey ? createLangfuse({ ...config.langfuse }) : null);
+
+/** null when the Langfuse keys are not set: tracing is off. Rebuilt when an admin changes them. */
+export let langfuse: Langfuse | null = fromConfig();
+
+export function reloadLangfuse() {
+  const old = langfuse;
+  langfuse = fromConfig();
+  void old?.flush().catch(() => {});
+}

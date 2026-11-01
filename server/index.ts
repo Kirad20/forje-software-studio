@@ -12,7 +12,11 @@ import { attachSocket } from "./baas/realtime.js";
 import { handleMcp } from "./mcp/server.js";
 import { accountFromApiToken } from "./platform/accounts.js";
 import { initBootstrap } from "./platform/bootstrap.js";
-import { platformDb } from "./platform/db.js";
+import { closePlatformDb, platformDb } from "./platform/db.js";
+import { seedLocal } from "./db/seeds/local.js";
+import { reloadProviders } from "./llm/providers.js";
+import { wireSettingReactions } from "./settings/reactions.js";
+import { loadSettings, warnMovedEnv } from "./settings/store.js";
 import { getProject, getProjectBySlug, type Project } from "./platform/projects.js";
 import { cookie, parseCookies, serveApp } from "./runtime/appServer.js";
 import { stopAllSandboxes } from "./runtime/sandbox.js";
@@ -110,11 +114,19 @@ function page(title: string, body: string) {
 }
 
 await platformDb();
+warnMovedEnv();
+const seeded = await seedLocal(config.seedFile);
+if (seeded.length) console.log(`[forja] ${config.seedFile}: ${seeded.join(", ")}`);
+await loadSettings();
+await reloadProviders();
+wireSettingReactions();
 await initBootstrap();
 await startJobRunner();
 startCatalogSync();
 startGithubSync();
-if (config.evals.enabled) void import("./evals/runner.js").then((m) => m.recoverEvals()).catch(() => {});
+// Always, not only with evals on: a crash mid-run of the evals or the agent playground (which can run
+// with evals off) leaves throwaway projects of the internal account behind.
+void import("./evals/runner.js").then((m) => m.recoverEvals()).catch(() => {});
 
 const server = serve({ fetch: app.fetch, port: config.port }, (info) => {
   console.log(`[forja] plataforma en ${config.publicUrl} (puerto ${info.port})`);

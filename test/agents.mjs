@@ -3,21 +3,33 @@
 // whitelists, fallback and cost metrics.   npm run test:agents
 import http from "node:http";
 import { spawn } from "node:child_process";
-import { mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { log as llmLog, startFakeLlm } from "./fakeLlm.mjs";
+import { freshDatabase } from "./helpers/pg.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const { server: llm, port: llmPort } = await startFakeLlm();
 const PORT = 4800 + Math.floor(Math.random() * 400);
 const DATA = mkdtempSync(path.join(tmpdir(), "forja-agents-"));
+const pgdb = await freshDatabase();
 const MODELS = [
   { provider: "openai", model: "fake-strong", label: "Fuerte", tier: 5, inPrice: 2, outPrice: 10, cacheReadPrice: 0.2, speed: 2, vision: true },
   { provider: "openai", model: "fake-mid", label: "Mediano", tier: 3, inPrice: 0.1, outPrice: 0.5, cacheReadPrice: 0.01, speed: 5, vision: true },
   { provider: "openai", model: "fake-flaky", label: "Inestable", tier: 5, inPrice: 0, outPrice: 0, speed: 5, vision: true },
 ];
+// Platform settings, providers and models live in the database: the server applies this seed file at start-up.
+const SEED = path.join(DATA, "seed.json");
+writeFileSync(
+  SEED,
+  JSON.stringify({
+    settings: { "evals.enabled": true, "evals.maxRunUsd": 1, "evals.maxDailyUsd": 5, "evals.concurrency": 1 },
+    providers: [{ id: "openai", baseUrl: `http://127.0.0.1:${llmPort}/v1`, apiKey: "test", enabled: true }],
+    models: MODELS,
+  }),
+);
 let serverLog = "";
 const app = spawn(process.execPath, ["--import", "tsx", "server/index.ts"], {
   cwd: ROOT,
@@ -26,21 +38,10 @@ const app = spawn(process.execPath, ["--import", "tsx", "server/index.ts"], {
     PORT: String(PORT),
     PUBLIC_URL: `http://localhost:${PORT}`,
     DATA_DIR: DATA,
+    DATABASE_URL: pgdb.url,
+    FORJA_SEED_FILE: SEED,
     SECRETS_KEY: "cd".repeat(32),
-    ANTHROPIC_API_KEY: "",
-    OPENROUTER_API_KEY: "",
-    OPENAI_BASE_URL: `http://127.0.0.1:${llmPort}/v1`,
-    OPENAI_API_KEY: "test",
-    BUILDER_MODEL: "",
-    APP_AI_MODEL: "",
-    FORJA_MODELS: JSON.stringify(MODELS),
-    FORJA_MODELS_ALLOW: "",
-    SMTP_URL: "",
     FORJA_BOOTSTRAP_TOKEN: "e2e-bootstrap-token-0123456789",
-    FORJA_EVALS: "1",
-    FORJA_EVALS_MAX_RUN_USD: "1",
-    FORJA_EVALS_MAX_DAILY_USD: "5",
-    FORJA_EVALS_CONCURRENCY: "1",
   },
 });
 app.stdout.on("data", (d) => (serverLog += d));
@@ -48,7 +49,10 @@ app.stderr.on("data", (d) => (serverLog += d));
 const finish = () => {
   app.kill();
   llm.close();
-  setTimeout(() => rmSync(DATA, { recursive: true, force: true }), 500);
+  setTimeout(() => {
+    rmSync(DATA, { recursive: true, force: true });
+    pgdb.drop().catch(() => {});
+  }, 500);
 };
 
 let cookie = "";
@@ -280,6 +284,43 @@ try {
   const js = await req("GET", `/api/admin/evals/runs/${started.json.runId}/export`);
   ok(js.json?.run?.id === started.json.runId && js.json.run.results.length === 1 && js.json.evalSetVersion >= 1, "evals: the run exports as JSON");
   ok((await req("GET", "/api/admin/evals/runs")).json.runs.some((r) => r.id === started.json.runId && r.done === 1), "evals: past runs are listed");
+
+  // 6. Admin panel: connection tests against the scripted model server.
+  const provTest = await req("POST", "/api/admin/providers/openai/test");
+  ok(provTest.json?.ok === true && provTest.json.models === 3, "admin: testing a provider lists its models", provTest.text);
+  const modelTest = await req("POST", "/api/admin/models/test/openai%3Afake-mid");
+  ok(modelTest.json?.ok === true && modelTest.json.text === "OK" && modelTest.json.toolsOk === true && modelTest.json.usd > 0, "admin: testing a model answers text and calls a tool", modelTest.text);
+  const flakyTest = await req("POST", "/api/admin/models/test/openai%3Afake-flaky");
+  ok(flakyTest.status === 200 && flakyTest.json.ok === false && /503|overloaded/.test(flakyTest.json.error), "admin: a failing model reports its error", flakyTest.text);
+  ok((await req("GET", "/api/me")).json.account.credits === me1.credits, "admin: connection tests charge nobody");
+
+  // 7. Admin panel: one agent on one model in a throwaway project, and what the router learned.
+  const playRoles = (await req("GET", "/api/admin/agents/roles")).json.roles;
+  ok(playRoles.some((r) => r.role === "backend" && r.tools.includes("write_file")), "playground: lists the roles with their tools", JSON.stringify(playRoles?.map((r) => r.role)));
+  const dirs2 = new Set(readdirSync(path.join(DATA, "projects")));
+  const spent0 = (await req("GET", "/api/admin/evals/config")).json.spentLast24hUsd;
+  const play = await req("POST", "/api/admin/agents/runs", { role: "backend", modelId: "openai:fake-mid", prompt: "Endpoint GET notes/list" });
+  ok(play.status === 202 && play.json.runId, "playground: a run starts", play.text);
+  ok((await req("POST", "/api/admin/agents/runs", { role: "ui", modelId: "openai:fake-mid", prompt: "otra" })).status === 409, "playground: one run at a time");
+  ok((await req("POST", "/api/admin/agents/runs", { role: "planner", modelId: "openai:fake-mid", prompt: "x" })).status === 400, "playground: roles that need the orchestrator are refused");
+  let pr;
+  for (let i = 0; i < 120; i++) {
+    pr = (await req("GET", `/api/admin/agents/runs/${play.json.runId}`)).json;
+    if (pr.status !== "running") break;
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  ok(pr.status === "done" && pr.result.files["endpoints/notes/list_GET.ts"]?.includes("select * from notes"), "playground: the agent's files come back", JSON.stringify({ status: pr.status, error: pr.error, files: Object.keys(pr.result?.files ?? {}) }));
+  ok(pr.events.some((e) => e.type === "tool_start" && e.name === "write_file") && pr.result.usd > 0, "playground: steps and cost are reported", JSON.stringify(pr.events.map((e) => e.type)));
+  ok(llmLog.filter((l) => l.role === "backend").at(-1)?.model === "fake-mid", "playground: the chosen model answered");
+  const dirs3 = readdirSync(path.join(DATA, "projects"));
+  ok(dirs3.every((d) => dirs2.has(d)), "playground: the throwaway project is gone", JSON.stringify(dirs3.filter((d) => !dirs2.has(d))));
+  ok((await req("GET", "/api/me")).json.account.credits === me1.credits, "playground: real accounts are not charged");
+  const spent1 = (await req("GET", "/api/admin/evals/config")).json.spentLast24hUsd;
+  ok(spent1 > spent0, "playground: its spend still counts against the daily cap once the project is gone", JSON.stringify({ spent0, spent1 }));
+  const stats = (await req("GET", "/api/admin/router/stats")).json;
+  ok(stats.classes.length > 0 && stats.classes[0].models[0].mean > 0 && stats.decisions.length > 0, "router: the panel shows what it learned and its decisions", JSON.stringify(stats.classes[0]));
+  const reset = await req("POST", "/api/admin/router/reset", {});
+  ok(reset.json.removed > 0 && (await req("GET", "/api/admin/router/stats")).json.classes.length === 0, "router: what it learned can be forgotten", reset.text);
 } finally {
   console.log(process.exitCode ? "\nSOME CHECKS FAILED" : "\nALL CHECKS PASSED");
   if (process.exitCode) console.log("\n--- server log ---\n" + serverLog.slice(-5000));

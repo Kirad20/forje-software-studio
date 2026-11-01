@@ -13,6 +13,11 @@ export interface EmailInput {
 
 let transport: Transporter | null | undefined;
 const getTransport = () => (transport ??= config.smtpUrl ? nodemailer.createTransport(config.smtpUrl) : null);
+/** The SMTP setting changed: the next email builds a new transport. */
+export function resetTransport() {
+  transport?.close();
+  transport = undefined;
+}
 
 /**
  * Sends one email from an app. Until the project has a verified sending domain and the

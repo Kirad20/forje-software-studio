@@ -2,12 +2,14 @@
 #
 # Coolify:   ver docs/despliegue-coolify.md. Coolify genera el dominio (SERVICE_URL_FORJA_4100),
 #            la clave de cifrado (SERVICE_HEX_64_SECRETSKEY) y el token de instalación
-#            (SERVICE_PASSWORD_BOOTSTRAP); el resto se edita en «Environment Variables».
-# Local:     cp .env.example .env   (rellena SERVICE_HEX_64_SECRETSKEY y una clave de modelo)
+#            (SERVICE_PASSWORD_BOOTSTRAP) y la contraseña de Postgres (SERVICE_PASSWORD_POSTGRES).
+#            El resto de la configuración se edita en el studio (Administración).
+# Local:     cp .env.example .env   (rellena SERVICE_HEX_64_SECRETSKEY y SERVICE_PASSWORD_POSTGRES)
 #            docker compose -f docker-compose.yml -f docker-compose.local.yml up --build
 #
-# Una sola instancia a propósito: las bases de datos son PGlite embebido sobre el volumen
-# forja-data, y dos procesos escribiendo la misma carpeta la corromperían. No escales réplicas.
+# La plataforma guarda sus datos en el servicio postgres (volumen forja-pg). Una sola instancia de
+# forja a propósito: las bases de datos de las apps son PGlite embebido sobre el volumen forja-data,
+# y dos procesos escribiendo la misma carpeta la corromperían. No escales réplicas.
 
 services:
   forja:
@@ -36,53 +38,15 @@ services:
       - DATA_DIR=/app/data
       - NODE_ENV=production
 
-      # --- Cuentas ---
-      # open (cualquiera, con código por correo) | invite (solo invitados) | closed (los admins las crean)
-      - FORJA_SIGNUP=${FORJA_SIGNUP:-invite}
-      - FREE_CREDITS=${FREE_CREDITS:-3000}
-      - CREDITS_PER_USD=${CREDITS_PER_USD:-1000}
-
-      # --- Modelos (al menos un proveedor) ---
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
-      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
-      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-}
-      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
-      - FORJA_PROVIDERS=${FORJA_PROVIDERS:-}
-      - FORJA_MODELS=${FORJA_MODELS:-}
-      - FORJA_MODELS_ALLOW=${FORJA_MODELS_ALLOW:-}
-      - BUILDER_MODEL=${BUILDER_MODEL:-}
-      - APP_AI_MODEL=${APP_AI_MODEL:-}
-
-      # --- Observabilidad (opcional): Langfuse Cloud o autoalojado como recurso aparte ---
-      - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY:-}
-      - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY:-}
-      - LANGFUSE_BASE_URL=${LANGFUSE_BASE_URL:-}
-
-      # --- Evals de calidad (opcional, gastan crédito real) ---
-      - FORJA_EVALS=${FORJA_EVALS:-}
-      - FORJA_EVALS_MAX_RUN_USD=${FORJA_EVALS_MAX_RUN_USD:-5}
-      - FORJA_EVALS_MAX_DAILY_USD=${FORJA_EVALS_MAX_DAILY_USD:-20}
-      - FORJA_EVALS_CONCURRENCY=${FORJA_EVALS_CONCURRENCY:-2}
-
-      # --- GitHub (opcional) ---
-      - GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID:-}
-      - GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET:-}
-      - GITHUB_WEBHOOK_SECRET=${GITHUB_WEBHOOK_SECRET:-}
-      - GITHUB_POLL_MS=${GITHUB_POLL_MS:-60000}
-      - GITHUB_API_URL=${GITHUB_API_URL:-}
-      - GITHUB_WEB_URL=${GITHUB_WEB_URL:-}
-
-      # --- Correo y pagos (opcionales) ---
-      # Sin SMTP los códigos de acceso solo quedan en el log: con FORJA_SIGNUP=open configúralo.
-      - SMTP_URL=${SMTP_URL:-}
-      - EMAIL_FROM=${EMAIL_FROM:-noreply@forja.local}
-      - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY:-}
-
-      # --- Paquetes npm de las apps ---
-      - FORJA_NPM=${FORJA_NPM:-1}
-      - FORJA_NPM_REGISTRY=${FORJA_NPM_REGISTRY:-}
+      # Base de datos de la plataforma (servicio postgres de abajo).
+      - DATABASE_URL=postgres://forja:${SERVICE_PASSWORD_POSTGRES}@postgres:5432/forja
+      # El resto de la configuración (registro, créditos, modelos y proveedores, SMTP, GitHub,
+      # Langfuse, evals, npm…) ya no va aquí: se edita en el studio, Administración → General.
+    depends_on:
+      postgres:
+        condition: service_healthy
     volumes:
-      # Bases de datos (PGlite), archivos subidos y versiones publicadas. Lo único que hay que respaldar.
+      # Bases de datos de las apps (PGlite), archivos subidos y versiones publicadas. Respáldalo junto a forja-pg.
       - forja-data:/app/data
       # Caché de paquetes npm de las apps: se reconstruye sola, solo evita reinstalar tras cada despliegue.
       - forja-deps:/app/node_modules/.forja-deps
@@ -113,6 +77,22 @@ services:
       - traefik.http.middlewares.forja-apps-https.redirectscheme.scheme=https
       - traefik.http.services.forja-apps.loadbalancer.server.port=4100
 
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=forja
+      - POSTGRES_PASSWORD=${SERVICE_PASSWORD_POSTGRES}
+      - POSTGRES_DB=forja
+    volumes:
+      - forja-pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U forja -d forja"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
 volumes:
+  forja-pg:
   forja-data:
   forja-deps:

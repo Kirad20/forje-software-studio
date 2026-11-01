@@ -1,0 +1,11 @@
+{
+  "accounts": [
+    { "email": "admin@forja.test", "name": "Admin Forja", "password": "forja-admin-1234", "platformRole": "admin", "credits": 100000 },
+    { "email": "dev@forja.test", "name": "Dev Forja", "password": "forja-dev-1234", "platformRole": "user", "credits": 10000 }
+  ],
+  "orgs": [{ "name": "Equipo demo", "owner": "admin@forja.test", "members": [{ "email": "dev@forja.test", "role": "member" }] }],
+  "projects": [
+    { "name": "App de ejemplo", "owner": "admin@forja.test", "org": "Equipo demo", "description": "Proyecto creado por npm run db:seed:dev" },
+    { "name": "Mi primera app", "owner": "dev@forja.test", "description": "Proyecto personal de la cuenta de desarrollo" }
+  ]
+}

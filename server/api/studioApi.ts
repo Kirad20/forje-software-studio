@@ -20,6 +20,7 @@ import { startSecurityReview } from "../builder/securityReview.js";
 import { addMemory, deleteMemory, listMemories, setMemoryEnabled, updateMemory } from "../platform/memory.js";
 import * as github from "../platform/github.js";
 import * as projects from "../platform/projects.js";
+import { adminApi } from "../admin/api.js";
 import { evalsApi } from "../evals/api.js";
 import { EVAL_EMAIL } from "../evals/runner.js";
 import { removeProjectData } from "../runtime/projectData.js";
@@ -52,6 +53,7 @@ import {
   syncOpenRouter,
   type ModelInfo,
 } from "../llm/catalog.js";
+import { providerSecret } from "../llm/providers.js";
 import { meanOf, posteriors } from "../llm/bandit.js";
 import { metricsReport } from "../builder/metrics.js";
 import { TOOL_HINTS } from "../mcp/server.js";
@@ -278,7 +280,7 @@ studioApi.get("/models", async (c) => {
     models,
     customized: !!acc?.models_customized,
     providers: providers().map((p) => ({ id: p.id, kind: p.kind })),
-    openrouter: { configured: !!config.openrouterKey, lastSync: await lastSync(), total: all.filter((m) => m.provider === "openrouter").length },
+    openrouter: { configured: !!providerSecret("openrouter"), lastSync: await lastSync(), total: all.filter((m) => m.provider === "openrouter").length },
   });
 });
 studioApi.put("/models/account", async (c) => {
@@ -287,7 +289,7 @@ studioApi.put("/models/account", async (c) => {
   return c.json({ ok: true });
 });
 studioApi.post("/models/sync", async (c) => {
-  if (!config.openrouterKey) return c.json({ error: "Configura OPENROUTER_API_KEY para sincronizar el catálogo." }, 400);
+  if (!providerSecret("openrouter")) return c.json({ error: "Configura OpenRouter en Administración → Proveedores para sincronizar el catálogo." }, 400);
   rateLimit(`sync:${c.get("account").id}`, 3, 60 * 60_000);
   return c.json({ synced: await syncOpenRouter() });
 });
@@ -415,8 +417,10 @@ studioApi.patch("/admin/users/:id", async (c) => {
   return c.json({ ok: true });
 });
 
-// Quality evals (admin only, and only with FORJA_EVALS=1): see server/evals.
+// Quality evals (admin only, and only with the evals.enabled setting on): see server/evals.
 studioApi.route("/admin/evals", evalsApi);
+// Settings, providers, models, agent playground and router (see server/admin).
+studioApi.route("/admin", adminApi);
 
 // --- Projects -------------------------------------------------------------------------
 

@@ -2,6 +2,8 @@ export class ApiError extends Error {
   constructor(
     message: string,
     public status: number,
+    /** The whole error body (some routes add details, like the settings' "field"). */
+    public data: Record<string, unknown> = {},
   ) {
     super(message);
   }
@@ -15,7 +17,7 @@ export async function api<T = any>(path: string, opts: { method?: string; body?:
     credentials: "include",
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new ApiError(data.error ?? `Error ${res.status}`, res.status);
+  if (!res.ok) throw new ApiError(data.error ?? `Error ${res.status}`, res.status, data);
   return data as T;
 }
 

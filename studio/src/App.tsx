@@ -4,7 +4,7 @@ import { Logo } from "./components/Icons";
 import { Menu, MenuItem } from "./components/ui";
 import { Account } from "./pages/Account";
 import { Dashboard } from "./pages/Dashboard";
-import { Evals } from "./pages/Evals";
+import { Admin } from "./pages/Admin";
 import { Integrations } from "./pages/Integrations";
 import { Login } from "./pages/Login";
 import { Plan } from "./pages/Plan";
@@ -45,8 +45,11 @@ export function App() {
         <Plan />
       ) : section === "integrations" ? (
         <Integrations />
+      ) : section === "admin" && me.platformRole === "admin" ? (
+        <Admin tab={path.split("?")[0]!.split("/")[2] ?? ""} />
       ) : section === "evals" && me.platformRole === "admin" ? (
-        <Evals />
+        // The evals page moved into the admin panel.
+        <Redirect to="/admin/evals" />
       ) : section === "account" ? (
         <Account me={me} onChange={refreshMe} />
       ) : (
@@ -54,6 +57,11 @@ export function App() {
       )}
     </Shell>
   );
+}
+
+function Redirect({ to }: { to: string }) {
+  useEffect(() => go(to, { replace: true }), [to]);
+  return null;
 }
 
 const NAV = [
@@ -133,7 +141,7 @@ function Shell({ me, section, children }: { me: Me; section: string; children: R
           <Logo /> Forja
         </div>
         <nav className="nav" style={{ display: "grid", gap: 2 }}>
-          {[...NAV, ...(me.platformRole === "admin" ? ([["evals", "Evals de calidad", "✓"]] as const) : [])].map(([key, label, icon]) => (
+          {[...NAV, ...(me.platformRole === "admin" ? ([["admin", "Administración", "⚙"]] as const) : [])].map(([key, label, icon]) => (
             <a
               key={key}
               href={`/${key}`}

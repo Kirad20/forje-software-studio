@@ -22,7 +22,7 @@ import { designSignals, renderReport, scoreCase, summarize, type CaseResult, typ
  * Quality evals: run the real builder on fixed requests and score what it produces.
  *
  * Safe to run in production because of how it is fenced in, not because it is careful:
- *  - Off unless FORJA_EVALS=1, and only platform admins reach it (see api.ts).
+ *  - Off unless the evals.enabled setting is on, and only platform admins reach it (see api.ts).
  *  - Every case runs in a throwaway project owned by a dedicated, disabled account
  *    (EVAL_EMAIL) with its own credits. It touches no user's project, data, credits or
  *    daily quota, and the router's bandit learns nothing from it (`synthetic` turns).
@@ -128,8 +128,11 @@ export async function cancelRun(runId: string): Promise<boolean> {
 
 // --- Starting ----------------------------------------------------------------------------------------
 
-async function spentLast24h(): Promise<number> {
-  return (await one<{ n: number }>(`select coalesce(sum(spent_usd), 0)::float8 as n from eval_runs where created_at > now() - interval '24 hours'`))?.n ?? 0;
+/** Spend of the last 24 h that counts against evals.maxDailyUsd: eval runs plus the agent playground (server/admin). */
+export async function spentLast24h(): Promise<number> {
+  const runs = (await one<{ n: number }>(`select coalesce(sum(spent_usd), 0)::float8 as n from eval_runs where created_at > now() - interval '24 hours'`))?.n ?? 0;
+  const playground = (await one<{ n: number }>(`select coalesce(sum(usd), 0)::float8 as n from ai_usage where source = 'playground' and created_at > now() - interval '24 hours'`))?.n ?? 0;
+  return runs + playground;
 }
 
 export async function evalConfig(admin: Account) {
@@ -148,8 +151,10 @@ export async function evalConfig(admin: Account) {
 }
 
 export async function startRun(admin: Account, req: RunRequest): Promise<{ runId: string; jobs: number; budgetUsd: number }> {
-  if (!config.evals.enabled) throw new EvalError(404, "Los evals están desactivados en este servidor (FORJA_EVALS=1 los activa).");
+  if (!config.evals.enabled) throw new EvalError(404, "Los evals están desactivados en este servidor (se activan en Administración → General → Evals de calidad).");
   if (active) throw new EvalError(409, "Ya hay una ejecución de evals en curso.");
+  // The playground (server/admin) uses the same internal account and sets its models and credits.
+  if ((await import("../admin/playground.js")).playgroundBusy()) throw new EvalError(409, "Hay una ejecución del playground de agentes en curso; espera a que termine.");
 
   const sizes = (req.sizes ?? []).filter((s) => ["small", "medium", "large"].includes(s));
   const cases: EvalCase[] = req.cases?.length ? req.cases.map((id) => caseById(id) ?? null).filter((c): c is EvalCase => !!c) : EVAL_CASES.filter((c) => !sizes.length || sizes.includes(c.size));

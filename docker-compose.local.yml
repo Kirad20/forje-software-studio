@@ -8,3 +8,7 @@ services:
     environment:
       # Sin proxy delante: X-Forwarded-For lo manda el cliente y no es de fiar.
       - FORJA_TRUST_PROXY=0
+  postgres:
+    # Para conectarte desde fuera (psql, npm run dev con DATABASE_URL a localhost:5432).
+    ports:
+      - "${FORJA_PG_PORT:-5432}:5432"

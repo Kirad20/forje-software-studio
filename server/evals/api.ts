@@ -18,7 +18,7 @@ evalsApi.onError((err, c) => {
 evalsApi.get("/config", async (c) => c.json(await evalConfig(c.get("account"))));
 
 evalsApi.use("*", async (c, next) => {
-  if (!config.evals.enabled) return c.json({ error: "Los evals están desactivados en este servidor (FORJA_EVALS=1 los activa)." }, 404);
+  if (!config.evals.enabled) return c.json({ error: "Los evals están desactivados en este servidor (se activan en Administración → General → Evals de calidad)." }, 404);
   await next();
 });
 
