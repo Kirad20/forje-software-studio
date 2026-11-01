@@ -5,10 +5,13 @@ import { rateLimit, RateLimitError } from "../lib/security.js";
 import type { Account } from "../platform/accounts.js";
 import { GROUPS } from "../settings/registry.js";
 import { listSettings, resetSetting, SettingsError, updateSettings } from "../settings/store.js";
+import { cancelPlayground, listPlaygroundRuns, PlaygroundError, playgroundRoles, playgroundRun, startPlayground } from "./playground.js";
 import { probeModel, probeProvider } from "./probe.js";
+import { resetRouter, routerStats } from "./router.js";
 
 /**
- * /api/admin/*  Platform configuration: settings, model providers and the model catalog.
+ * /api/admin/*  Platform configuration (settings, model providers, the model catalog) and the
+ * tools to try it (connection tests, the agent playground, what the router learned).
  * Mounted under studioApi's admin guard, so only platform admins get here.
  */
 export const adminApi = new Hono<{ Variables: { account: Account } }>();
@@ -89,6 +92,33 @@ adminApi.patch("/models/item/*", async (c) => {
 adminApi.delete("/models/item/*", async (c) => {
   await deleteModel(modelIdOf(c.req.path, "/models/item/"), me(c));
   return c.json({ ok: true });
+});
+
+// --- Agent playground --------------------------------------------------------------------
+
+adminApi.get("/agents/roles", (c) => c.json({ roles: playgroundRoles() }));
+adminApi.get("/agents/runs", (c) => c.json({ runs: listPlaygroundRuns() }));
+adminApi.post("/agents/runs", async (c) => {
+  rateLimit(`playground:${me(c)}`, 20, 60 * 60_000);
+  try {
+    return c.json({ runId: await startPlayground(await body(c), me(c)) }, 202);
+  } catch (e) {
+    if (e instanceof PlaygroundError) return c.json({ error: e.message }, e.status);
+    throw e;
+  }
+});
+adminApi.get("/agents/runs/:id", (c) => {
+  const run = playgroundRun(c.req.param("id")!);
+  return run ? c.json(run) : c.json({ error: "Ejecución no encontrada" }, 404);
+});
+adminApi.post("/agents/runs/:id/cancel", (c) => c.json({ cancelled: cancelPlayground(c.req.param("id")!) }));
+
+// --- Router ------------------------------------------------------------------------------
+
+adminApi.get("/router/stats", async (c) => c.json(await routerStats()));
+adminApi.post("/router/reset", async (c) => {
+  const f = await body<{ taskClass?: string; modelId?: string }>(c);
+  return c.json({ removed: await resetRouter({ taskClass: f.taskClass ? String(f.taskClass) : undefined, modelId: f.modelId ? String(f.modelId) : undefined }) });
 });
 
 function modelIdOf(path: string, marker: string) {

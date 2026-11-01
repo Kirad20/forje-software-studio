@@ -128,8 +128,11 @@ export async function cancelRun(runId: string): Promise<boolean> {
 
 // --- Starting ----------------------------------------------------------------------------------------
 
-async function spentLast24h(): Promise<number> {
-  return (await one<{ n: number }>(`select coalesce(sum(spent_usd), 0)::float8 as n from eval_runs where created_at > now() - interval '24 hours'`))?.n ?? 0;
+/** Spend of the last 24 h that counts against evals.maxDailyUsd: eval runs plus the agent playground (server/admin). */
+export async function spentLast24h(): Promise<number> {
+  const runs = (await one<{ n: number }>(`select coalesce(sum(spent_usd), 0)::float8 as n from eval_runs where created_at > now() - interval '24 hours'`))?.n ?? 0;
+  const playground = (await one<{ n: number }>(`select coalesce(sum(usd), 0)::float8 as n from ai_usage where source = 'playground' and created_at > now() - interval '24 hours'`))?.n ?? 0;
+  return runs + playground;
 }
 
 export async function evalConfig(admin: Account) {

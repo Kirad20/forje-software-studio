@@ -293,6 +293,31 @@ try {
   const flakyTest = await req("POST", "/api/admin/models/test/openai%3Afake-flaky");
   ok(flakyTest.status === 200 && flakyTest.json.ok === false && /503|overloaded/.test(flakyTest.json.error), "admin: a failing model reports its error", flakyTest.text);
   ok((await req("GET", "/api/me")).json.account.credits === me1.credits, "admin: connection tests charge nobody");
+
+  // 7. Admin panel: one agent on one model in a throwaway project, and what the router learned.
+  const playRoles = (await req("GET", "/api/admin/agents/roles")).json.roles;
+  ok(playRoles.some((r) => r.role === "backend" && r.tools.includes("write_file")), "playground: lists the roles with their tools", JSON.stringify(playRoles?.map((r) => r.role)));
+  const dirs2 = new Set(readdirSync(path.join(DATA, "projects")));
+  const play = await req("POST", "/api/admin/agents/runs", { role: "backend", modelId: "openai:fake-mid", prompt: "Endpoint GET notes/list" });
+  ok(play.status === 202 && play.json.runId, "playground: a run starts", play.text);
+  ok((await req("POST", "/api/admin/agents/runs", { role: "ui", modelId: "openai:fake-mid", prompt: "otra" })).status === 409, "playground: one run at a time per admin");
+  ok((await req("POST", "/api/admin/agents/runs", { role: "planner", modelId: "openai:fake-mid", prompt: "x" })).status === 400, "playground: roles that need the orchestrator are refused");
+  let pr;
+  for (let i = 0; i < 120; i++) {
+    pr = (await req("GET", `/api/admin/agents/runs/${play.json.runId}`)).json;
+    if (pr.status !== "running") break;
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  ok(pr.status === "done" && pr.result.files["endpoints/notes/list_GET.ts"]?.includes("select * from notes"), "playground: the agent's files come back", JSON.stringify({ status: pr.status, error: pr.error, files: Object.keys(pr.result?.files ?? {}) }));
+  ok(pr.events.some((e) => e.type === "tool_start" && e.name === "write_file") && pr.result.usd > 0, "playground: steps and cost are reported", JSON.stringify(pr.events.map((e) => e.type)));
+  ok(llmLog.filter((l) => l.role === "backend").at(-1)?.model === "fake-mid", "playground: the chosen model answered");
+  const dirs3 = readdirSync(path.join(DATA, "projects"));
+  ok(dirs3.every((d) => dirs2.has(d)), "playground: the throwaway project is gone", JSON.stringify(dirs3.filter((d) => !dirs2.has(d))));
+  ok((await req("GET", "/api/me")).json.account.credits === me1.credits, "playground: real accounts are not charged");
+  const stats = (await req("GET", "/api/admin/router/stats")).json;
+  ok(stats.classes.length > 0 && stats.classes[0].models[0].mean > 0 && stats.decisions.length > 0, "router: the panel shows what it learned and its decisions", JSON.stringify(stats.classes[0]));
+  const reset = await req("POST", "/api/admin/router/reset", {});
+  ok(reset.json.removed > 0 && (await req("GET", "/api/admin/router/stats")).json.classes.length === 0, "router: what it learned can be forgotten", reset.text);
 } finally {
   console.log(process.exitCode ? "\nSOME CHECKS FAILED" : "\nALL CHECKS PASSED");
   if (process.exitCode) console.log("\n--- server log ---\n" + serverLog.slice(-5000));
