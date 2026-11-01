@@ -24,9 +24,9 @@
     "semantic_hash": ""
   },
   "server/api/studioApi.ts": {
-    "mtime": 1793566439.6777935,
-    "seen": 1793566459.6659486,
-    "ast_hash": "97a2135aa37e8d7455239b626b387340",
+    "mtime": 1793569783.5917907,
+    "seen": 1793569800.8367152,
+    "ast_hash": "a75a8ab72f5e1897149f697772d9f306",
     "semantic_hash": ""
   },
   "server/baas/ai.ts": {
@@ -144,15 +144,15 @@
     "semantic_hash": ""
   },
   "server/config.ts": {
-    "mtime": 1793565645.7664223,
-    "seen": 1793565648.326041,
-    "ast_hash": "5d6b42fa8c13b295dde835e124ee35be",
+    "mtime": 1793569783.5927887,
+    "seen": 1793569800.8367152,
+    "ast_hash": "d366dd27435f7dc71395c7172c09733d",
     "semantic_hash": ""
   },
   "server/index.ts": {
-    "mtime": 1793568339.486001,
-    "seen": 1793568354.0555098,
-    "ast_hash": "afc243144b9ed4b8cde46d5e80672f83",
+    "mtime": 1793569783.5937915,
+    "seen": 1793569800.8367152,
+    "ast_hash": "ced9eab4d7d4562509abb0c7cd1be429",
     "semantic_hash": ""
   },
   "server/lib/crypto.ts": {
@@ -174,9 +174,9 @@
     "semantic_hash": ""
   },
   "server/lib/security.ts": {
-    "mtime": 1793563798.9387233,
-    "seen": 1793564642.7433424,
-    "ast_hash": "e9d66dc3a2197aec621c5eede3359220",
+    "mtime": 1793569783.5947962,
+    "seen": 1793569800.8367152,
+    "ast_hash": "f89d8a7fb32918715aa1e8004ceebcbb",
     "semantic_hash": ""
   },
   "server/lib/zip.ts": {
@@ -528,9 +528,9 @@
     "semantic_hash": ""
   },
   "test/e2e.mjs": {
-    "mtime": 1793566488.8278413,
-    "seen": 1793566499.900724,
-    "ast_hash": "b13233c65a9dc623de1b02b7238ed537",
+    "mtime": 1793569783.595791,
+    "seen": 1793569800.8367152,
+    "ast_hash": "5baf6f81c05279f05cd15c38cfacf54e",
     "semantic_hash": ""
   },
   "test/fakeGithub.mjs": {
@@ -1029,6 +1029,12 @@
     "mtime": 1793567691.5589223,
     "seen": 1793567708.7054055,
     "ast_hash": "9e6372fa084b3fe0ab841f3c29d32280",
+    "semantic_hash": ""
+  },
+  "test/unit/publicUrl.test.ts": {
+    "mtime": 1793569783.5967913,
+    "seen": 1793569800.83772,
+    "ast_hash": "a6f1b9636f1e9575f2415726a2c4e568",
     "semantic_hash": ""
   },
   "package-lock.json": {

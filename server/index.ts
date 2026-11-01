@@ -130,6 +130,10 @@ void import("./evals/runner.js").then((m) => m.recoverEvals()).catch(() => {});
 
 const server = serve({ fetch: app.fetch, port: config.port }, (info) => {
   console.log(`[forja] plataforma en ${config.publicUrl} (puerto ${info.port})`);
+  if (process.env.NODE_ENV === "production" && /^https?:\/\/(localhost|127\.0\.0\.1)(:|\/|$)/.test(config.publicUrl))
+    console.warn(
+      "[forja] PUBLIC_URL apunta a localhost en producción: las vistas previas, los enlaces de los correos, GitHub y MCP usarán esa dirección. Define PUBLIC_URL (o SERVICE_URL_FORJA_4100 en Coolify) con el dominio público.",
+    );
   console.log(`[forja] MCP en ${config.publicUrl}/mcp`);
 });
 

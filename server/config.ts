@@ -11,6 +11,28 @@ export const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)
 const env = new Proxy(process.env, { get: (t, k) => (typeof k === "string" && t[k] !== "" ? t[k] : undefined) });
 
 /**
+ * The studio's public origin. PUBLIC_URL wins; without it, Coolify's SERVICE_URL_FORJA_4100 (the
+ * compose derives PUBLIC_URL from it, but an empty interpolation must not leave us on localhost).
+ * Behind a trusted proxy, a port equal to our own PORT is the container port the proxy routes to
+ * (Coolify writes https://host:4100), not the one browsers use: it is dropped, or no browser
+ * Origin would ever match it.
+ */
+export function resolvePublicUrl(vars: Record<string, string | undefined>): string {
+  const get = (k: string) => (vars[k] ? vars[k] : undefined);
+  const port = get("PORT") ?? "4100";
+  const raw = get("PUBLIC_URL") ?? get("SERVICE_URL_FORJA_4100");
+  if (!raw) return `http://localhost:${port}`;
+  try {
+    const url = new URL(raw);
+    const behindProxy = Number(get("FORJA_TRUST_PROXY") ?? 0) > 0;
+    if (behindProxy && url.port === port) url.port = "";
+    return url.toString().replace(/\/$/, "");
+  } catch {
+    throw new Error(`PUBLIC_URL no es una URL válida: ${raw}`);
+  }
+}
+
+/**
  * Platform defaults when FORJA_MODELS_ALLOW is empty: Sonnet and Haiku, every model of
  * self-declared OpenAI-compatible providers, and a curated, cheap-to-strong spread from
  * OpenRouter. Opus is declared but only used when explicitly allowed.
@@ -42,7 +64,7 @@ export const DEFAULT_MODELS_ALLOW = [
  */
 export const config = {
   port: Number(env.PORT ?? 4100),
-  publicUrl: (env.PUBLIC_URL ?? `http://localhost:${env.PORT ?? 4100}`).replace(/\/$/, ""),
+  publicUrl: resolvePublicUrl(process.env),
   dataDir: path.resolve(ROOT_DIR, env.DATA_DIR ?? "data"),
   /** The platform database (Postgres). Project app databases stay in PGlite under dataDir. */
   databaseUrl: env.DATABASE_URL ?? "",

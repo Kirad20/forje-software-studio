@@ -59,7 +59,7 @@ import { metricsReport } from "../builder/metrics.js";
 import { TOOL_HINTS } from "../mcp/server.js";
 import { taskClassOf, type Role } from "../llm/router.js";
 import { accessOf, inviteMember, listMembers, removeMember, sharedProjectIds, type Access } from "../platform/members.js";
-import { clientIp, isHttps, rateLimit, RateLimitError, studioOrigins } from "../lib/security.js";
+import { clientIp, isHttps, rateLimit, RateLimitError, requestOrigin, studioOrigins } from "../lib/security.js";
 
 const quoteIdent = (name: string) => `"${name.replace(/"/g, '""')}"`;
 
@@ -118,7 +118,8 @@ export const ipOf = (c: Context) =>
 studioApi.use("*", async (c, next) => {
   if (["POST", "PUT", "PATCH", "DELETE"].includes(c.req.method)) {
     const origin = c.req.header("origin");
-    if (origin && !studioOrigins().includes(origin)) return c.json({ error: "Origen no permitido" }, 403);
+    const sameOrigin = origin === requestOrigin({ host: c.req.header("host"), forwardedHost: c.req.header("x-forwarded-host"), forwardedProto: c.req.header("x-forwarded-proto") });
+    if (origin && !sameOrigin && !studioOrigins().includes(origin)) return c.json({ error: "Origen no permitido" }, 403);
     const hasBody = Number(c.req.header("content-length") ?? 0) > 0 || !!c.req.header("transfer-encoding");
     if (hasBody && !(c.req.header("content-type") ?? "").includes("application/json")) return c.json({ error: "Se espera JSON" }, 415);
   }
