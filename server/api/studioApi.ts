@@ -49,6 +49,8 @@ import {
   type ModelInfo,
 } from "../llm/catalog.js";
 import { meanOf, posteriors } from "../llm/bandit.js";
+import { metricsReport } from "../builder/metrics.js";
+import { TOOL_HINTS } from "../mcp/server.js";
 import { taskClassOf, type Role } from "../llm/router.js";
 import { accessOf, inviteMember, listMembers, removeMember, sharedProjectIds, type Access } from "../platform/members.js";
 import { isHttps, rateLimit, RateLimitError, studioOrigins } from "../lib/security.js";
@@ -317,6 +319,14 @@ studioApi.get("/projects", async (c) => {
   const shared = (await Promise.all((await sharedProjectIds(me)).map((id) => projects.getProject(id)))).filter((p): p is projects.Project => !!p);
   const view = (p: projects.Project, access: Access) => ({ ...p, access, appUrl: p.slug ? appUrl(p.slug) : null });
   return c.json({ projects: own.map((p) => view(p, "owner")), shared: shared.map((p) => view(p, "editor")) });
+});
+
+// Agent telemetry (Code Mode decision): how many input tokens go to re-sending tool results.
+const metricsDays = (c: Context<Env>) => Math.min(Math.max(Number(c.req.query("days")) || 30, 1), 365);
+const isReadOnlyTool = (tool: string) => TOOL_HINTS[tool]?.readOnlyHint === true;
+studioApi.get("/agent-metrics", async (c) => {
+  const own = await projects.listProjects(c.get("account").id);
+  return c.json(await metricsReport(own.map((p) => p.id), metricsDays(c), isReadOnlyTool));
 });
 
 /** The dashboard's prompt box: the project is named from the idea, and the studio then sends the idea to the builder. */
@@ -660,6 +670,8 @@ studioApi.post("/projects/:id/text-edit", async (c) => {
   await projects.writeFile(pid(c), r.path, r.content, "owner", c.get("account").email);
   return c.json({ ok: true, path: r.path, undo: prev?.id ?? null });
 });
+
+studioApi.get("/projects/:id/agent-metrics", async (c) => c.json(await metricsReport([pid(c)], metricsDays(c), isReadOnlyTool)));
 
 // Chat with the builder
 studioApi.get("/projects/:id/chat", async (c) => {

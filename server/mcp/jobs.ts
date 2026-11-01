@@ -30,6 +30,14 @@ const jobs = new Map<string, Job>();
 const KEEP_MS = 60 * 60_000;
 export const MAX_WAIT_SECONDS = 25;
 
+/** structuredContent of a deferred call, so typed tools still match their outputSchema. */
+export const PENDING_SCHEMA = {
+  type: "object",
+  properties: { status: { type: "string", enum: ["pending"] }, jobId: { type: "string" } },
+  required: ["status", "jobId"],
+  additionalProperties: false,
+};
+
 export const inlineMs = () => Number(process.env.FORJA_MCP_INLINE_MS ?? 20_000);
 
 const fail = (text: string): CallResult => ({ content: [{ type: "text", text }], isError: true });
@@ -60,6 +68,7 @@ export async function runOrDefer(accountId: string, tool: string, work: () => Pr
         text: `PENDING jobId=${job.id}\n${tool} sigue en curso. Llama get_job_status({ jobId: "${job.id}", wait_seconds: ${MAX_WAIT_SECONDS} }) hasta tener el resultado. Mientras tanto puedes usar otras tools: este job no las bloquea.`,
       },
     ],
+    structuredContent: { status: "pending", jobId: job.id },
     isError: false,
   };
 }

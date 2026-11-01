@@ -63,11 +63,57 @@ export interface BuilderTool {
   name: string;
   description: string;
   input_schema: Record<string, unknown>;
+  /** JSON Schema of `call()`'s data. Set only on tools with typed output (see `typed`). */
+  output_schema?: Record<string, unknown>;
+  /**
+   * Typed tools: the structured result (`data`) plus the text the model sees (`output`), from
+   * one run. MCP returns `data` as structuredContent; code (Code Mode) would use it directly.
+   */
+  call?(input: any, ctx: ToolContext): Promise<{ data: Record<string, unknown>; output: ToolOutput }>;
   run(input: any, ctx: ToolContext): Promise<ToolOutput>;
+}
+
+/**
+ * A tool whose result is data first: `data()` returns what code can use, `format()` turns it into
+ * the text the model reads. `run()` stays byte-for-byte what agents always got.
+ */
+function typed<I, O extends Record<string, unknown>>(t: {
+  name: string;
+  description: string;
+  input_schema: Record<string, unknown>;
+  output_schema: Record<string, unknown>;
+  data(input: I, ctx: ToolContext): Promise<O>;
+  format(data: O, input: I): ToolOutput;
+}): BuilderTool {
+  const call = async (input: I, ctx: ToolContext) => {
+    const data = await t.data(input, ctx);
+    return { data, output: t.format(data, input) };
+  };
+  return {
+    name: t.name,
+    description: t.description,
+    input_schema: t.input_schema,
+    output_schema: t.output_schema,
+    call,
+    run: async (input, ctx) => (await call(input, ctx)).output,
+  };
 }
 
 const obj = (properties: Record<string, unknown>, required: string[] = []) => ({ type: "object", properties, required });
 const str = (description: string) => ({ type: "string", description });
+// Output schemas: every listed property is always present unless marked optional with `opt`.
+const out = (properties: Record<string, unknown>, optional: string[] = []) => ({
+  type: "object",
+  properties,
+  required: Object.keys(properties).filter((k) => !optional.includes(k)),
+  additionalProperties: false,
+});
+const arr = (items: unknown) => ({ type: "array", items });
+const S = { type: "string" };
+const N = { type: "number" };
+const I = { type: "integer" };
+const B = { type: "boolean" };
+const nullable = (t: string) => ({ type: [t, "null"] });
 
 const MAX_RESULT = 30_000;
 const clip = (s: string) => (s.length > MAX_RESULT ? `${s.slice(0, MAX_RESULT)}\n… (recortado, ${s.length} caracteres)` : s);
@@ -78,23 +124,35 @@ const numbered = (content: string) =>
     .join("\n");
 
 export const builderTools: BuilderTool[] = [
-  {
+  typed({
     name: "list_files",
     description: "Lista los archivos del proyecto con su tamaño, además de las páginas, endpoints y tareas detectadas. Para orientarte en un proyecto con código, project_map da más con menos tokens.",
     input_schema: obj({}),
-    async run(_i, ctx) {
+    output_schema: out({
+      files: arr(out({ path: S, size: I })),
+      pages: arr(out({ pattern: S, file: S })),
+      endpoints: arr(out({ method: S, route: S })),
+      jobs: arr(S),
+    }),
+    async data(_i: Record<string, never>, ctx) {
       const files = await projects.readAllFiles(ctx.projectId);
-      const list = await projects.listFiles(ctx.projectId);
-      return [
-        "Archivos:",
-        ...list.map((f) => `  ${f.path} (${f.size} B)`),
-        "",
-        "Páginas: " + (pageRoutes(files).map((p) => `${p.pattern} ← ${p.file}`).join(", ") || "ninguna"),
-        "Endpoints: " + (endpointRoutes(files).map((e) => `${e.method} /_api/${e.route}`).join(", ") || "ninguno"),
-        "Tareas: " + (jobFiles(files).map((j) => j.name).join(", ") || "ninguna"),
-      ].join("\n");
+      return {
+        files: (await projects.listFiles(ctx.projectId)).map((f) => ({ path: f.path, size: f.size })),
+        pages: pageRoutes(files).map((p) => ({ pattern: p.pattern, file: p.file })),
+        endpoints: endpointRoutes(files).map((e) => ({ method: e.method, route: e.route })),
+        jobs: jobFiles(files).map((j) => j.name),
+      };
     },
-  },
+    format: (d) =>
+      [
+        "Archivos:",
+        ...d.files.map((f) => `  ${f.path} (${f.size} B)`),
+        "",
+        "Páginas: " + (d.pages.map((p) => `${p.pattern} ← ${p.file}`).join(", ") || "ninguna"),
+        "Endpoints: " + (d.endpoints.map((e) => `${e.method} /_api/${e.route}`).join(", ") || "ninguno"),
+        "Tareas: " + (d.jobs.join(", ") || "ninguna"),
+      ].join("\n"),
+  }),
   {
     name: "project_map",
     description:
@@ -120,32 +178,53 @@ export const builderTools: BuilderTool[] = [
       return relatedFiles(await projects.readAllFiles(ctx.projectId), i.path).join("\n") || "Sin conexiones.";
     },
   },
-  {
+  typed({
     name: "read_files",
     description: 'Lee hasta 20 archivos con números de línea. Para archivos grandes pide solo un rango: "pages/_index.tsx:40-120".',
     input_schema: obj({ paths: { type: "array", items: { type: "string" }, description: 'Rutas, opcionalmente con rango "ruta:inicio-fin"' } }, ["paths"]),
-    async run(i: { paths: string[] }, ctx) {
-      const out: string[] = [];
+    output_schema: out({
+      files: arr(
+        out(
+          {
+            path: S,
+            exists: B,
+            content: { type: "string", description: "Texto sin números de línea; solo el rango si se pidió uno" },
+            range: out({ from: I, to: I, total: I }),
+          },
+          ["content", "range"],
+        ),
+      ),
+    }),
+    async data(i: { paths: string[] }, ctx) {
+      const files: { path: string; exists: boolean; content?: string; range?: { from: number; to: number; total: number } }[] = [];
       for (const raw of i.paths.slice(0, 20)) {
         const m = /^(.*?):(\d+)-(\d+)$/.exec(raw);
         const p = m ? m[1]! : raw;
         const c = await projects.readFile(ctx.projectId, p);
-        if (c === undefined) {
-          out.push(`### ${p}\n(no existe)`);
-          continue;
+        if (c === undefined) files.push({ path: p, exists: false });
+        else if (!m) files.push({ path: p, exists: true, content: c });
+        else {
+          const lines = c.split("\n");
+          const from = Math.max(1, Number(m[2]));
+          const to = Math.min(lines.length, Number(m[3]));
+          files.push({ path: p, exists: true, content: lines.slice(from - 1, to).join("\n"), range: { from, to, total: lines.length } });
         }
-        if (!m) {
-          out.push(`### ${p}\n${numbered(c)}`);
-          continue;
-        }
-        const lines = c.split("\n");
-        const from = Math.max(1, Number(m[2]));
-        const to = Math.min(lines.length, Number(m[3]));
-        out.push(`### ${p} (líneas ${from}-${to} de ${lines.length})\n${lines.slice(from - 1, to).map((l, k) => `${String(from + k).padStart(4)}\t${l}`).join("\n")}`);
       }
-      return clip(out.join("\n\n"));
+      return { files };
     },
-  },
+    format: (d) =>
+      clip(
+        d.files
+          .map((f) => {
+            if (!f.exists) return `### ${f.path}\n(no existe)`;
+            if (!f.range) return `### ${f.path}\n${numbered(f.content!)}`;
+            const { from, to, total } = f.range;
+            const body = from > to ? "" : f.content!.split("\n").map((l, k) => `${String(from + k).padStart(4)}\t${l}`).join("\n");
+            return `### ${f.path} (líneas ${from}-${to} de ${total})\n${body}`;
+          })
+          .join("\n\n"),
+      ),
+  }),
   {
     name: "write_file",
     description: "Crea o reemplaza un archivo completo. Para cambios en un archivo existente usa edit_file (gasta muchos menos tokens).",
@@ -284,30 +363,35 @@ export const builderTools: BuilderTool[] = [
       });
     },
   },
-  {
+  typed({
     name: "search_code",
     description: "Busca un texto o expresión regular en todos los archivos del proyecto y devuelve las líneas que coinciden (archivo:línea).",
     input_schema: obj(
       { pattern: str("Texto o regex (sin barras)"), path_prefix: str("Limitar a rutas que empiecen así, p. ej. endpoints/"), ignore_case: { type: "boolean", description: "Sin distinguir mayúsculas" } },
       ["pattern"],
     ),
-    async run(i: { pattern: string; path_prefix?: string; ignore_case?: boolean }, ctx) {
+    output_schema: out({ matches: arr(out({ path: S, line: I, text: S })), truncated: { type: "boolean", description: "Había más de 200 coincidencias" } }),
+    async data(i: { pattern: string; path_prefix?: string; ignore_case?: boolean }, ctx) {
       let re: RegExp;
       try {
         re = new RegExp(i.pattern, i.ignore_case ? "i" : "");
       } catch {
         re = new RegExp(i.pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), i.ignore_case ? "i" : "");
       }
-      const hits: string[] = [];
+      const matches: { path: string; line: number; text: string }[] = [];
+      let truncated = false;
       for (const [path, content] of Object.entries(await projects.readAllFiles(ctx.projectId))) {
         if (i.path_prefix && !path.startsWith(i.path_prefix)) continue;
         content.split("\n").forEach((line, n) => {
-          if (hits.length < 200 && re.test(line)) hits.push(`${path}:${n + 1}: ${line.trim().slice(0, 200)}`);
+          if (!re.test(line)) return;
+          if (matches.length < 200) matches.push({ path, line: n + 1, text: line.trim().slice(0, 200) });
+          else truncated = true;
         });
       }
-      return hits.join("\n") || "Sin coincidencias.";
+      return { matches, truncated };
     },
-  },
+    format: (d) => d.matches.map((m) => `${m.path}:${m.line}: ${m.text}`).join("\n") || "Sin coincidencias.",
+  }),
   {
     name: "call_endpoint",
     description:
@@ -387,16 +471,20 @@ export const builderTools: BuilderTool[] = [
       }
     },
   },
-  {
+  typed({
     name: "security_scan",
     description:
       "Pasa el escaneo rápido de seguridad al código actual: secretos en páginas o escritos en el código, SQL construido con texto, endpoints que cambian datos sin sesión, endpoints de admin sin rol, POST sin validar, importes que vienen del navegador, HTML sin escapar. Es el mismo que bloquea la publicación (solo los críticos bloquean). Úsalo tras tocar endpoints o antes de publicar, y arregla lo que encuentre.",
     input_schema: obj({}),
-    async run(_i, ctx) {
-      const open = (await runQuickScan(ctx.projectId)).filter((f) => !f.ignored);
-      return open.length ? `${open.length} hallazgo(s):\n${open.map(formatFinding).join("\n")}` : "Sin hallazgos en el escaneo rápido.";
+    output_schema: out({
+      findings: arr(out({ id: S, rule: S, severity: S, title: S, detail: S, fix: S, file: S, line: I, source: S }, ["file", "line"])),
+    }),
+    async data(_i: Record<string, never>, ctx) {
+      const findings = (await runQuickScan(ctx.projectId)).filter((f) => !f.ignored).map(({ ignored: _ignored, ...f }) => f);
+      return { findings };
     },
-  },
+    format: (d) => (d.findings.length ? `${d.findings.length} hallazgo(s):\n${d.findings.map(formatFinding).join("\n")}` : "Sin hallazgos en el escaneo rápido."),
+  }),
   {
     name: "remember",
     description:
@@ -441,18 +529,20 @@ export const builderTools: BuilderTool[] = [
       return clip(await fetchPublicText(i.url));
     },
   },
-  {
+  typed({
     name: "describe_database",
     description: "Muestra las tablas y columnas de la base de datos Postgres del proyecto.",
     input_schema: obj({ include_internal: { type: "boolean", description: "Incluir tablas _forja_* (usuarios, sesiones)" } }),
-    async run(i: { include_internal?: boolean }, ctx) {
+    output_schema: out({ tables: arr(out({ name: S, columns: arr(out({ name: S, type: S, nullable: B, default: nullable("string") })) })) }),
+    async data(i: { include_internal?: boolean }, ctx) {
       const s = await describeSchema(ctx.projectId, i.include_internal);
-      const lines = Object.entries(s).map(
-        ([t, cols]) => `${t}(\n${cols.map((c) => `  ${c.name} ${c.type}${c.nullable ? "" : " not null"}${c.default ? ` default ${c.default}` : ""}`).join(",\n")}\n)`,
-      );
-      return lines.join("\n\n") || "La base de datos no tiene tablas todavía.";
+      return { tables: Object.entries(s).map(([name, columns]) => ({ name, columns })) };
     },
-  },
+    format: (d) =>
+      d.tables
+        .map((t) => `${t.name}(\n${t.columns.map((c) => `  ${c.name} ${c.type}${c.nullable ? "" : " not null"}${c.default ? ` default ${c.default}` : ""}`).join(",\n")}\n)`)
+        .join("\n\n") || "La base de datos no tiene tablas todavía.",
+  }),
   {
     name: "execute_sql",
     description:
@@ -467,56 +557,86 @@ export const builderTools: BuilderTool[] = [
       );
     },
   },
-  {
+  typed({
     name: "query_database",
     description: "Lectura: ejecuta una consulta SELECT y devuelve hasta 100 filas.",
     input_schema: obj({ sql: str("SELECT ...") }, ["sql"]),
-    async run(i: { sql: string }, ctx) {
+    output_schema: out({ rowCount: { type: "integer", description: "Filas que devolvió la consulta" }, rows: arr({ type: "object", description: "Hasta 100 filas" }) }),
+    async data(i: { sql: string }, ctx) {
       if (!/^\s*(select|with|explain|show)\b/i.test(i.sql)) throw new Error("query_database solo acepta lecturas; usa execute_sql para escribir.");
       const [r] = await execSql(ctx.projectId, i.sql);
-      return clip(`${r?.rows.length ?? 0} filas\n${JSON.stringify(r?.rows.slice(0, 100) ?? [], null, 1)}`);
+      return { rowCount: r?.rows.length ?? 0, rows: (r?.rows.slice(0, 100) ?? []) as Record<string, unknown>[] };
     },
-  },
-  {
+    format: (d) => clip(`${d.rowCount} filas\n${JSON.stringify(d.rows, null, 1)}`),
+  }),
+  typed({
     name: "check_build",
     description: "Compila la app completa (páginas, endpoints, tareas) y devuelve los errores. Úsalo después de cada tanda de cambios.",
     input_schema: obj({}),
-    async run(_i, ctx) {
+    output_schema: out({ ok: B, problems: arr(out({ file: S, line: I, column: I, text: S }, ["line", "column"])) }),
+    async data(_i: Record<string, never>, ctx) {
       const problems = await checkProject(await projects.readAllFiles(ctx.projectId));
-      return problems.length ? `${problems.length} problema(s):\n${problems.map(formatProblem).join("\n")}` : "Compila sin errores.";
+      return { ok: !problems.length, problems };
     },
-  },
-  {
+    format: (d) => (d.problems.length ? `${d.problems.length} problema(s):\n${d.problems.map(formatProblem).join("\n")}` : "Compila sin errores."),
+  }),
+  typed({
     name: "run_tests",
     description:
       "Ejecuta las pruebas helpers/**/*.spec.ts en el entorno aislado (describe/it/beforeEach/expect, estilo Jasmine; toBe, toEqual, toContain, toThrow, toBeCloseTo, not…). Úsalo para lógica de negocio: cálculos, validaciones, formatos.",
     input_schema: obj({ path: str("Solo este archivo .spec.ts (opcional)") }),
-    async run(i: { path?: string }, ctx) {
+    output_schema: out({
+      ok: { type: "boolean", description: "Hay pruebas y todas pasan" },
+      failed: I,
+      results: arr(
+        out(
+          {
+            spec: S,
+            status: { type: "string", enum: ["pass", "fail", "empty", "error"], description: "empty: el archivo no define pruebas; error: no compiló o no corrió" },
+            test: S,
+            ms: N,
+            error: S,
+          },
+          ["test", "ms", "error"],
+        ),
+      ),
+    }),
+    async data(i: { path?: string }, ctx) {
       const files = await projects.readAllFiles(ctx.projectId);
       const specs = Object.keys(files).filter((f) => /^helpers\/.+\.spec\.tsx?$/.test(f) && (!i.path || f === i.path));
-      if (!specs.length) return "No hay pruebas. Crea helpers/<nombre>.spec.ts que importe el helper y use describe/it/expect.";
-      const lines: string[] = [];
+      const results: { spec: string; status: "pass" | "fail" | "empty" | "error"; test?: string; ms?: number; error?: string }[] = [];
       let failed = 0;
       for (const spec of specs) {
         try {
           const mod = await compileServerModule(files, spec);
-          const out = (await runInSandbox(ctx.projectId, "test", { env_name: "preview", file: mod.file, base: "" }, "job")) as {
+          const run = (await runInSandbox(ctx.projectId, "test", { env_name: "preview", file: mod.file, base: "" }, "job")) as {
             results: { name: string; ok: boolean; ms: number; error?: string }[];
           };
-          for (const r of out.results) {
+          for (const r of run.results) {
             if (!r.ok) failed++;
-            lines.push(`${r.ok ? "✓" : "✗"} ${spec} › ${r.name}${r.ok ? "" : ` — ${r.error}`}`);
+            results.push({ spec, status: r.ok ? "pass" : "fail", test: r.name, ms: r.ms, ...(r.ok ? {} : { error: r.error }) });
           }
-          if (!out.results.length) lines.push(`? ${spec}: no define ninguna prueba con it(...)`);
+          if (!run.results.length) results.push({ spec, status: "empty" });
         } catch (e) {
           failed++;
-          lines.push(`✗ ${spec}: ${(e as Error).message}`);
+          results.push({ spec, status: "error", error: (e as Error).message });
         }
       }
-      return `${failed ? `${failed} fallo(s)` : "Todo en verde"}\n${lines.join("\n")}`;
+      return { ok: results.length > 0 && failed === 0, failed, results };
     },
-  },
-  {
+    format: (d) => {
+      if (!d.results.length) return "No hay pruebas. Crea helpers/<nombre>.spec.ts que importe el helper y use describe/it/expect.";
+      const lines = d.results.map((r) =>
+        r.status === "empty"
+          ? `? ${r.spec}: no define ninguna prueba con it(...)`
+          : r.status === "error"
+            ? `✗ ${r.spec}: ${r.error}`
+            : `${r.status === "pass" ? "✓" : "✗"} ${r.spec} › ${r.test}${r.status === "pass" ? "" : ` — ${r.error}`}`,
+      );
+      return `${d.failed ? `${d.failed} fallo(s)` : "Todo en verde"}\n${lines.join("\n")}`;
+    },
+  }),
+  typed({
     name: "get_logs",
     description:
       "Lee los registros recientes: peticiones a endpoints, errores del servidor, errores de la consola del navegador de la vista previa, correos y tareas. Primer paso ante un 500 o una pantalla en blanco.",
@@ -524,31 +644,43 @@ export const builderTools: BuilderTool[] = [
       errors_only: { type: "boolean", description: "Solo errores" },
       limit: { type: "integer", description: "Cuántas entradas, las más recientes (por defecto 60)" },
     }),
-    async run(i: { errors_only?: boolean; limit?: number }, ctx) {
-      const logs = readLogs(ctx.projectId, { level: i.errors_only ? "error" : undefined, limit: i.limit ?? 60 });
-      return clip(logs.map((l) => `${l.at} [${l.env}/${l.source}/${l.level}] ${l.message}`).join("\n") || "Sin registros.");
+    output_schema: out({ entries: arr(out({ at: S, env: S, source: S, level: S, message: S })) }),
+    async data(i: { errors_only?: boolean; limit?: number }, ctx) {
+      const entries = readLogs(ctx.projectId, { level: i.errors_only ? "error" : undefined, limit: i.limit ?? 60 });
+      return { entries: entries.map((l) => ({ at: l.at, env: l.env, source: l.source, level: l.level, message: l.message })) };
     },
-  },
-  {
+    format: (d) => clip(d.entries.map((l) => `${l.at} [${l.env}/${l.source}/${l.level}] ${l.message}`).join("\n") || "Sin registros."),
+  }),
+  typed({
     name: "get_problems",
     description:
       "Lo que está roto AHORA en la vista previa, sin duplicados: errores de compilación, errores no capturados del navegador (con su pila), llamadas a la API que fallaron (método, ruta, código HTTP y respuesta) y fallos de endpoints o tareas. Úsala primero ante un error, una pantalla en blanco o un 4xx/5xx, y otra vez al terminar para confirmar que no queda nada.",
     input_schema: obj({ recheck: { type: "boolean", description: "Vuelve a compilar antes de responder (por defecto sí)." } }),
-    async run(i: { recheck?: boolean }, ctx) {
+    output_schema: out({
+      problems: arr(
+        out(
+          { id: S, kind: { type: "string", enum: ["build", "server", "runtime", "network"] }, title: S, detail: S, file: S, line: I, status: I, count: I, firstAt: S, lastAt: S },
+          ["file", "line", "status"],
+        ),
+      ),
+    }),
+    async data(i: { recheck?: boolean }, ctx) {
       watchProblems(ctx.projectId);
       if (i.recheck !== false) await recheckBuild(ctx.projectId);
-      return clip(formatProblems(listProblems(ctx.projectId), 20));
+      return { problems: listProblems(ctx.projectId).map((p) => ({ ...p })) };
     },
-  },
-  {
+    format: (d) => clip(formatProblems(d.problems, 20)),
+  }),
+  typed({
     name: "list_secrets",
     description: "Lista los secretos (variables de entorno) del proyecto: nombre, descripción y si ya tienen valor. Nunca muestra valores.",
     input_schema: obj({}),
-    async run(_i, ctx) {
-      const s = await listSecrets(ctx.projectId);
-      return s.map((x) => `${x.name}: ${x.isSet ? "configurado" : "PENDIENTE"} — ${x.description}`).join("\n") || "Sin secretos.";
+    output_schema: out({ secrets: arr(out({ name: S, description: S, isSet: B })) }),
+    async data(_i: Record<string, never>, ctx) {
+      return { secrets: (await listSecrets(ctx.projectId)).map((x) => ({ name: x.name, description: x.description, isSet: x.isSet })) };
     },
-  },
+    format: (d) => d.secrets.map((x) => `${x.name}: ${x.isSet ? "configurado" : "PENDIENTE"} — ${x.description}`).join("\n") || "Sin secretos.",
+  }),
   {
     name: "request_secret",
     description:
@@ -609,15 +741,17 @@ export const builderTools: BuilderTool[] = [
       return `Publicada en ${r.url}`;
     },
   },
-  {
+  typed({
     name: "get_preview_url",
     description:
       "Devuelve el enlace de la vista previa en vivo (válido 7 días, sin iniciar sesión). En un proyecto existente llámala al principio, antes del primer cambio, y compártela tal cual para que el usuario vea los cambios en vivo.",
     input_schema: obj({}),
-    async run(_i, ctx) {
-      return previewUrl((await projects.getProject(ctx.projectId))!, 7);
+    output_schema: out({ url: S }),
+    async data(_i: Record<string, never>, ctx) {
+      return { url: previewUrl((await projects.getProject(ctx.projectId))!, 7) };
     },
-  },
+    format: (d) => d.url,
+  }),
 ];
 
 export const toolByName = new Map(builderTools.map((t) => [t.name, t]));

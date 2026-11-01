@@ -372,6 +372,41 @@ alter table ai_usage add column if not exists cache_read_tokens integer not null
 alter table ai_usage add column if not exists cache_write_tokens integer not null default 0;
 alter table ai_usage add column if not exists usd double precision not null default 0;
 alter table ai_usage add column if not exists role text;
+
+-- Agent telemetry (builder/metrics.ts): one row per model call and per tool call, to measure
+-- how many input tokens go to re-sending tool results (the Code Mode decision).
+create table if not exists agent_steps (
+  id serial primary key,
+  run_id text not null,
+  project_id text references projects(id) on delete cascade,
+  turn_id text,
+  task_id text,
+  role text not null,
+  step integer not null,
+  model_id text,
+  input_tokens integer not null default 0,
+  cache_read_tokens integer not null default 0,
+  cache_write_tokens integer not null default 0,
+  output_tokens integer not null default 0,
+  created_at timestamptz not null default now()
+);
+create index if not exists agent_steps_project on agent_steps (project_id, created_at);
+create index if not exists agent_steps_run on agent_steps (run_id);
+create table if not exists agent_tool_calls (
+  id serial primary key,
+  run_id text not null,
+  project_id text references projects(id) on delete cascade,
+  source text not null check (source in ('builder', 'mcp')),
+  role text,
+  step integer not null,
+  tool text not null,
+  input_chars integer not null default 0,
+  result_chars integer not null default 0,
+  ok boolean not null,
+  ms integer not null default 0,
+  created_at timestamptz not null default now()
+);
+create index if not exists agent_tool_calls_project on agent_tool_calls (project_id, created_at);
 `;
 
 export async function platformDb(): Promise<PGlite> {

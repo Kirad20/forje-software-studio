@@ -4,6 +4,7 @@ import { addUsage, emptyUsage, type Block, type LlmMessage, type LlmTool, type U
 import { q } from "../platform/db.js";
 import { readFile } from "../platform/projects.js";
 import { countAction } from "../platform/usage.js";
+import { newRunId, recordStep, recordToolCall } from "./metrics.js";
 import type { BuilderTool, ToolContext } from "./tools.js";
 
 /** Events streamed to the studio. `taskId` says which agent lane they belong to. */
@@ -111,6 +112,7 @@ export async function runAgent(spec: AgentSpec): Promise<AgentResult> {
   const result: AgentResult = { text: "", model: null, usage: emptyUsage(), usd: 0, credits: 0, steps: [], buildOk: null, testsOk: null, toolErrors: 0, hitStepLimit: false, written: [] };
   const emit = (e: AgentEvent) => spec.emit(spec.taskId && "type" in e && ["text", "tool_start", "tool_end"].includes(e.type) ? ({ ...e, taskId: spec.taskId } as AgentEvent) : e);
 
+  const runId = newRunId();
   let maxSteps = spec.maxSteps;
   let reminded = false;
   for (let step = 0; step < maxSteps; step++) {
@@ -128,6 +130,7 @@ export async function runAgent(spec: AgentSpec): Promise<AgentResult> {
       spec.onModel?.(call.model, call.failed.length ? `tras fallar ${call.failed.join("; ")}` : "");
     }
     result.usage = addUsage(result.usage, call.response.usage);
+    recordStep({ runId, projectId: spec.ctx.projectId, turnId: spec.turnId, taskId: spec.taskId, role: spec.role, step, modelId: call.model.id, usage: call.response.usage });
     result.usd += call.usd;
     result.credits += call.credits;
 
@@ -157,6 +160,7 @@ export async function runAgent(spec: AgentSpec): Promise<AgentResult> {
         await countAction(spec.ctx.account.id);
         let output: string;
         let ok = true;
+        const started = performance.now();
         try {
           const tool = byName.get(c.name);
           if (!tool) throw new Error(`Herramienta no disponible para este agente: ${c.name}`);
@@ -173,6 +177,18 @@ export async function runAgent(spec: AgentSpec): Promise<AgentResult> {
         if (c.name === "check_build") result.buildOk = ok && output.startsWith("Compila sin errores");
         if (c.name === "run_tests") result.testsOk = ok && output.startsWith("Todo en verde");
         if (!ok) result.toolErrors++;
+        recordToolCall({
+          runId,
+          projectId: spec.ctx.projectId,
+          source: "builder",
+          role: spec.role,
+          step,
+          tool: c.name,
+          inputChars: JSON.stringify(c.input ?? {}).length,
+          resultChars: output.length,
+          ok,
+          ms: performance.now() - started,
+        });
         result.steps.push({ tool: c.name, summary, ok });
         emit({ type: "tool_end", id: c.id, ok, output: output.slice(0, 2000) });
         return { type: "tool_result", tool_use_id: c.id, content: output, is_error: !ok || undefined };
