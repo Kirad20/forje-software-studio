@@ -18,6 +18,7 @@ import { stopAllSandboxes } from "./runtime/sandbox.js";
 import { startCatalogSync } from "./llm/catalog.js";
 import { startGithubSync } from "./platform/github.js";
 import { rateLimit, STUDIO_HEADERS } from "./lib/security.js";
+import { langfuse } from "./builder/tracing.js";
 import { closeBrowser } from "./runtime/browser.js";
 import { checkShareToken, parseAppHost, SHARE_COOKIE } from "./runtime/urls.js";
 
@@ -131,6 +132,7 @@ server.on("upgrade", async (req, socket, head) => {
 const shutdown = async () => {
   stopAllSandboxes();
   await closeBrowser();
+  await langfuse?.flush();
   await closeAll();
   process.exit(0);
 };

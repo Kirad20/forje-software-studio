@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { q } from "../platform/db.js";
 import type { Usage } from "../llm/types.js";
+import { langfuse } from "./tracing.js";
 
 /**
  * Agent telemetry for the Code Mode decision (F0): how many input tokens go to tool results
@@ -25,6 +26,9 @@ export interface StepRecord {
   step: number;
   modelId?: string;
   usage: Usage;
+  /** Model call latency and cost. Not stored here: only the Langfuse export (tracing.ts) uses them. */
+  ms?: number;
+  usd?: number;
 }
 
 export interface ToolCallRecord {
@@ -44,6 +48,7 @@ export interface ToolCallRecord {
 const quiet = (p: Promise<unknown>) => void p.catch(() => {});
 
 export function recordStep(r: StepRecord) {
+  langfuse?.step(r);
   quiet(
     q(
       `insert into agent_steps (run_id, project_id, turn_id, task_id, role, step, model_id, input_tokens, cache_read_tokens, cache_write_tokens, output_tokens)
@@ -54,6 +59,7 @@ export function recordStep(r: StepRecord) {
 }
 
 export function recordToolCall(r: ToolCallRecord) {
+  langfuse?.toolCall(r);
   quiet(
     q(
       `insert into agent_tool_calls (run_id, project_id, source, role, step, tool, input_chars, result_chars, ok, ms)

@@ -60,6 +60,12 @@ export const config = {
     /** A Chrome/Chromium binary to use instead of Playwright's own download. */
     executablePath: env.FORJA_CHROMIUM ?? "",
   },
+  /** Optional agent tracing to Langfuse (cloud or self-hosted). Off unless both keys are set. */
+  langfuse: {
+    publicKey: env.LANGFUSE_PUBLIC_KEY ?? "",
+    secretKey: env.LANGFUSE_SECRET_KEY ?? "",
+    baseUrl: (env.LANGFUSE_BASE_URL ?? env.LANGFUSE_HOST ?? "https://cloud.langfuse.com").replace(/\/$/, ""),
+  },
   /** A project database closes after this long without queries ("sleeps"). */
   dbIdleMs: 60_000,
   /** Longest a single endpoint call or job run may take. */
