@@ -8,7 +8,8 @@ import { createProject, getProject, listProjects, projectVersion, updateProject,
 import { countAction } from "../platform/usage.js";
 import { accessOf, sharedProjectIds } from "../platform/members.js";
 import { guideList, readGuides } from "./guides.js";
-import { jobStatus, MAX_WAIT_SECONDS, runOrDefer, type CallResult } from "./jobs.js";
+import { jobStatus, MAX_WAIT_SECONDS, PENDING_SCHEMA, runOrDefer, type CallResult } from "./jobs.js";
+import { recordToolCall } from "../builder/metrics.js";
 
 /**
  * Remote MCP server: lets any MCP client (Claude, ChatGPT, Cursor, Codex...) build Forja
@@ -194,6 +195,9 @@ function buildServer(account: Account) {
             properties: { ...projectIdProp, ...schema.properties, ...(VERSIONED_WRITES.has(t.name) ? expectedVersionProp : {}) },
             required: ["projectId", ...(schema.required ?? [])],
           },
+          // Typed tools also return structuredContent, so code can use the result without parsing text.
+          // A slow call answers PENDING first, so the schema also admits that shape.
+          ...(t.output_schema ? { outputSchema: { type: "object" as const, anyOf: [t.output_schema, PENDING_SCHEMA] } } : {}),
           annotations: hintsOf(t.name),
         };
       }),
@@ -256,15 +260,30 @@ function buildServer(account: Account) {
       // Every write lands in the project's change log as "mcp", so it can be undone from the studio.
       // A slow call (browser walk, publish, install) answers with a jobId instead of timing out the client.
       return await runOrDefer(account.id, tool.name, async (): Promise<CallResult> => {
-        const out = await tool.run(args, { account, projectId, author: "mcp" });
+        const started = performance.now();
+        const metric = (ok: boolean, resultChars: number) =>
+          recordToolCall({ runId: "", projectId, source: "mcp", step: 0, tool: tool.name, inputChars: JSON.stringify(args).length, resultChars, ok, ms: performance.now() - started });
+        let out: Awaited<ReturnType<typeof tool.run>>;
+        let structuredContent: Record<string, unknown> | undefined;
+        try {
+          const ctx = { account, projectId, author: "mcp" as const };
+          if (tool.call) ({ data: structuredContent, output: out } = await tool.call(args, ctx));
+          else out = await tool.run(args, ctx);
+        } catch (e) {
+          metric(false, (e as Error).message.length);
+          throw e;
+        }
+        metric(true, typeof out === "string" ? out.length : out.text.length);
+        // Typed tools also return their data, so code can use it without parsing the text.
+        const typedPart = structuredContent ? { structuredContent } : {};
         if (typeof out !== "string") {
-          return { content: [{ type: "text" as const, text: out.text }, ...out.images.map((i) => ({ type: "image" as const, data: i.data, mimeType: i.media_type }))], isError: false };
+          return { content: [{ type: "text" as const, text: out.text }, ...out.images.map((i) => ({ type: "image" as const, data: i.data, mimeType: i.media_type }))], isError: false, ...typedPart };
         }
         const extra: string[] = [];
         if (VERSIONED_WRITES.has(tool.name) || VERSIONED_READS.has(tool.name)) extra.push(`Versión del proyecto: ${await projectVersion(projectId)} (pásala como expected_version en tu próxima escritura)`);
         // External agents do not get the studio's system prompt, so hand them the owner's context here.
         if (CONTEXT_TOOLS.has(tool.name)) extra.push(await projectContext(project!, account.id));
-        return text([out, ...extra].join("\n\n"));
+        return { ...text([out, ...extra].join("\n\n")), ...typedPart };
       });
     } catch (e) {
       return text(`Error: ${(e as Error).message}`, true);
