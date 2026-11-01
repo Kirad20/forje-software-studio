@@ -284,6 +284,15 @@ try {
   const js = await req("GET", `/api/admin/evals/runs/${started.json.runId}/export`);
   ok(js.json?.run?.id === started.json.runId && js.json.run.results.length === 1 && js.json.evalSetVersion >= 1, "evals: the run exports as JSON");
   ok((await req("GET", "/api/admin/evals/runs")).json.runs.some((r) => r.id === started.json.runId && r.done === 1), "evals: past runs are listed");
+
+  // 6. Admin panel: connection tests against the scripted model server.
+  const provTest = await req("POST", "/api/admin/providers/openai/test");
+  ok(provTest.json?.ok === true && provTest.json.models === 3, "admin: testing a provider lists its models", provTest.text);
+  const modelTest = await req("POST", "/api/admin/models/test/openai%3Afake-mid");
+  ok(modelTest.json?.ok === true && modelTest.json.text === "OK" && modelTest.json.toolsOk === true && modelTest.json.usd > 0, "admin: testing a model answers text and calls a tool", modelTest.text);
+  const flakyTest = await req("POST", "/api/admin/models/test/openai%3Afake-flaky");
+  ok(flakyTest.status === 200 && flakyTest.json.ok === false && /503|overloaded/.test(flakyTest.json.error), "admin: a failing model reports its error", flakyTest.text);
+  ok((await req("GET", "/api/me")).json.account.credits === me1.credits, "admin: connection tests charge nobody");
 } finally {
   console.log(process.exitCode ? "\nSOME CHECKS FAILED" : "\nALL CHECKS PASSED");
   if (process.exitCode) console.log("\n--- server log ---\n" + serverLog.slice(-5000));

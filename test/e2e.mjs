@@ -58,6 +58,7 @@ function req(method, path, { host = "localhost", body, headers = {}, raw = false
   });
 }
 
+const settingValue = (res, key) => res.json?.settings?.find((s) => s.key === key)?.value;
 const ok = (cond, msg, extra) => {
   if (!cond) { console.error("FAIL:", msg, extra ?? ""); process.exitCode = 1; } else console.log("ok  ", msg);
 };
@@ -465,6 +466,36 @@ jar.localhost = ownerCookie;
 const evalsOff = await req("GET", "/api/admin/evals/config");
 ok(evalsOff.status === 200 && evalsOff.json.enabled === false && evalsOff.json.models.length === 0, "evals are off by default", evalsOff.text.slice(0, 200));
 ok((await req("POST", "/api/admin/evals/runs", { body: { cases: ["small-cafe-landing"] } })).status === 404, "an admin cannot start evals while they are off");
+
+// Admin panel: platform settings, providers and models live in the database.
+jar.localhost = bobCookie;
+ok((await req("GET", "/api/admin/settings")).status === 403, "a member cannot read the platform settings");
+ok((await req("PATCH", "/api/admin/settings", { body: { signup: "closed" } })).status === 403, "a member cannot change the platform settings");
+jar.localhost = ownerCookie;
+const settings0 = await req("GET", "/api/admin/settings");
+ok(settings0.status === 200 && settings0.json.settings.find((s) => s.key === "signup")?.value === "open", "admin reads the settings with their defaults", settings0.text.slice(0, 200));
+const closed = await req("PATCH", "/api/admin/settings", { body: { signup: "closed" } });
+ok(closed.status === 200 && (await req("GET", "/api/auth/status")).json.signup === "closed", "a setting changed in the panel applies at once", closed.text.slice(0, 200));
+await req("POST", "/api/auth/request", { body: { email: "nueva@example.com" } });
+ok(!/nueva@example.com: \d{6}/.test(serverLog), "with signup closed, a new email gets no code");
+await req("DELETE", "/api/admin/settings/signup");
+ok((await req("GET", "/api/auth/status")).json.signup === "open", "a setting goes back to its default");
+const badPatch = await req("PATCH", "/api/admin/settings", { body: { freeCredits: 5, signup: "everyone" } });
+ok(badPatch.status === 400 && badPatch.json.field === "signup", "an invalid value is refused with its field", badPatch.text);
+ok(settingValue(await req("GET", "/api/admin/settings"), "freeCredits") === 3000, "an invalid patch writes nothing");
+await req("PATCH", "/api/admin/settings", { body: { smtpUrl: "smtp://mailer:hunter2secret@127.0.0.1:2525" } });
+const withSecret = await req("GET", "/api/admin/settings");
+ok(!withSecret.text.includes("hunter2secret") && withSecret.json.settings.find((s) => s.key === "smtpUrl").secret.hint === "…2525", "a secret setting never comes back in clear");
+await req("PATCH", "/api/admin/settings", { body: { smtpUrl: null } });
+ok((await req("DELETE", "/api/admin/providers/anthropic")).status === 400, "builtin providers cannot be deleted");
+const lab = await req("POST", "/api/admin/providers", { body: { id: "lab", label: "Laboratorio", baseUrl: "http://127.0.0.1:9/v1", apiKey: "lab-key-0000abcd" } });
+ok(lab.status === 201 && lab.json.providers.find((p) => p.id === "lab")?.keyHint === "…abcd" && !lab.text.includes("lab-key-0000abcd"), "admin adds an OpenAI-compatible provider; its key stays hidden", lab.text.slice(0, 300));
+const labTest = await req("POST", "/api/admin/providers/lab/test");
+ok(labTest.status === 200 && labTest.json.ok === false && labTest.json.error, "testing an unreachable provider reports the error", labTest.text);
+ok((await req("POST", "/api/admin/models", { body: { provider: "lab", model: "tiny", tier: 2 } })).status === 201, "admin adds a custom model");
+ok((await req("GET", "/api/admin/models")).json.models.some((m) => m.id === "lab:tiny" && m.source === "custom" && m.available), "the custom model is in the catalog");
+ok((await req("DELETE", "/api/admin/models/item/anthropic%3Aclaude-opus-5-5")).status === 400, "builtin models cannot be deleted");
+ok((await req("DELETE", "/api/admin/providers/lab")).status === 200 && !(await req("GET", "/api/admin/models")).json.models.some((m) => m.provider === "lab"), "deleting a provider removes its custom models");
 const members = await req("GET", `/api/projects/${project.id}/members`);
 ok(members.json.members.length === 1 && members.json.members[0].email === "bob@example.com", "owner sees bob as member", members.text);
 await req("DELETE", `/api/projects/${project.id}/members/bob%40example.com`);

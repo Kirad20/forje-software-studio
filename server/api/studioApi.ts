@@ -20,6 +20,7 @@ import { startSecurityReview } from "../builder/securityReview.js";
 import { addMemory, deleteMemory, listMemories, setMemoryEnabled, updateMemory } from "../platform/memory.js";
 import * as github from "../platform/github.js";
 import * as projects from "../platform/projects.js";
+import { adminApi } from "../admin/api.js";
 import { evalsApi } from "../evals/api.js";
 import { EVAL_EMAIL } from "../evals/runner.js";
 import { removeProjectData } from "../runtime/projectData.js";
@@ -418,6 +419,8 @@ studioApi.patch("/admin/users/:id", async (c) => {
 
 // Quality evals (admin only, and only with the evals.enabled setting on): see server/evals.
 studioApi.route("/admin/evals", evalsApi);
+// Settings, providers, models, agent playground and router (see server/admin).
+studioApi.route("/admin", adminApi);
 
 // --- Projects -------------------------------------------------------------------------
 

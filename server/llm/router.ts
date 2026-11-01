@@ -229,7 +229,8 @@ export interface Billing {
   /** Credits are charged to the project owner. */
   payerId: string;
   projectId: string | null;
-  source: "builder" | "app";
+  /** "playground": an admin trying one agent (server/admin/playground.ts). */
+  source: "builder" | "app" | "playground";
 }
 
 export interface CallOptions {
@@ -249,7 +250,8 @@ export interface CallResult {
   failed: string[];
 }
 
-async function invoke(m: ModelInfo, req: LlmRequest): Promise<LlmResponse> {
+/** One raw call to a model, with no routing, fallback or billing (callModel adds those). */
+export async function invoke(m: ModelInfo, req: LlmRequest): Promise<LlmResponse> {
   if (m.provider === "anthropic") return anthropicChat(m.model, req);
   const provider = providerOf(m.provider);
   if (!provider?.endpoint) throw new ModelCallError(`Proveedor no configurado: ${m.provider}`, false);
