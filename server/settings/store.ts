@@ -132,6 +132,14 @@ function emit(keys: string[]) {
 
 /** Variables of older versions that now live in the database: said once at start-up so nobody is surprised. */
 const MOVED_ENV = [
+  "ANTHROPIC_API_KEY",
+  "OPENROUTER_API_KEY",
+  "OPENAI_BASE_URL",
+  "OPENAI_API_KEY",
+  "FORJA_PROVIDERS",
+  "FORJA_MODELS",
+  "BUILDER_MODEL",
+  "APP_AI_MODEL",
   "FORJA_SIGNUP",
   "FREE_CREDITS",
   "CREDITS_PER_USD",
@@ -155,7 +163,7 @@ const MOVED_ENV = [
   "FORJA_EVALS_MAX_DAILY_USD",
   "FORJA_EVALS_CONCURRENCY",
 ];
-export function warnMovedEnv(extra: string[] = []) {
-  const set = [...MOVED_ENV, ...extra].filter((k) => process.env[k]);
+export function warnMovedEnv() {
+  const set = MOVED_ENV.filter((k) => process.env[k]);
   if (set.length) console.warn(`[forja] Estas variables de entorno ya no se leen: ${set.join(", ")}. Configúralas en el studio, Administración (o en seed.local.json).`);
 }

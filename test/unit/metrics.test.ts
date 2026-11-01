@@ -13,7 +13,7 @@ const { q, closePlatformDb } = await import("../../server/platform/db.js");
 const m = await import("../../server/builder/metrics.js");
 
 const usage = (input: number) => ({ input, output: 10, cacheRead: 0, cacheWrite: 0 });
-const settle = () => new Promise((r) => setTimeout(r, 50));
+const settle = () => m.metricsIdle();
 const read = (t: string) => ["read_files", "search_code"].includes(t);
 
 beforeAll(async () => {

@@ -1,10 +1,14 @@
 import { config } from "../config.js";
 import { one, q } from "../platform/db.js";
+import { audit } from "../settings/store.js";
 import type { CompatEndpoint } from "./openaiCompat.js";
+import { ensureProviders, onProvidersChanged, OPENROUTER_URL, providerSecret, usableProviders } from "./providers.js";
 
 /**
  * Every model the router may choose from, with what it costs and can do.
  * Ids are "provider:model" (anthropic:claude-sonnet-5-5, openrouter:qwen/qwen3-coder…).
+ * They all live in model_catalog: builtin ones (seeded), OpenRouter's (synced daily) and the
+ * custom ones admins add. Each can be switched off from the admin panel.
  */
 export interface ModelInfo {
   id: string;
@@ -33,127 +37,145 @@ export interface Provider {
   endpoint?: CompatEndpoint;
 }
 
-/** Anthropic first-party prices (USD / MTok), from the Claude API model table. */
-const ANTHROPIC: ModelInfo[] = [
-  { id: "anthropic:claude-opus-5-5", provider: "anthropic", model: "claude-opus-5-5", label: "Claude Opus 5.5", inPrice: 4, outPrice: 20, cacheReadPrice: 0.2, context: 1_000_000, tools: true, vision: true, tier: 5, speed: 2, source: "builtin" },
-  { id: "anthropic:claude-sonnet-5-5", provider: "anthropic", model: "claude-sonnet-5-5", label: "Claude Sonnet 5.5", inPrice: 2, outPrice: 10, cacheReadPrice: 0.2, context: 1_000_000, tools: true, vision: true, tier: 4, speed: 3, source: "builtin" },
-  {
-    id: "anthropic:claude-haiku-5-5",
-    provider: "anthropic",
-    model: "claude-haiku-5-5",
-    label: "Claude Haiku 5.5",
-    inPrice: 0.1,
-    outPrice: 0.5,
-    cacheReadPrice: 0.01,
-    longPrompt: { threshold: 100_000, inPrice: 0.5, outPrice: 2.5 },
-    context: 1_000_000,
-    tools: true,
-    vision: true,
-    tier: 3,
-    speed: 5,
-    source: "builtin",
-  },
-];
-
-function parseJson<T>(raw: string, what: string): T[] {
-  if (!raw.trim()) return [];
-  try {
-    const v = JSON.parse(raw);
-    return Array.isArray(v) ? v : [];
-  } catch {
-    console.warn(`[forja] ${what} no es JSON válido; se ignora.`);
-    return [];
-  }
-}
-
+/** Providers the router may call: enabled in the admin panel, with a key or URL. */
 export function providers(): Provider[] {
-  const list: Provider[] = [];
-  if (config.anthropicKey) list.push({ id: "anthropic", kind: "anthropic" });
-  if (config.openrouterKey) {
-    list.push({
-      id: "openrouter",
-      kind: "openai",
-      endpoint: {
-        baseUrl: "https://openrouter.ai/api/v1",
-        apiKey: config.openrouterKey,
-        headers: { "HTTP-Referer": config.publicUrl, "X-Title": "Forja" },
-      },
-    });
-  }
-  if (config.openaiConfigured) list.push({ id: "openai", kind: "openai", endpoint: { baseUrl: config.openaiBaseUrl, apiKey: config.openaiKey || undefined } });
-  for (const p of parseJson<{ id: string; baseUrl: string; apiKeyEnv?: string; headers?: Record<string, string> }>(config.extraProviders, "FORJA_PROVIDERS")) {
-    if (!p.id || !p.baseUrl || list.some((x) => x.id === p.id)) continue;
-    list.push({ id: p.id, kind: "openai", endpoint: { baseUrl: p.baseUrl, apiKey: p.apiKeyEnv ? process.env[p.apiKeyEnv] : undefined, headers: p.headers } });
-  }
-  return list;
+  return usableProviders().map((p) =>
+    p.kind === "anthropic"
+      ? { id: p.id, kind: p.kind }
+      : p.id === "openrouter"
+        ? { id: p.id, kind: p.kind, endpoint: { baseUrl: OPENROUTER_URL, apiKey: p.apiKey, headers: { "HTTP-Referer": config.publicUrl, "X-Title": "Forja", ...p.headers } } }
+        : { id: p.id, kind: p.kind, endpoint: { baseUrl: p.baseUrl!, apiKey: p.apiKey || undefined, headers: p.headers } },
+  );
 }
 
 export const providerOf = (id: string) => providers().find((p) => p.id === id);
 
-/** Models declared in FORJA_MODELS, plus the legacy BUILDER_MODEL/APP_AI_MODEL on the "openai" provider. */
-function customModels(): ModelInfo[] {
-  const declared = parseJson<Partial<ModelInfo> & { provider: string; model: string }>(config.extraModels, "FORJA_MODELS");
-  const legacy: { provider: string; model: string }[] = [];
-  for (const m of [process.env.BUILDER_MODEL, process.env.APP_AI_MODEL]) {
-    if (m && !m.startsWith("claude-") && config.openaiConfigured) legacy.push({ provider: "openai", model: m });
-  }
-  const seen = new Set<string>();
-  return [...declared, ...legacy]
-    .filter((m) => m.provider && m.model && !seen.has(`${m.provider}:${m.model}`) && seen.add(`${m.provider}:${m.model}`))
-    .map((m) => ({
-      id: `${m.provider}:${m.model}`,
-      provider: m.provider,
-      model: m.model,
-      label: (m as Partial<ModelInfo>).label ?? m.model,
-      inPrice: (m as Partial<ModelInfo>).inPrice ?? 0,
-      outPrice: (m as Partial<ModelInfo>).outPrice ?? 0,
-      cacheReadPrice: (m as Partial<ModelInfo>).cacheReadPrice ?? 0,
-      context: (m as Partial<ModelInfo>).context ?? 128_000,
-      tools: (m as Partial<ModelInfo>).tools ?? true,
-      vision: (m as Partial<ModelInfo>).vision ?? false,
-      tier: (m as Partial<ModelInfo>).tier ?? 3,
-      speed: (m as Partial<ModelInfo>).speed ?? 3,
-      source: "custom" as const,
-    }));
-}
+type CatalogRow = {
+  id: string;
+  provider: string;
+  model: string;
+  label: string;
+  in_price: number;
+  out_price: number;
+  cache_read_price: number | null;
+  long_prompt: ModelInfo["longPrompt"] | null;
+  context: number;
+  tools: boolean;
+  vision: boolean;
+  tier: number;
+  speed: number;
+  source: ModelInfo["source"];
+  enabled: boolean;
+};
 
-async function openrouterModels(): Promise<ModelInfo[]> {
-  const rows = await q<{
-    id: string;
-    provider: string;
-    model: string;
-    label: string;
-    in_price: number;
-    out_price: number;
-    cache_read_price: number | null;
-    context: number;
-    tools: boolean;
-    vision: boolean;
-    tier: number;
-    speed: number;
-  }>(`select * from model_catalog where provider = 'openrouter'`);
-  return rows.map((r) => ({
-    id: r.id,
-    provider: r.provider,
-    model: r.model,
-    label: r.label,
-    inPrice: r.in_price,
-    outPrice: r.out_price,
-    cacheReadPrice: r.cache_read_price ?? r.in_price,
-    context: r.context,
-    tools: r.tools,
-    vision: r.vision,
-    tier: r.tier,
-    speed: r.speed,
-    source: "openrouter",
-  }));
-}
+const toModel = (r: CatalogRow): ModelInfo => ({
+  id: r.id,
+  provider: r.provider,
+  model: r.model,
+  label: r.label,
+  inPrice: r.in_price,
+  outPrice: r.out_price,
+  // OpenRouter omits it for models without caching: reads then cost like input.
+  cacheReadPrice: r.cache_read_price ?? (r.source === "openrouter" ? r.in_price : 0),
+  ...(r.long_prompt ? { longPrompt: r.long_prompt } : {}),
+  context: r.context,
+  tools: r.tools,
+  vision: r.vision,
+  tier: r.tier,
+  speed: r.speed,
+  source: r.source,
+});
 
-/** Every model whose provider is configured. */
+/** Every model whose provider is usable and that an admin has not switched off. */
 export async function availableModels(): Promise<ModelInfo[]> {
-  const configured = new Set(providers().map((p) => p.id));
-  const all = [...ANTHROPIC, ...customModels(), ...(configured.has("openrouter") ? await openrouterModels() : [])];
-  return all.filter((m) => configured.has(m.provider));
+  await ensureProviders();
+  const usable = providers().map((p) => p.id);
+  if (!usable.length) return [];
+  return (await q<CatalogRow>(`select * from model_catalog where enabled and provider = any($1::text[]) order by provider, id`, [usable])).map(toModel);
+}
+
+/** The whole catalog for the admin panel, switched-off models and unusable providers included. */
+export async function listCatalog(): Promise<(ModelInfo & { enabled: boolean; available: boolean; allowed: boolean })[]> {
+  await ensureProviders();
+  const usable = new Set(providers().map((p) => p.id));
+  return (await q<CatalogRow>(`select * from model_catalog order by provider, id`)).map((r) => {
+    const m = toModel(r);
+    return { ...m, enabled: r.enabled, available: r.enabled && usable.has(r.provider), allowed: platformAllows(m) };
+  });
+}
+
+export class ModelError extends Error {}
+
+export interface ModelInput {
+  provider: string;
+  model: string;
+  label?: string;
+  inPrice?: number;
+  outPrice?: number;
+  cacheReadPrice?: number;
+  context?: number;
+  tools?: boolean;
+  vision?: boolean;
+  tier?: number;
+  speed?: number;
+  enabled?: boolean;
+}
+
+const num = (v: unknown, min: number, max: number, what: string) => {
+  if (v === undefined) return undefined;
+  if (typeof v !== "number" || !Number.isFinite(v) || v < min || v > max) throw new ModelError(`${what}: entre ${min} y ${max}`);
+  return v;
+};
+
+/**
+ * Adds a custom model, or edits any model's label, prices, limits and priors. OpenRouter's
+ * daily sync later refreshes prices and limits of its own models, never tier or enabled.
+ */
+export async function saveModel(input: ModelInput, actorId: string | null, opts: { create?: boolean } = {}): Promise<string> {
+  if (!/^[a-z0-9-]{2,32}$/.test(input.provider ?? "")) throw new ModelError("Proveedor no válido");
+  if (!input.model?.trim() || input.model.length > 200) throw new ModelError("Falta el nombre del modelo");
+  const id = `${input.provider}:${input.model.trim()}`;
+  const v = {
+    label: input.label === undefined ? undefined : String(input.label).trim().slice(0, 120) || input.model,
+    in_price: num(input.inPrice, 0, 1000, "Precio de entrada"),
+    out_price: num(input.outPrice, 0, 1000, "Precio de salida"),
+    cache_read_price: num(input.cacheReadPrice, 0, 1000, "Precio de lectura de caché"),
+    context: num(input.context, 1000, 100_000_000, "Contexto"),
+    tools: input.tools === undefined ? undefined : !!input.tools,
+    vision: input.vision === undefined ? undefined : !!input.vision,
+    tier: num(input.tier, 1, 5, "Calidad"),
+    speed: num(input.speed, 1, 5, "Velocidad"),
+    enabled: input.enabled === undefined ? undefined : !!input.enabled,
+  };
+  const existing = await one<{ id: string }>(`select id from model_catalog where id = $1`, [id]);
+  if (opts.create) {
+    if (existing) throw new ModelError(`El modelo ${id} ya existe.`);
+    if (!(await one(`select 1 from providers where id = $1`, [input.provider]))) throw new ModelError(`No existe el proveedor «${input.provider}».`);
+    if (input.provider === "openrouter") throw new ModelError("Los modelos de OpenRouter llegan con la sincronización.");
+    await q(
+      `insert into model_catalog (id, provider, model, label, in_price, out_price, cache_read_price, context, tools, vision, tier, speed, enabled, source)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 'custom')`,
+      [id, input.provider, input.model.trim(), v.label ?? input.model.trim(), v.in_price ?? 0, v.out_price ?? 0, v.cache_read_price ?? 0, v.context ?? 128_000, v.tools ?? true, v.vision ?? false, v.tier ?? 3, v.speed ?? 3, v.enabled ?? true],
+    );
+    await audit(`model:${id}`, actorId, "create");
+    return id;
+  }
+  if (!existing) throw new ModelError(`No existe el modelo ${id}.`);
+  const entries = Object.entries(v).filter(([, x]) => x !== undefined);
+  if (entries.length) {
+    await q(`update model_catalog set ${entries.map(([k], i) => `${k} = $${i + 2}`).join(", ")} where id = $1`, [id, ...entries.map(([, x]) => x)]);
+    await audit(`model:${id}`, actorId, "set");
+  }
+  return id;
+}
+
+/** Only custom models are deleted; builtin and OpenRouter ones are switched off instead. */
+export async function deleteModel(id: string, actorId: string | null): Promise<void> {
+  const row = await one<{ source: string }>(`select source from model_catalog where id = $1`, [id]);
+  if (!row) throw new ModelError(`No existe el modelo ${id}.`);
+  if (row.source !== "custom") throw new ModelError("Solo se borran los modelos propios: desactívalo.");
+  await q(`delete from model_catalog where id = $1`, [id]);
+  await audit(`model:${id}`, actorId, "delete");
 }
 
 // --- Whitelist ------------------------------------------------------------------------------
@@ -236,10 +258,11 @@ let syncing: Promise<number> | null = null;
 
 /** Pulls OpenRouter's model list (prices, context, tool and image support). */
 export function syncOpenRouter(): Promise<number> {
-  if (!config.openrouterKey) return Promise.resolve(0);
+  const key = providerSecret("openrouter");
+  if (!key) return Promise.resolve(0);
   syncing ??= (async () => {
     try {
-      const res = await fetch("https://openrouter.ai/api/v1/models", { headers: { authorization: `Bearer ${config.openrouterKey}` }, signal: AbortSignal.timeout(30_000) });
+      const res = await fetch(`${OPENROUTER_URL}/models`, { headers: { authorization: `Bearer ${key}` }, signal: AbortSignal.timeout(30_000) });
       if (!res.ok) throw new Error(`OpenRouter ${res.status}`);
       const data = (await res.json()) as {
         data: {
@@ -293,15 +316,16 @@ export async function lastSync(): Promise<string | null> {
   return (await one<{ at: string | null }>(`select max(synced_at) as at from model_catalog where provider = 'openrouter'`))?.at ?? null;
 }
 
-/** Syncs at start-up when the catalog is older than a day, then daily. */
+/** Syncs at start-up when the catalog is older than a day, then daily, and as soon as OpenRouter is configured. */
 export function startCatalogSync() {
-  if (!config.openrouterKey) return;
   const tick = async () => {
+    if (!providerSecret("openrouter")) return;
     const at = await lastSync();
     if (!at || Date.now() - new Date(at).getTime() > 24 * 3600_000) {
       await syncOpenRouter().catch((e) => console.warn("[forja] sincronización de OpenRouter:", (e as Error).message));
     }
   };
-  void tick();
+  void ensureProviders().then(tick);
   setInterval(() => void tick(), 3600_000).unref();
+  onProvidersChanged(() => void tick());
 }

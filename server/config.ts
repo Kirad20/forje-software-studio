@@ -60,17 +60,6 @@ export const config = {
   bootstrapToken: env.FORJA_BOOTSTRAP_TOKEN ?? "",
   /** Optional seed file (settings, providers, models) applied at start-up; see server/db/seeds/local.ts. */
   seedFile: env.FORJA_SEED_FILE === undefined ? path.join(ROOT_DIR, "seed.local.json") : env.FORJA_SEED_FILE,
-  anthropicKey: env.ANTHROPIC_API_KEY ?? "",
-  openaiBaseUrl: (env.OPENAI_BASE_URL ?? "https://api.openai.com/v1").replace(/\/$/, ""),
-  openaiKey: env.OPENAI_API_KEY ?? "",
-  /** True when OPENAI_BASE_URL was set: that endpoint (Ollama, vLLM…) becomes the "openai" provider. */
-  openaiConfigured: !!env.OPENAI_BASE_URL || !!env.OPENAI_API_KEY,
-  openrouterKey: env.OPENROUTER_API_KEY ?? "",
-  /** Extra OpenAI-compatible providers: [{"id":"lab","baseUrl":"https://…/v1","apiKeyEnv":"LAB_KEY"}]. */
-  extraProviders: env.FORJA_PROVIDERS ?? "",
-  /** Extra models: [{"provider":"lab","model":"qwen3.8:latest","tier":3,"inPrice":0,"outPrice":0}]. */
-  extraModels: env.FORJA_MODELS ?? "",
-
   // --- Platform settings (defaults; see server/settings/registry.ts) ---
   /** Who may create an account: "open" (anyone, by email code), "invite" (only invited emails), "closed" (admins add people). */
   signup: "open" as "open" | "invite" | "closed",

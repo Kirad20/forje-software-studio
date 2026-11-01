@@ -1,11 +1,14 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { config } from "../config.js";
+import { providerSecret } from "./providers.js";
 import { ModelCallError, type Block, type LlmRequest, type LlmResponse } from "./types.js";
 
-let client: Anthropic | undefined;
+let client: { key: string; sdk: Anthropic } | undefined;
 const getClient = () => {
-  if (!config.anthropicKey) throw new ModelCallError("Falta ANTHROPIC_API_KEY", false);
-  return (client ??= new Anthropic({ apiKey: config.anthropicKey, maxRetries: 2 }));
+  const key = providerSecret("anthropic");
+  if (!key) throw new ModelCallError("Anthropic no está configurado (Administración → Proveedores)", false);
+  // A new key from the admin panel takes effect on the next call.
+  if (client?.key !== key) client = { key, sdk: new Anthropic({ apiKey: key, maxRetries: 2 }) };
+  return client.sdk;
 };
 
 /** Models that accept the server-side refusal fallback (`fallbacks: "default"`). */

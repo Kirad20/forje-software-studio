@@ -28,13 +28,6 @@ const app = spawn(process.execPath, ["--import", "tsx", "server/index.ts"], {
     DATABASE_URL: pgdb.url,
     FORJA_SEED_FILE: SEED,
     SECRETS_KEY: "ef".repeat(32),
-    ANTHROPIC_API_KEY: "",
-    OPENROUTER_API_KEY: "",
-    OPENAI_BASE_URL: "",
-    OPENAI_API_KEY: "",
-    BUILDER_MODEL: "",
-    APP_AI_MODEL: "",
-    FORJA_MODELS: "",
     FORJA_BOOTSTRAP_TOKEN: "e2e-bootstrap-token-0123456789",
   },
 });

@@ -1,12 +1,14 @@
 import pg from "pg";
 import { config } from "../config.js";
 import { migrate } from "../db/migrate.js";
+import { seedDefaults } from "../db/seeds/defaults.js";
 
 /**
  * The platform's own database, on a Postgres server (DATABASE_URL): accounts, projects, their
  * source files, checkpoints, publish snapshots, chat history, secrets, settings and every
  * service log. Each project's app data lives in a separate PGlite database (see baas/projectDb.ts).
- * The schema is versioned in server/db/migrations and applied on first use.
+ * The schema is versioned in server/db/migrations and applied on first use, followed by the
+ * default seed (builtin providers and models).
  */
 
 // PGlite returned numbers for these and the code assumes it: count(*), sums, round(…::numeric).
@@ -22,10 +24,6 @@ export interface PlatformDb extends Tx {
   exec(sql: string): Promise<void>;
   transaction<R>(fn: (tx: Tx) => Promise<R>): Promise<R>;
 }
-
-/** Runs once the schema is ready, before the first query is served (seeders). */
-const readyHooks: (() => Promise<void>)[] = [];
-export const onPlatformDbReady = (fn: () => Promise<void>) => void readyHooks.push(fn);
 
 let pool: pg.Pool | undefined;
 let ready: Promise<PlatformDb> | undefined;
@@ -60,9 +58,7 @@ export function platformDb(): Promise<PlatformDb> {
         }
       },
     };
-    // Hooks query through q(), which awaits `ready`: hand them the db through a resolved promise.
-    ready = Promise.resolve(db);
-    for (const hook of readyHooks) await hook();
+    await seedDefaults(db);
     return db;
   })().catch((e) => {
     ready = undefined;
