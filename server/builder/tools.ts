@@ -79,7 +79,7 @@ const numbered = (content: string) =>
 export const builderTools: BuilderTool[] = [
   {
     name: "list_files",
-    description: "Lista los archivos del proyecto con su tamaño, además de las páginas, endpoints y tareas detectadas.",
+    description: "Lista los archivos del proyecto con su tamaño, además de las páginas, endpoints y tareas detectadas. Para orientarte en un proyecto con código, project_map da más con menos tokens.",
     input_schema: obj({}),
     async run(_i, ctx) {
       const files = await projects.readAllFiles(ctx.projectId);
@@ -196,7 +196,8 @@ export const builderTools: BuilderTool[] = [
   },
   {
     name: "delete_file",
-    description: "Borra un archivo.",
+    description:
+      "Borra un archivo. Antes revisa con related_files o find_symbol quién lo importa y quita esos imports, o la compilación fallará. Queda en el registro de cambios y se puede restaurar.",
     input_schema: obj({ path: str("Ruta") }, ["path"]),
     async run(i: { path: string }, ctx) {
       assertOwned(ctx, i.path);
@@ -207,7 +208,8 @@ export const builderTools: BuilderTool[] = [
   },
   {
     name: "rename_file",
-    description: "Mueve o renombra un archivo.",
+    description:
+      "Mueve o renombra un archivo. NO reescribe los imports: antes mira quién lo importa con related_files y actualízalos con edit_file; después corre check_build. Si la ruta nueva ya existe, la reemplaza.",
     input_schema: obj({ from: str("Ruta actual"), to: str("Ruta nueva") }, ["from", "to"]),
     async run(i: { from: string; to: string }, ctx) {
       assertOwned(ctx, i.from);
@@ -571,7 +573,8 @@ export const builderTools: BuilderTool[] = [
   },
   {
     name: "create_checkpoint",
-    description: "Guarda un punto de restauración del código con una etiqueta.",
+    description:
+      "Guarda un punto de restauración con nombre que el dueño ve en el historial y puede restaurar. Úsalo al terminar una unidad de trabajo coherente (una función, un arreglo), no tras cada archivo, con una etiqueta que diga qué se logró (p. ej. \"Login con correo y contraseña\"). Restaura código, no filas de la base de datos.",
     input_schema: obj({ label: str("Etiqueta") }, ["label"]),
     async run(i: { label: string }, ctx) {
       await projects.createCheckpoint(ctx.projectId, i.label, ctx.author);
@@ -590,7 +593,8 @@ export const builderTools: BuilderTool[] = [
   },
   {
     name: "get_preview_url",
-    description: "Devuelve el enlace de la vista previa en vivo.",
+    description:
+      "Devuelve el enlace de la vista previa en vivo (válido 7 días, sin iniciar sesión). En un proyecto existente llámala al principio, antes del primer cambio, y compártela tal cual para que el usuario vea los cambios en vivo.",
     input_schema: obj({}),
     async run(_i, ctx) {
       return previewUrl((await projects.getProject(ctx.projectId))!, 7);
