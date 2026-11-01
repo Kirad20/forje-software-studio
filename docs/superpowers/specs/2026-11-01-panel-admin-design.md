@@ -219,6 +219,9 @@ pasan a la tabla de proveedores y modelos.
 ## 4. Playground de agentes
 
 Prueba un **solo agente** de un rol con un modelo concreto, sin crear nada en el espacio de nadie.
+Roles: `fast`, `data`, `backend`, `ui` y `chat`. Planificador, revisión y seguridad necesitan herramientas
+que solo les da el orquestador (`submit_plan`, `report_review`…), así que no se ofrecen. Mientras hay una
+ejecución de evals en curso no se puede lanzar (ambos fijan los modelos de la cuenta interna).
 
 - `POST /api/admin/agents/runs { role, modelId, prompt, files?: Record<string,string>, maxSteps? }`
   → `{ runId }`. `GET /api/admin/agents/runs/:id` → estado y transcripción. `POST …/:id/cancel`.
@@ -268,8 +271,8 @@ Todo bajo el middleware `/admin/*` existente (403 a quien no sea admin de plataf
 | `PATCH/DELETE /admin/providers/:id` | Editar (clave nueva, URL, cabeceras, enabled) / borrar (no `builtin`, y sus modelos `custom`) |
 | `POST /admin/providers/:id/test` | `probeProvider` |
 | `GET/POST /admin/models` | Catálogo completo con `enabled`, `allowed` y `available` / alta `custom` |
-| `PATCH/DELETE /admin/models/:id` | Editar label, precios, contexto, tools, vision, tier, speed, enabled / borrar (solo `custom`) |
-| `POST /admin/models/:id/test` | `probeModel` |
+| `PATCH/DELETE /admin/models/item/<id>` (el id lleva `:` y a veces `/`) | Editar label, precios, contexto, tools, vision, tier, speed, enabled / borrar (solo `custom`) |
+| `POST /admin/models/test/<id>` | `probeModel` |
 | `POST /admin/models/sync` | Sincronizar OpenRouter |
 | `GET /admin/agents/roles` | Roles con sus herramientas y pasos máximos |
 | `POST /admin/agents/runs`, `GET …/:id`, `POST …/:id/cancel` | Playground |

@@ -4,24 +4,38 @@ Constructor de apps full-stack por chat, con su propio BaaS incluido. Es una rei
 
 ## Arranque
 
+La plataforma guarda sus datos en Postgres (`DATABASE_URL`). Las bases de datos de cada app siguen siendo PGlite embebido bajo `DATA_DIR`.
+
 ```bash
 npm install
-cp .env.example .env   # pon SECRETS_KEY y al menos un proveedor: ANTHROPIC_API_KEY, OPENROUTER_API_KEY u OPENAI_BASE_URL
+cp .env.example .env   # pon SECRETS_KEY y DATABASE_URL
+docker compose -f docker-compose.yml -f docker-compose.local.yml up -d postgres   # o tu propio Postgres
 npm run build          # compila el studio
-npm start              # http://localhost:4100
+npm start              # http://localhost:4100 (aplica las migraciones al arrancar)
 ```
+
+Después, en el studio, **Administración → Proveedores**: activa al menos uno (Anthropic, OpenRouter o un servidor compatible con OpenAI) y pon su clave. Para no repetirlo tras cada reinicio de la base, copia `seed.local.example.json` a `seed.local.json` (fuera de git) con tus claves: se aplica al arrancar a lo que no se haya cambiado en el panel.
+
+Base de datos:
+
+| Script | Qué hace |
+|---|---|
+| `npm run db:migrate` | Aplica las migraciones pendientes (`server/db/migrations`) y los valores por defecto. También ocurre al arrancar. |
+| `npm run db:seed` | Aplica `seed.local.json` (o `FORJA_SEED_FILE`) a lo que falte; `-- --force` lo sobrescribe. |
+| `npm run db:seed:dev` | Datos de desarrollo: `admin@forja.test` / `forja-admin-1234`, `dev@forja.test` / `forja-dev-1234`, una organización y dos proyectos. No corre con `NODE_ENV=production`. |
+| `npm run db:reset` | Borra todo, migra y vuelve a sembrar. |
 
 Con Docker (incluye Chromium para `browser_test`; `--build-arg BROWSER=0` lo quita):
 
 ```bash
 docker build -t forja .
-docker run -p 4100:4100 -v forja-data:/app/data -e SECRETS_KEY=... -e ANTHROPIC_API_KEY=... forja
+docker run -p 4100:4100 -v forja-data:/app/data -e SECRETS_KEY=... -e DATABASE_URL=postgres://... forja
 ```
 
-Con Docker Compose (volúmenes, healthcheck y variables listos; el mismo archivo se importa en Coolify):
+Con Docker Compose (Postgres, volúmenes, healthcheck y variables listos; el mismo archivo se importa en Coolify):
 
 ```bash
-cp .env.example .env   # SERVICE_HEX_64_SECRETSKEY=$(openssl rand -hex 32) y una clave de modelo
+cp .env.example .env   # SERVICE_HEX_64_SECRETSKEY=$(openssl rand -hex 32) y SERVICE_PASSWORD_POSTGRES
 docker compose -f docker-compose.yml -f docker-compose.local.yml up --build
 ```
 
@@ -29,11 +43,19 @@ Producción en Coolify, con dominio, HTTPS y subdominios comodín para las apps:
 
 Desarrollo con recarga: `npm run dev` (servidor en :4100 + studio Vite en :5173). Sin SMTP, el código de acceso al studio aparece en la consola del servidor.
 
-**Primer arranque (sin usuario por defecto).** Una instalación nueva no tiene cuentas ni contraseñas conocidas: el servidor imprime en su log un token de un solo uso (o usa `FORJA_BOOTSTRAP_TOKEN`, mínimo 16 caracteres) y con él se crea la primera cuenta de administración en la pantalla de configuración. Al existir una cuenta, el token deja de servir. Después se entra con correo + contraseña, o con un código por correo (que también crea cuentas nuevas). `FORJA_SIGNUP` controla quién puede crear cuenta: `open` (por defecto), `invite` (solo correos invitados) o `closed`.
+**Primer arranque (sin usuario por defecto).** Una instalación nueva no tiene cuentas ni contraseñas conocidas: el servidor imprime en su log un token de un solo uso (o usa `FORJA_BOOTSTRAP_TOKEN`, mínimo 16 caracteres) y con él se crea la primera cuenta de administración en la pantalla de configuración. Al existir una cuenta, el token deja de servir. Después se entra con correo + contraseña, o con un código por correo (que también crea cuentas nuevas). Quién puede crear cuenta se decide en Administración → General: abierto (por defecto), solo invitados o cerrado.
 
-**Organizaciones (tenants).** Cada cuenta tiene una organización personal; se pueden crear organizaciones de equipo (`/api/orgs`) con roles `owner`/`admin`/`member`. Cada proyecto pertenece a una organización y sus miembros lo abren como editores. Los tokens MCP pueden limitarse a una organización. Los administradores de la plataforma (`/api/admin/users`) gestionan cuentas, no los proyectos de otros.
+**Administración.** Las cuentas con rol de administración de la plataforma ven «Administración» en el menú (`/admin`). Todo lo que antes eran variables de entorno se cambia ahí, sin reiniciar:
+- **General**: registro de cuentas, créditos, lista blanca de modelos, SMTP, Stripe, GitHub, Langfuse, paquetes npm, navegador y los topes de los evals. Lo genera el registro `server/settings/registry.ts`; los secretos se guardan cifrados con `SECRETS_KEY` y nunca vuelven al navegador.
+- **Proveedores**: claves y URL de Anthropic, OpenRouter, el compatible con OpenAI y los que añadas, con «Probar conexión».
+- **Modelos**: el catálogo entero (activar, calidad, velocidad, precios), modelos propios, la lista blanca con cuántos modelos casa cada patrón, la sincronización de OpenRouter y «Probar» por modelo (texto y una llamada a herramienta; el coste no se cobra a nadie).
+- **Agentes**: un playground que ejecuta un agente de un rol con el modelo que elijas en un proyecto desechable, y muestra sus pasos, su coste y los archivos que escribió.
+- **Enrutador**: lo que ha aprendido por tipo de tarea y sus últimas decisiones; se puede olvidar.
+- **Evals** y **Usuarios**.
 
-Pruebas: `npm run typecheck`, `npm test` (unidad: enrutador, aprendizaje, índice), `npm run test:e2e` (studio, todos los servicios BaaS, vista previa, publicación, tiempo real y MCP, sin LLM) `npm run test:agents` (equipo de agentes contra un modelo simulado: plan, paralelismo, propiedad de archivos, revisión, listas blancas, respaldo, costes, modos Chat/Plan y arreglo automático) y `npm run test:github` (sincronización con una API de GitHub simulada y el registro de problemas). En GitHub, `.github/workflows/ci.yml` pasa tipos, unidad, build, e2e y agentes (con Chromium) en cada PR y push a `main`, y construye y arranca la imagen Docker.
+**Organizaciones (tenants).** Cada cuenta tiene una organización personal; se pueden crear organizaciones de equipo (`/api/orgs`) con roles `owner`/`admin`/`member`. Cada proyecto pertenece a una organización y sus miembros lo abren como editores. Los tokens MCP pueden limitarse a una organización. Los administradores de la plataforma gestionan cuentas, no los proyectos de otros.
+
+Pruebas: necesitan un Postgres en `TEST_DATABASE_URL` (por defecto `postgres://forja:forja@127.0.0.1:5433/postgres`; cada prueba crea y borra su propia base): `docker run -d -p 5433:5432 -e POSTGRES_USER=forja -e POSTGRES_PASSWORD=forja postgres:17-alpine`. Luego `npm run typecheck`, `npm test` (unidad: enrutador, aprendizaje, índice, ajustes, catálogo, migraciones), `npm run test:e2e` (studio, todos los servicios BaaS, vista previa, publicación, tiempo real, MCP y la API de administración, sin LLM) `npm run test:agents` (equipo de agentes contra un modelo simulado: plan, paralelismo, propiedad de archivos, revisión, listas blancas, respaldo, costes, modos Chat/Plan, arreglo automático, pruebas de conexión y playground) y `npm run test:github` (sincronización con una API de GitHub simulada y el registro de problemas). En GitHub, `.github/workflows/ci.yml` pasa tipos, unidad, build, e2e y agentes (con Chromium y un servicio Postgres) en cada PR y push a `main`, y construye y arranca la imagen Docker.
 
 ## Cómo está hecho
 
@@ -59,8 +81,8 @@ apps generadas ──▶  pv-<id>.localhost   (vista previa, enlace con token)
 - **Modos del chat**: *Construir* (cambia la app), *Chat* (pregunta e investiga con herramientas de solo lectura, modelo barato) y *Plan* (el planificador prepara un plan que se revisa y se lanza con «Implementar plan», sin volver a planificar). Los mensajes escritos mientras trabaja se ponen en cola.
 - **GitHub** (`platform/github.ts`): sincronización en los dos sentidos solo con la API REST (sin git ni disco). Cada turno del constructor se sube como un commit con el nombre de la petición; otras ediciones, a los pocos segundos. Los commits hechos fuera entran al proyecto (por webhook firmado o consultando cada minuto) y aparecen en el chat con su resultado de compilación y «Intentar arreglar» si fallan. Solo se sincronizan las carpetas del proyecto; el resto del repositorio (README, CI…) no se toca. La cuenta se conecta con OAuth o con un token personal guardado cifrado.
 - **SDK**: el navegador usa `@forja/client` (router, `api`, `useApi`, `auth`, `storage`, `realtime`, `ai`); los endpoints y tareas reciben `ctx` (`db`, `user`, `storage`, `email`, `ai`, `jobs`, `realtime`, `payments`, `env`). El manual completo que lee el agente está en `server/builder/prompt.ts`.
-- **Paquetes npm** (`runtime/deps.ts`): además de `react`, `react-dom` y `zod`, cada app puede usar cualquier paquete de npm. El agente lo añade con `add_dependency`, que fija la versión exacta en el `package.json` del proyecto y lo instala sin ejecutar scripts. Cada conjunto de dependencias se instala una sola vez en `node_modules/.forja-deps/<hash>` y lo comparten todos los proyectos que lo usen. El navegador recibe los paquetes empaquetados, siempre con una única copia de React; los endpoints los cargan desde esa carpeta, dentro del entorno aislado. Importar un paquete sin instalarlo da un error de compilación. `FORJA_NPM=0` lo desactiva y `FORJA_NPM_REGISTRY` cambia el registro.
-- **Pruebas en navegador** (`runtime/browser.ts`): con `browser_test`, el agente abre la vista previa en un Chromium sin interfaz (Playwright), navega, hace clic, escribe y comprueba textos, como visitante anónimo o con la sesión de un usuario de la app, y en tamaño móvil, tablet o escritorio. Recibe el resultado de cada paso, los errores de consola, las peticiones fallidas, el texto visible y hasta tres capturas que el modelo ve. Solo puede pedir la propia vista previa y recursos https públicos; el estudio, otras apps y las redes privadas quedan bloqueados. Las capturas no se guardan en el historial. Necesita Chromium (`npx playwright-core install chromium-headless-shell`) o `FORJA_CHROMIUM` con la ruta de un Chrome; `FORJA_BROWSER=0` lo desactiva.
+- **Paquetes npm** (`runtime/deps.ts`): además de `react`, `react-dom` y `zod`, cada app puede usar cualquier paquete de npm. El agente lo añade con `add_dependency`, que fija la versión exacta en el `package.json` del proyecto y lo instala sin ejecutar scripts. Cada conjunto de dependencias se instala una sola vez en `node_modules/.forja-deps/<hash>` y lo comparten todos los proyectos que lo usen. El navegador recibe los paquetes empaquetados, siempre con una única copia de React; los endpoints los cargan desde esa carpeta, dentro del entorno aislado. Importar un paquete sin instalarlo da un error de compilación. Se desactiva o cambia de registro en Administración → General.
+- **Pruebas en navegador** (`runtime/browser.ts`): con `browser_test`, el agente abre la vista previa en un Chromium sin interfaz (Playwright), navega, hace clic, escribe y comprueba textos, como visitante anónimo o con la sesión de un usuario de la app, y en tamaño móvil, tablet o escritorio. Recibe el resultado de cada paso, los errores de consola, las peticiones fallidas, el texto visible y hasta tres capturas que el modelo ve. Solo puede pedir la propia vista previa y recursos https públicos; el estudio, otras apps y las redes privadas quedan bloqueados. Las capturas no se guardan en el historial. Necesita Chromium (`npx playwright-core install chromium-headless-shell`) o `FORJA_CHROMIUM` con la ruta de un Chrome; se apaga en Administración → General, y una imagen construida con `FORJA_BROWSER=0` no lo tiene.
 - **Seguridad** (`runtime/securityScan.ts`, `builder/securityReview.ts`): un escaneo rápido de reglas fijas se pasa en cada publicación (los hallazgos críticos, como una clave secreta en una página, la bloquean) y está disponible para el agente como `security_scan`. Busca secretos en páginas o escritos en el código, SQL construido con texto, endpoints que cambian datos sin sesión o de admin sin rol, POST sin validar, importes que vienen del navegador y HTML sin escapar; un endpoint abierto a propósito se marca con `// forja:public`. La revisión profunda la hace en segundo plano un agente de solo lectura que lee el código como un atacante. Ambos resultados se ven en Servicios → Seguridad, donde cada hallazgo se puede mandar al constructor («Arreglar») o ignorar.
 - **Memoria** (`platform/memory.ts`): hechos que el constructor guarda entre conversaciones (preferencias, decisiones, enfoques descartados y datos del negocio). La memoria del proyecto la comparten quienes lo editan; la personal sigue a cada persona en todos sus proyectos. El agente guarda con `remember` y corrige o borra con `forget`; además, al resumir los turnos antiguos un modelo barato extrae hasta cinco hechos nuevos. Se añade al prompt de todos los agentes del turno, rechaza secretos y se ve, edita y apaga en Ajustes → Memoria.
 
