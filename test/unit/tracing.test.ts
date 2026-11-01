@@ -60,4 +60,18 @@ describe("Langfuse export", () => {
     expect(langfuse).toBeNull();
     vi.unstubAllEnvs();
   });
+
+  it("sends a finished eval case as a trace in the run's session, with one score per measure", async () => {
+    const f = fakeFetch();
+    const lf = createLangfuse({ publicKey: "pk", secretKey: "sk", baseUrl: "https://lf.test", fetch: f.fn, flushMs: 60_000 });
+    lf.evalCase({ runId: "run1", caseId: "small-cafe-landing", size: "small", repeat: 2, turnId: "t9", scores: { total: 81.5, judge: null, compile: 1 } });
+    await lf.flush();
+    const b = f.batch();
+    expect(b.map((e) => e.type)).toEqual(["trace-create", "score-create", "score-create"]);
+    expect(b[0]!.body).toMatchObject({ name: "eval:small-cafe-landing", sessionId: "eval:run1", tags: ["eval", "small", "small-cafe-landing"], metadata: { turnId: "t9", repeat: 2 } });
+    expect(b.slice(1).map((e) => [e.body.name, e.body.value, e.body.traceId === b[0]!.body.id])).toEqual([
+      ["total", 81.5, true],
+      ["compile", 1, true],
+    ]);
+  });
 });

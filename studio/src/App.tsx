@@ -4,6 +4,7 @@ import { Logo } from "./components/Icons";
 import { Menu, MenuItem } from "./components/ui";
 import { Account } from "./pages/Account";
 import { Dashboard } from "./pages/Dashboard";
+import { Evals } from "./pages/Evals";
 import { Integrations } from "./pages/Integrations";
 import { Login } from "./pages/Login";
 import { Plan } from "./pages/Plan";
@@ -44,6 +45,8 @@ export function App() {
         <Plan />
       ) : section === "integrations" ? (
         <Integrations />
+      ) : section === "evals" && me.platformRole === "admin" ? (
+        <Evals />
       ) : section === "account" ? (
         <Account me={me} onChange={refreshMe} />
       ) : (
@@ -130,7 +133,7 @@ function Shell({ me, section, children }: { me: Me; section: string; children: R
           <Logo /> Forja
         </div>
         <nav className="nav" style={{ display: "grid", gap: 2 }}>
-          {NAV.map(([key, label, icon]) => (
+          {[...NAV, ...(me.platformRole === "admin" ? ([["evals", "Evals de calidad", "✓"]] as const) : [])].map(([key, label, icon]) => (
             <a
               key={key}
               href={`/${key}`}

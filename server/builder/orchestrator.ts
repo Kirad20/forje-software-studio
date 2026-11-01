@@ -236,6 +236,8 @@ interface TurnState {
   usage: Usage;
   usd: number;
   credits: number;
+  /** An eval turn: see runBuilderTurn. */
+  synthetic: boolean;
 }
 
 function projectSection(s: TurnState) {
@@ -255,6 +257,12 @@ function track(s: TurnState, r: AgentResult) {
   s.usd += r.usd;
   s.credits += r.credits;
 }
+
+/**
+ * What the bandit learns from a run. Eval turns are synthetic requests: they must never move
+ * the router's beliefs about real work, so they do not teach it anything.
+ */
+const learn = (s: TurnState, ...args: Parameters<typeof recordOutcome>) => (s.synthetic ? Promise.resolve() : recordOutcome(...args));
 
 /**
  * Reward in [0, 1] for one agent run, from what can be observed without a human. The finish
@@ -391,7 +399,7 @@ async function runFast(s: TurnState): Promise<void> {
   let reply = r.text || "Listo.";
   // If the change left the app not compiling, fix it before handing back (at most twice).
   let broken = s.wrote ? await recheckBuild(s.project.id) : [];
-  if (r.model) await recordOutcome(taskClassOf("fast", s.features), r.model, rewardOf({ ...r, buildOk: broken.length ? false : r.buildOk }, null), r.usd);
+  if (r.model) await learn(s, taskClassOf("fast", s.features), r.model, rewardOf({ ...r, buildOk: broken.length ? false : r.buildOk }, null), r.usd);
   for (let round = 1; round <= 2 && broken.length && !s.signal.aborted; round++) {
     const fixCtx: ToolContext = { account: s.account, projectId: s.project.id, author: "builder" };
     const fix = await runLane(
@@ -432,7 +440,7 @@ async function runChat(s: TurnState): Promise<void> {
       routing: { complexity: Math.min(3, s.features.complexity), domains: s.features.domains, needsVision: s.features.needsVision },
     },
   );
-  if (r.model) await recordOutcome(taskClassOf("chat", s.features), r.model, rewardOf(r, null), r.usd);
+  if (r.model) await learn(s, taskClassOf("chat", s.features), r.model, rewardOf(r, null), r.usd);
   await save(s.project.id, { role: "assistant", content: [{ type: "text", text: r.text || "…" }] }, s.turnId);
 }
 
@@ -679,7 +687,7 @@ async function runTeam(s: TurnState, opts: { given?: Plan; planOnly?: boolean } 
     const routing = { complexity: s.features.complexity, domains: [t.role === "ui" ? "ui" : t.role === "data" ? "data" : (s.features.domains.find((d) => d !== "ui") ?? "data")], needsVision: false };
     const needsFix = fixResults.some((f) => f.task.role === t.role);
     const reward = r instanceof Error || !r ? 0 : rewardOf(r, needsFix ? false : reviewOk);
-    await recordOutcome(taskClassOf(t.role, routing), model, reward, r instanceof Error || !r ? 0 : r.usd);
+    await learn(s, taskClassOf(t.role, routing), model, reward, r instanceof Error || !r ? 0 : r.usd);
   }
 
   // 5. One reply for the owner, written by the cheapest capable model.
@@ -724,11 +732,13 @@ export async function runBuilderTurn(
   attachments: string[] = [],
   mode: ChatMode = "build",
   implementPlan = false,
+  /** `synthetic`: an eval turn (server/evals). It teaches the router nothing and does not touch GitHub or the chat summary. */
+  opts: { synthetic?: boolean } = {},
 ) {
   if (active.has(projectId)) throw new Error("El constructor ya está trabajando en este proyecto.");
   const abort = new AbortController();
   active.set(projectId, abort);
-  holdSync(projectId);
+  if (!opts.synthetic) holdSync(projectId);
   const turnId = newId();
   const project = (await getProject(projectId))!;
   const payer = project.ownerId;
@@ -751,6 +761,7 @@ export async function runBuilderTurn(
     usage: emptyUsage(),
     usd: 0,
     credits: 0,
+    synthetic: !!opts.synthetic,
   };
   try {
     // Credits are the project owner's, whoever is chatting (collaborators included).
@@ -799,8 +810,10 @@ export async function runBuilderTurn(
     // A named point per turn, labelled with the request, on top of the per-file change log.
     if (s.wrote) await createCheckpoint(projectId, userText.slice(0, 80), "builder").catch(() => {});
     // Linked to GitHub: the whole turn goes up as one commit named after the request.
-    void releaseSync(projectId, commitMessage(userText)).catch(() => {});
-    void updateSummary(projectId, billing, scope).catch(() => {});
+    if (!opts.synthetic) {
+      void releaseSync(projectId, commitMessage(userText)).catch(() => {});
+      void updateSummary(projectId, billing, scope).catch(() => {});
+    }
   }
 }
 
