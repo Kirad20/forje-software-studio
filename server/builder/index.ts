@@ -25,6 +25,16 @@ const cache = new Map<string, FileFacts>();
 const RESOLVE = ["", ".tsx", ".ts", ".css", "/index.tsx", "/index.ts"];
 const SQL_WORDS = new Set(["select", "where", "set", "values", "the", "a", "an", "on", "as", "if", "not", "exists", "lateral", "only", "now", "unnest"]);
 
+/** Dependencies as written in package.json, without validating them (the build does that). */
+function declaredDeps(files: FileMap): Record<string, string> {
+  try {
+    const deps = JSON.parse(files["package.json"] ?? "{}").dependencies;
+    return deps && typeof deps === "object" ? deps : {};
+  } catch {
+    return {};
+  }
+}
+
 function kindOf(p: string): FileFacts["kind"] {
   if (p.startsWith("static/__dev/")) return "note";
   if (p.startsWith("pages/")) return p.includes(".example.") ? "example" : p.endsWith(".css") ? "style" : "page";
@@ -138,6 +148,7 @@ export function projectMap(files: FileMap, schema: Record<string, { name: string
   section("Pruebas y ejemplos", [...by("test"), ...by("example")].map((f) => f.path));
   section("Estilos", by("style").map((f) => f.path));
   section("Notas del constructor", by("note").map((f) => f.path));
+  section("Paquetes npm (package.json)", Object.entries(declaredDeps(files)).map(([n, v]) => `${n}@${v}`));
   const tables = Object.entries(schema).filter(([t]) => !t.startsWith("_forja_"));
   section("Base de datos", tables.map(([t, cols]) => `${t}(${cols.map((c) => c.name).join(", ")})`));
   if (Object.keys(schema).some((t) => t === "_forja_users")) lines.push("(auth activo: _forja_users)");

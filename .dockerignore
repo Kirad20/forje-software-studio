@@ -1,0 +1,9 @@
+node_modules
+dist
+data
+data-preview
+.env
+.env.*
+!.env.example
+test/.tmp
+*.log

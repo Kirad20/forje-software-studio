@@ -48,6 +48,18 @@ export const config = {
     webhookSecret: env.GITHUB_WEBHOOK_SECRET ?? "",
     pollMs: Number(env.GITHUB_POLL_MS ?? 60_000),
   },
+  npm: {
+    /** Registry the builder resolves and installs project packages from. */
+    registry: (env.FORJA_NPM_REGISTRY ?? "https://registry.npmjs.org").replace(/\/$/, ""),
+    /** "0" turns project packages off: apps get only react, react-dom and zod. */
+    enabled: env.FORJA_NPM !== "0",
+  },
+  browser: {
+    /** "0" turns off browser_test (the builder's headless Chromium against the preview). */
+    enabled: env.FORJA_BROWSER !== "0",
+    /** A Chrome/Chromium binary to use instead of Playwright's own download. */
+    executablePath: env.FORJA_CHROMIUM ?? "",
+  },
   /** A project database closes after this long without queries ("sleeps"). */
   dbIdleMs: 60_000,
   /** Longest a single endpoint call or job run may take. */
@@ -67,4 +79,7 @@ export const paths = {
   // Compiled endpoints import npm packages by name, so they must live where Node resolves
   // Forja's node_modules — not under DATA_DIR, which may be anywhere.
   bundleCache: path.join(ROOT_DIR, "node_modules", ".cache", "forja-endpoints"),
+  // Installed project packages, one folder per dependency set; inside node_modules so the
+  // endpoint sandbox (which may read only node_modules) can load them.
+  projectDeps: path.join(ROOT_DIR, "node_modules", ".forja-deps"),
 };

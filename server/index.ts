@@ -18,9 +18,9 @@ import { stopAllSandboxes } from "./runtime/sandbox.js";
 import { startCatalogSync } from "./llm/catalog.js";
 import { startGithubSync } from "./platform/github.js";
 import { rateLimit, STUDIO_HEADERS } from "./lib/security.js";
-import { checkShareToken, parseAppHost } from "./runtime/urls.js";
+import { closeBrowser } from "./runtime/browser.js";
+import { checkShareToken, parseAppHost, SHARE_COOKIE } from "./runtime/urls.js";
 
-const SHARE_COOKIE = "forja_share";
 const STUDIO_DIST = path.join(ROOT_DIR, "dist", "studio");
 
 /** Finds the app a Host header points at, and whether this browser may open it. */
@@ -130,6 +130,7 @@ server.on("upgrade", async (req, socket, head) => {
 
 const shutdown = async () => {
   stopAllSandboxes();
+  await closeBrowser();
   await closeAll();
   process.exit(0);
 };

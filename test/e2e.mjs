@@ -203,6 +203,24 @@ ok(pub2.status === 400 && pub2.json.error.includes("broken.tsx"), "publish block
 ok((await req("GET", "/", { host: "tareas-equipo.localhost" })).status === 200, "live app untouched after failed publish");
 await req("PUT", `/api/projects/${project.id}/file`, { body: { path: "pages/broken.tsx", content: "export default () => <p>arreglada</p>;" } });
 
+// Security: the quick scan runs on publish; critical findings block it until fixed or ignored.
+const sec0 = await req("GET", `/api/projects/${project.id}/security`);
+ok(sec0.json.quick?.status === "done", "publish ran the quick security scan", sec0.text.slice(0, 300));
+const leakKey = "sk_live_" + "Zx9Yw8Vu7Ts6Rq5Po4Nm3";
+await req("PUT", `/api/projects/${project.id}/file`, { body: { path: "pages/leak.tsx", content: `const key = "${leakKey}";\nexport default () => <p>{key.length}</p>;` } });
+const pubLeak = await req("POST", `/api/projects/${project.id}/publish`, {});
+ok(pubLeak.status === 400 && pubLeak.json.error.includes("seguridad") && pubLeak.json.error.includes("pages/leak.tsx"), "publish blocked by a secret key in a page", pubLeak.text.slice(0, 300));
+const secLeak = await req("POST", `/api/projects/${project.id}/security/scan`, {});
+const leak = secLeak.json.quick.findings.find((f) => f.rule === "secret-in-client");
+ok(leak?.severity === "critical" && leak.file === "pages/leak.tsx" && !leak.ignored, "security scan lists the leaked key", secLeak.text.slice(0, 300));
+const ign = await req("POST", `/api/projects/${project.id}/security/ignore`, { body: { id: leak.id, ignored: true } });
+ok(ign.json.quick.findings.find((f) => f.id === leak.id)?.ignored === true, "a finding can be ignored");
+ok((await req("POST", `/api/projects/${project.id}/publish`, {})).status === 200, "an ignored finding no longer blocks publishing");
+await req("POST", `/api/projects/${project.id}/security/ignore`, { body: { id: leak.id, ignored: false } });
+await req("PUT", `/api/projects/${project.id}/file`, { body: { path: "pages/leak.tsx", content: "export default () => <p>sin claves</p>;" } });
+ok(!(await req("POST", `/api/projects/${project.id}/security/scan`, {})).json.quick.findings.some((f) => f.rule === "secret-in-client"), "the finding goes away once fixed");
+ok((await req("POST", `/api/projects/${project.id}/security/ignore`, { body: { id: "nope" } })).status === 400, "ignore rejects bad ids");
+
 // SEO, analytics and code export on the published app
 await req("PATCH", `/api/projects/${project.id}`, { body: { seo: { siteName: "Tareas del equipo", robots: true, sitemap: true } } });
 const robots = await req("GET", "/robots.txt", { host: "tareas-equipo.localhost" });
@@ -323,8 +341,46 @@ const tl = await req("POST", "/mcp", { headers: mcpH, body: { jsonrpc: "2.0", id
 ok(tl.json?.result?.tools?.length > 15, `mcp tools/list (${tl.json?.result?.tools?.length})`, tl.text.slice(0, 300));
 const call = await req("POST", "/mcp", { headers: mcpH, body: { jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "check_build", arguments: { projectId: project.id } } } });
 ok(call.json?.result?.content?.[0]?.text?.includes("Compila"), "mcp check_build", call.text.slice(0, 300));
+// browser_test: a real headless Chromium against the preview, anonymous and signed in.
+const browse = async (args) =>
+  (await req("POST", "/mcp", { headers: mcpH, body: { jsonrpc: "2.0", id: 4, method: "tools/call", params: { name: "browser_test", arguments: { projectId: project.id, ...args } } } })).json?.result?.content ?? [];
+const anon = await browse({ steps: [{ action: "goto", path: "/" }, { action: "expect_text", text: "Entrar" }, { action: "click", selector: "text=Entrar" }, { action: "screenshot" }] });
+ok(anon[0]?.text?.includes("pasos pasaron") && anon[0].text.includes("URL final: /login") && anon[1]?.type === "image", "browser_test walks a flow and returns a screenshot", anon[0]?.text?.slice(0, 600));
+const signed = await browse({ steps: [{ action: "goto", path: "/" }, { action: "expect_text", text: "Tareas" }], viewport: "mobile", as_user_email: "ana@example.com" });
+ok(signed[0]?.text?.includes("pasos pasaron") && signed[0].text.includes("con sesión") && signed[0].text.includes("390×844"), "browser_test as an app user on mobile", signed[0]?.text?.slice(0, 600));
+const miss = await browse({ steps: [{ action: "goto", path: "/" }, { action: "expect_text", text: "Esto no existe" }] });
+ok(miss[0]?.text?.includes("Falló en el paso 2") && miss[1]?.type === "image", "browser_test stops at the failing step with a screenshot", miss[0]?.text?.slice(0, 600));
 const noauth = await req("POST", "/mcp", { headers: { accept: "application/json, text/event-stream" }, body: { jsonrpc: "2.0", id: 1, method: "tools/list" } });
 ok(noauth.status === 401, "mcp requires token");
+
+// Memory: the agent's remember/forget tools, and the owner's view in Settings.
+const tool = async (name, args) =>
+  (await req("POST", "/mcp", { headers: mcpH, body: { jsonrpc: "2.0", id: 5, method: "tools/call", params: { name, arguments: { projectId: project.id, ...args } } } })).json?.result;
+const memText = (r) => r?.content?.[0]?.text ?? "";
+ok(/Guardado en memoria \(([0-9a-f]{10})\)/.test(memText(await tool("remember", { text: "Los precios se muestran con IVA incluido", kind: "business" }))), "remember saves a project memory");
+ok(/Ya estaba/.test(memText(await tool("remember", { text: "los precios se muestran con IVA incluido.", kind: "business" }))), "the same fact again is not duplicated");
+const leaky = await tool("remember", { text: "La clave es sk_live_" + "a1B2c3D4e5F6g7H8i9J0", kind: "business" });
+ok(leaky?.isError && /Secretos/.test(memText(leaky)), "remember refuses secrets", JSON.stringify(leaky));
+await tool("remember", { text: "Responde siempre en tono informal", kind: "preference", scope: "personal" });
+let mem = (await req("GET", `/api/projects/${project.id}/memory`)).json;
+ok(mem.project.length === 1 && mem.project[0].source === "agent" && mem.personal.length === 1 && mem.projectEnabled && mem.personalEnabled, "memory lists project and personal facts", JSON.stringify(mem));
+const priceId = mem.project[0].id;
+ok(/corregida/.test(memText(await tool("remember", { text: "Los precios se muestran sin IVA", kind: "business", replaces: priceId }))), "remember can correct a memory");
+mem = (await req("POST", `/api/projects/${project.id}/memory`, { body: { text: "No usar la palabra «barato»", kind: "rejected" } })).json;
+ok(mem.project.some((m) => m.id === priceId && m.text.endsWith("sin IVA")) && mem.project.some((m) => m.source === "owner" && m.kind === "rejected"), "owner adds memories in Settings", JSON.stringify(mem.project));
+ok((await req("POST", `/api/projects/${project.id}/memory`, { body: { text: "x".repeat(301), kind: "decision" } })).status === 400, "memories are short");
+ok((await req("POST", `/api/projects/${project.id}/memory`, { body: { text: "algo", kind: "otra" } })).status === 400, "memory kinds are checked");
+const edited = await req("PATCH", `/api/projects/${project.id}/memory/${priceId}`, { body: { text: "Precios en euros, sin IVA", kind: "decision" } });
+ok(edited.json.project.some((m) => m.id === priceId && m.kind === "decision" && m.text === "Precios en euros, sin IVA"), "owner edits a memory");
+mem = (await req("POST", `/api/projects/${project.id}/memory/settings`, { body: { project: false } })).json;
+ok(!mem.projectEnabled && /apagada/.test(memText(await tool("remember", { text: "Otra cosa", kind: "decision" }))), "with project memory off the agent saves nothing");
+await req("POST", `/api/projects/${project.id}/memory/settings`, { body: { project: true } });
+const otherProject = (await req("POST", "/api/projects", { body: { prompt: "Otra app" } })).json.project;
+const otherMem = (await req("GET", `/api/projects/${otherProject.id}/memory`)).json;
+ok(otherMem.project.length === 0 && otherMem.personal.length === 1, "personal memory follows the person to other projects, project memory does not", JSON.stringify(otherMem));
+const rejectedId = mem.project.find((m) => m.kind === "rejected").id;
+ok((await req("DELETE", `/api/projects/${otherProject.id}/memory/${rejectedId}`)).status === 404, "a project memory cannot be deleted from another project");
+ok(/borrada/.test(memText(await tool("forget", { id: rejectedId }))), "forget deletes a memory");
 
 // Collaborators: invite before sign-up, claimed on first sign-in; editors build, owners manage.
 const ownerCookie = jar.localhost;
@@ -345,6 +401,9 @@ ok((await req("PUT", `/api/projects/${project.id}/file`, { body: { path: "pages/
 ok((await req("DELETE", `/api/projects/${project.id}`)).status === 403, "editor cannot delete the project");
 ok((await req("POST", `/api/projects/${project.id}/members`, { body: { email: "eve@example.com" } })).status === 403, "editor cannot invite");
 ok((await req("GET", `/api/projects/${project.id}/changes`)).json.changes[0].actor === "bob@example.com", "editor writes are logged with who made them");
+const bobMem = (await req("GET", `/api/projects/${project.id}/memory`)).json;
+ok(bobMem.project.some((m) => m.id === priceId) && bobMem.personal.length === 0, "editors share project memory but not the owner's personal memory", JSON.stringify(bobMem));
+ok((await req("PATCH", `/api/projects/${project.id}/memory/${mem.personal[0].id}`, { body: { text: "hack" } })).status === 404, "an editor cannot change the owner's personal memory");
 await signInAs("carol@example.com");
 ok((await req("GET", `/api/projects/${project.id}`)).status === 404, "strangers cannot see the project");
 jar.localhost = ownerCookie;

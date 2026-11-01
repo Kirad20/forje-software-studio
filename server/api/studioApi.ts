@@ -13,6 +13,9 @@ import { replaceVisibleText } from "../builder/textEdit.js";
 import * as accounts from "../platform/accounts.js";
 import { projectEvents, readLogs, type ProjectEvent } from "../platform/events.js";
 import { clearProblems, listProblems, recheckBuild, watchProblems } from "../platform/problems.js";
+import { getSecurity, runQuickScan, setIgnored } from "../platform/security.js";
+import { startSecurityReview } from "../builder/securityReview.js";
+import { addMemory, deleteMemory, listMemories, setMemoryEnabled, updateMemory } from "../platform/memory.js";
 import * as github from "../platform/github.js";
 import * as projects from "../platform/projects.js";
 import { publishProject, suggestSlug, unpublishProject } from "../runtime/publish.js";
@@ -417,6 +420,55 @@ studioApi.get("/projects/:id/services", async (c) => {
 });
 
 studioApi.get("/projects/:id/analytics", async (c) => c.json(await analyticsSummary(pid(c), Number(c.req.query("days") ?? 7))));
+
+// Security: the quick scan (rules, also run on publish) and the deep review (an agent, spends credits).
+studioApi.get("/projects/:id/security", async (c) => c.json(await getSecurity(pid(c))));
+studioApi.post("/projects/:id/security/scan", async (c) => {
+  await runQuickScan(pid(c));
+  return c.json(await getSecurity(pid(c)));
+});
+studioApi.post("/projects/:id/security/deep", async (c) => {
+  const started = await startSecurityReview(c.get("account"), pid(c));
+  return c.json({ started, ...(await getSecurity(pid(c))) }, started ? 202 : 409);
+});
+studioApi.post("/projects/:id/security/ignore", async (c) => {
+  const { id, ignored } = await c.req.json<{ id?: string; ignored?: boolean }>();
+  if (!id || !/^[0-9a-f]{12}$/.test(id)) return c.json({ error: "Hallazgo no válido" }, 400);
+  await setIgnored(pid(c), id, ignored !== false);
+  return c.json(await getSecurity(pid(c)));
+});
+
+// Memory: what the builder keeps between conversations. Project memories are shared by the
+// project's editors; personal ones belong to whoever is signed in.
+const memoryOf = (c: Context<Env>) => listMemories(pid(c), c.get("account").id);
+studioApi.get("/projects/:id/memory", async (c) => c.json(await memoryOf(c)));
+studioApi.post("/projects/:id/memory", async (c) => {
+  const { text, kind, scope } = await c.req.json<{ text?: string; kind?: string; scope?: string }>();
+  try {
+    await addMemory(pid(c), c.get("account").id, { scope: scope === "personal" ? "personal" : "project", kind: kind ?? "", text: text ?? "", source: "owner" });
+  } catch (e) {
+    return c.json({ error: (e as Error).message }, 400);
+  }
+  return c.json(await memoryOf(c));
+});
+studioApi.patch("/projects/:id/memory/:mid", async (c) => {
+  const { text, kind } = await c.req.json<{ text?: string; kind?: string }>();
+  try {
+    if (!(await updateMemory(pid(c), c.get("account").id, c.req.param("mid"), { text, kind }))) return c.json({ error: "Memoria no encontrada" }, 404);
+  } catch (e) {
+    return c.json({ error: (e as Error).message }, 400);
+  }
+  return c.json(await memoryOf(c));
+});
+studioApi.delete("/projects/:id/memory/:mid", async (c) => {
+  if (!(await deleteMemory(pid(c), c.get("account").id, c.req.param("mid")))) return c.json({ error: "Memoria no encontrada" }, 404);
+  return c.json(await memoryOf(c));
+});
+studioApi.post("/projects/:id/memory/settings", async (c) => {
+  const { project, personal } = await c.req.json<{ project?: boolean; personal?: boolean }>();
+  await setMemoryEnabled(pid(c), c.get("account").id, { project, personal });
+  return c.json(await memoryOf(c));
+});
 
 // Share links: Floot-style 7-day development links, and revoking every link at once.
 studioApi.post("/projects/:id/share-link", async (c) => {

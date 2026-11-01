@@ -79,6 +79,11 @@ export interface AgentSpec {
   turnId: string;
   /** Persist the transcript to chat_messages (the fast agent's turn is the chat itself). */
   persist?: { projectId: string };
+  /**
+   * A tool the agent must call before it stops (submit_plan, report_review). If it ends
+   * without it, it is reminded once and given one more step.
+   */
+  requiredTool?: string;
   /** Called once the router chose the model, before the first step runs. */
   onModel?: (m: ModelInfo, reason: string) => void;
 }
@@ -95,16 +100,20 @@ export interface AgentResult {
   testsOk: boolean | null;
   toolErrors: number;
   hitStepLimit: boolean;
+  /** Files the agent wrote, renamed or deleted. */
+  written: string[];
 }
 
 export async function runAgent(spec: AgentSpec): Promise<AgentResult> {
   const history: LlmMessage[] = [...spec.messages];
   const tools: LlmTool[] = spec.tools.map(({ name, description, input_schema }) => ({ name, description, input_schema }));
   const byName = new Map(spec.tools.map((t) => [t.name, t]));
-  const result: AgentResult = { text: "", model: null, usage: emptyUsage(), usd: 0, credits: 0, steps: [], buildOk: null, testsOk: null, toolErrors: 0, hitStepLimit: false };
+  const result: AgentResult = { text: "", model: null, usage: emptyUsage(), usd: 0, credits: 0, steps: [], buildOk: null, testsOk: null, toolErrors: 0, hitStepLimit: false, written: [] };
   const emit = (e: AgentEvent) => spec.emit(spec.taskId && "type" in e && ["text", "tool_start", "tool_end"].includes(e.type) ? ({ ...e, taskId: spec.taskId } as AgentEvent) : e);
 
-  for (let step = 0; step < spec.maxSteps; step++) {
+  let maxSteps = spec.maxSteps;
+  let reminded = false;
+  for (let step = 0; step < maxSteps; step++) {
     if (spec.signal.aborted) throw new Error("Detenido.");
     const call = await callModel(
       spec.scope,
@@ -130,9 +139,17 @@ export async function runAgent(spec: AgentSpec): Promise<AgentResult> {
     if (texts.length) result.text = texts.join("\n");
 
     const calls = call.response.content.filter((b): b is Extract<Block, { type: "tool_use" }> => b.type === "tool_use");
-    if (!calls.length) break;
+    if (!calls.length) {
+      if (!spec.requiredTool || reminded || result.steps.some((st) => st.tool === spec.requiredTool && st.ok)) break;
+      reminded = true;
+      maxSteps = Math.max(maxSteps, step + 2);
+      history.push({ role: "user", content: `Todavía no has llamado a ${spec.requiredTool}. Llámala ahora con la herramienta (no escribas el resultado como texto).` });
+      continue;
+    }
 
-    // Independent tool calls of one step run concurrently; results go back in one message.
+    // Independent tool calls of one step run concurrently; results go back in one message,
+    // followed by any images they returned (screenshots), which the model sees directly.
+    const images: Block[] = [];
     const results = await Promise.all(
       calls.map(async (c): Promise<Block> => {
         const summary = summarize(c.name, c.input);
@@ -143,7 +160,12 @@ export async function runAgent(spec: AgentSpec): Promise<AgentResult> {
         try {
           const tool = byName.get(c.name);
           if (!tool) throw new Error(`Herramienta no disponible para este agente: ${c.name}`);
-          output = await tool.run(c.input, spec.ctx);
+          const out = await tool.run(c.input, spec.ctx);
+          if (typeof out === "string") output = out;
+          else {
+            output = out.text;
+            for (const img of out.images) images.push({ type: "image", source: { type: "base64", ...img } });
+          }
         } catch (e) {
           ok = false;
           output = `Error: ${(e as Error).message}`;
@@ -156,10 +178,11 @@ export async function runAgent(spec: AgentSpec): Promise<AgentResult> {
         return { type: "tool_result", tool_use_id: c.id, content: output, is_error: !ok || undefined };
       }),
     );
-    const toolMsg: LlmMessage = { role: "user", content: results };
-    history.push(toolMsg);
-    if (spec.persist) await save(spec.persist.projectId, toolMsg, spec.turnId);
-    if (step === spec.maxSteps - 1) result.hitStepLimit = true;
+    history.push({ role: "user", content: [...results, ...images] });
+    // Screenshots are only useful in this run; stored history keeps the text.
+    if (spec.persist) await save(spec.persist.projectId, { role: "user", content: results }, spec.turnId);
+    if (step === maxSteps - 1) result.hitStepLimit = true;
   }
+  result.written = [...(spec.ctx.written ?? [])];
   return result;
 }

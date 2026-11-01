@@ -8,6 +8,8 @@ import { config } from "../config.js";
  * Browsers resolve any *.localhost name to the loopback address.
  */
 const PREVIEW_PREFIX = "pv-";
+/** Cookie a share link is traded for on the app's own host. */
+export const SHARE_COOKIE = "forja_share";
 const DAY = 24 * 3600_000;
 
 const withHost = (sub: string) => config.publicUrl.replace("://", `://${sub}.`);

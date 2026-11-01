@@ -4,6 +4,7 @@ import { UserMenu, type Me } from "../App";
 import { TurnDetails, type TurnDetail } from "../components/Changes";
 import { Chat, type SelectedElement } from "../components/Chat";
 import type { Problem } from "../components/Problems";
+import { SecurityPanel } from "../components/Security";
 import { External, Refresh } from "../components/Icons";
 import { AiPanel, CodePanel, EmailPanel, JobsPanel, LogsPanel, UsersPanel } from "../components/Panels";
 import { AnalyticsPanel, DataPanel, DocsPanel, IntegrationsPanel, PaymentsPanel, SeoPanel, StoragePanel } from "../components/ServicePanels";
@@ -21,7 +22,7 @@ const TEXT_EDIT_WHY: Record<string, string> = {
 };
 
 type View = "preview" | "services" | "settings" | "details";
-type ServiceKey = "data" | "users" | "ai" | "integrations" | "analytics" | "seo" | "docs" | "jobs" | "storage" | "email" | "payments" | "logs" | "code";
+type ServiceKey = "data" | "users" | "ai" | "integrations" | "analytics" | "seo" | "docs" | "jobs" | "storage" | "email" | "payments" | "logs" | "security" | "code";
 type LogLine = { at: string; env: string; level: string; source: string; message: string };
 
 const SERVICES: { key: ServiceKey; label: string; icon: string }[] = [
@@ -37,9 +38,10 @@ const SERVICES: { key: ServiceKey; label: string; icon: string }[] = [
   { key: "email", label: "Correo", icon: "✉" },
   { key: "payments", label: "Pagos", icon: "¤" },
   { key: "logs", label: "Registros", icon: "≡" },
+  { key: "security", label: "Seguridad", icon: "⛨" },
 ];
 /** Always listed among the used ones. */
-const ALWAYS_USED = new Set<ServiceKey>(["seo", "logs"]);
+const ALWAYS_USED = new Set<ServiceKey>(["seo", "logs", "security"]);
 
 const readDrawer = () => {
   try {
@@ -69,6 +71,8 @@ export function ProjectView({ id, me, onCredits }: { id: string; me: Me; onCredi
   const [codeFile, setCodeFile] = useState<string | null>(null);
   const [problems, setProblems] = useState<Problem[]>([]);
   const [fixNonce, setFixNonce] = useState(0);
+  // A message another panel asks the chat to send (Security's "Arreglar").
+  const [outbox, setOutbox] = useState<{ nonce: number; text: string } | null>(null);
   const [chatKey, setChatKey] = useState(0);
   const [detail, setDetail] = useState<TurnDetail | null>(null);
   const [insert, setInsert] = useState<{ text: string; nonce: number } | null>(null);
@@ -390,6 +394,7 @@ export function ProjectView({ id, me, onCredits }: { id: string; me: Me; onCredi
               insert={insert}
               problems={problems}
               fixNonce={fixNonce}
+              outbox={outbox}
               reloadKey={chatKey}
               onTurnEnd={() => {
                 void load();
@@ -467,6 +472,17 @@ export function ProjectView({ id, me, onCredits }: { id: string; me: Me; onCredi
                 {service === "email" && <EmailPanel project={project} onChange={load} />}
                 {service === "payments" && <PaymentsPanel projectId={id} />}
                 {service === "logs" && <LogsPanel projectId={id} lines={logLines} />}
+                {service === "security" && (
+                  <SecurityPanel
+                    projectId={id}
+                    reloadKey={filesKey}
+                    building={building}
+                    onFix={(text) => {
+                      setDrawer(true);
+                      setOutbox((o) => ({ nonce: (o?.nonce ?? 0) + 1, text }));
+                    }}
+                  />
+                )}
                 {service === "code" && <CodePanel key={codeFile ?? ""} projectId={id} reloadKey={filesKey} initialPath={codeFile} />}
               </div>
             </div>

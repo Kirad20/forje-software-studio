@@ -5,6 +5,7 @@ import * as esbuild from "esbuild";
 import { ROOT_DIR, paths } from "../config.js";
 import { sha256 } from "../lib/crypto.js";
 import type { FileMap } from "../platform/projects.js";
+import { BUILTIN_PACKAGES, ensureDeps, isNodeBuiltin, MANIFEST, packageName, readDeps, type Deps } from "./deps.js";
 
 const SDK_CLIENT = path.join(ROOT_DIR, "sdk", "client", "index.ts");
 const RESOLVE_EXT = ["", ".tsx", ".ts", ".jsx", ".js", ".css", ".json", "/index.tsx", "/index.ts"];
@@ -24,18 +25,62 @@ export class BuildError extends Error {
 
 export const formatProblem = (p: BuildProblem) => `${p.file}${p.line ? `:${p.line}:${p.column ?? 0}` : ""} — ${p.text}`;
 
+interface Packages {
+  deps: Deps;
+  /** Installed folder for `deps`, or null when the project has none. */
+  dir: string | null;
+}
+
+/** The project's packages, installed on first use. Problems point at package.json. */
+async function projectPackages(files: FileMap): Promise<Packages> {
+  try {
+    const deps = readDeps(files);
+    return { deps, dir: await ensureDeps(deps) };
+  } catch (e) {
+    throw new BuildError([{ file: MANIFEST, text: (e as Error).message }]);
+  }
+}
+
+const SKIP = { forjaSkip: true };
+
+/** Resolves a bare import from another folder, through esbuild's own resolver. */
+async function resolveFrom(build: esbuild.PluginBuild, args: esbuild.OnResolveArgs, resolveDir: string): Promise<esbuild.OnResolveResult> {
+  const r = await build.resolve(args.path, { kind: args.kind, resolveDir, importer: args.importer, pluginData: SKIP });
+  return r.errors.length ? { errors: r.errors } : { path: r.path, namespace: r.namespace, external: r.external, sideEffects: r.sideEffects };
+}
+
 /**
  * Serves a project's files to esbuild from memory. Relative imports and the `~/` alias
- * resolve inside the project; bare imports (react, zod...) resolve from Forja's own
- * node_modules, which is the set of packages generated apps may use.
+ * resolve inside the project. Bare imports resolve to react, react-dom and zod from
+ * Forja's own node_modules, or to the packages listed in the project's package.json.
+ * React always comes from Forja (one copy, even when a package brings its own).
+ * In node builds packages stay external: Node loads them at run time next to the bundle.
  */
-function vfsPlugin(files: FileMap, entry?: { path: string; contents: string }): esbuild.Plugin {
+function vfsPlugin(files: FileMap, pkgs: Packages, opts: { entry?: { path: string; contents: string }; node?: boolean } = {}): esbuild.Plugin {
   const resolveIn = (p: string) => RESOLVE_EXT.map((e) => p + e).find((c) => c in files);
+  const { entry } = opts;
   return {
     name: "forja-vfs",
     setup(build) {
       build.onResolve({ filter: /^@forja\/client$/ }, () => ({ path: SDK_CLIENT }));
       if (entry) build.onResolve({ filter: /^forja:entry$/ }, () => ({ path: entry.path, namespace: "vfs" }));
+      if (!opts.node) {
+        build.onResolve({ filter: /^react(-dom)?(\/.*)?$/ }, (args) => (args.pluginData?.forjaSkip ? undefined : resolveFrom(build, args, ROOT_DIR)));
+      }
+      // Bare imports written in project files (imports inside packages resolve normally).
+      build.onResolve({ filter: /^[A-Za-z0-9@_]/ }, (args) => {
+        if (args.namespace !== "vfs" || args.path.startsWith("@/")) return undefined;
+        if (isNodeBuiltin(args.path)) {
+          return opts.node ? { path: args.path, external: true } : { errors: [{ text: `"${args.path}" es un módulo de Node: no existe en el navegador.` }] };
+        }
+        const name = packageName(args.path);
+        if (name in pkgs.deps) {
+          if (opts.node) return { path: args.path, external: true };
+          return resolveFrom(build, args, pkgs.dir!);
+        }
+        if (BUILTIN_PACKAGES.includes(name)) return opts.node ? { path: args.path, external: true } : undefined;
+        return { errors: [{ text: `El paquete "${name}" no está instalado. Añádelo con add_dependency antes de importarlo.` }] };
+      });
       build.onResolve({ filter: /^(\.{1,2}\/|~\/|@\/|\/)/ }, (args) => {
         if (args.namespace !== "vfs" && args.kind !== "entry-point") return undefined;
         let target: string;
@@ -123,6 +168,7 @@ export async function buildClient(files: FileMap, opts: { minify?: boolean } = {
 }
 
 async function bundleBrowser(files: FileMap, entry: string, minify = false): Promise<{ js: string; css: string }> {
+  const pkgs = await projectPackages(files);
   try {
     const result = await esbuild.build({
       entryPoints: ["forja:entry"],
@@ -137,7 +183,7 @@ async function bundleBrowser(files: FileMap, entry: string, minify = false): Pro
       sourcemap: minify ? false : "inline",
       logLevel: "silent",
       define: { "process.env.NODE_ENV": JSON.stringify(minify ? "production" : "development") },
-      plugins: [vfsPlugin(files, { path: "__entry__.tsx", contents: entry })],
+      plugins: [vfsPlugin(files, pkgs, { entry: { path: "__entry__.tsx", contents: entry } })],
     });
     const out = (ext: string) => result.outputFiles.find((f) => f.path.endsWith(ext))?.text ?? "";
     return { js: out(".js"), css: out(".css") };
@@ -209,10 +255,10 @@ export interface CompiledModule {
 
 const compileCache = new Map<string, Promise<CompiledModule>>();
 
-/** Server code depends on endpoints/, jobs/ and helpers/ only; hash just those. */
+/** Server code depends on endpoints/, jobs/, helpers/ and package.json only; hash just those. */
 function serverHash(files: FileMap, entry: string) {
   const relevant = Object.keys(files)
-    .filter((f) => /^(endpoints|jobs|helpers)\//.test(f))
+    .filter((f) => /^(endpoints|jobs|helpers)\//.test(f) || f === MANIFEST)
     .sort()
     .map((f) => `${f}\0${files[f]}`)
     .join("\0");
@@ -231,6 +277,7 @@ export async function compileServerModule(files: FileMap, entry: string): Promis
     p = (async () => {
       let code: string;
       let exports: string[] = [];
+      const pkgs = await projectPackages(files);
       try {
         const result = await esbuild.build({
           entryPoints: [`./${entry}`],
@@ -241,9 +288,8 @@ export async function compileServerModule(files: FileMap, entry: string): Promis
           platform: "node",
           target: "node22",
           logLevel: "silent",
-          packages: "external",
           metafile: true,
-          plugins: [vfsPlugin(files)],
+          plugins: [vfsPlugin(files, pkgs, { node: true })],
           absWorkingDir: ROOT_DIR,
         });
         code = result.outputFiles[0]!.text;
@@ -251,8 +297,10 @@ export async function compileServerModule(files: FileMap, entry: string): Promis
       } catch (e) {
         throw new BuildError(toProblems(e));
       }
-      mkdirSync(paths.bundleCache, { recursive: true });
-      const file = path.join(paths.bundleCache, `${key}.mjs`);
+      // Next to the installed packages, so Node finds them first (then Forja's own).
+      const dir = pkgs.dir ? path.join(pkgs.dir, ".bundles") : paths.bundleCache;
+      mkdirSync(dir, { recursive: true });
+      const file = path.join(dir, `${key}.mjs`);
       if (!existsSync(file)) writeFileSync(file, code);
       return { file, exports };
     })();

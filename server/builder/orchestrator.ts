@@ -5,12 +5,13 @@ import { emptyUsage, addUsage, textOf, type Block, type LlmMessage, type Usage }
 import { describeSchema } from "../baas/projectDb.js";
 import { getAccount, type Account } from "../platform/accounts.js";
 import { one, q } from "../platform/db.js";
+import { addMemory, memorySection, memorySettings, MEMORY_KINDS } from "../platform/memory.js";
 import { createCheckpoint, getProject, readAllFiles, type Project } from "../platform/projects.js";
 import { imageBlocks, runAgent, save, UPLOADS, type AgentEvent, type AgentResult } from "./agent.js";
 import { formatProblems, listProblems, recheckBuild, watchProblems } from "../platform/problems.js";
 import { holdSync, releaseSync } from "../platform/github.js";
 import { projectMap, selectContext } from "./index.js";
-import { MAX_STEPS, PLANNER_FILES, ROLE_PROMPTS, ROLE_TOOLS } from "./roles.js";
+import { FAST_EXCLUDED_TOOLS, FIRST_BUILD, MAX_STEPS, PLANNER_FILES, ROLE_PROMPTS, ROLE_TOOLS } from "./roles.js";
 import { builderTools, toolByName, type BuilderTool, type ToolContext } from "./tools.js";
 
 /**
@@ -45,6 +46,7 @@ interface Review {
 
 const RECENT_TURNS = 4;
 const tools = (names: string[]) => names.map((n) => toolByName.get(n)).filter((t): t is BuilderTool => !!t);
+const FAST_TOOLS = builderTools.filter((t) => !FAST_EXCLUDED_TOOLS.includes(t.name));
 
 // --- Context per turn: a rolling summary + the last few exchanges (text only) -----------------------
 
@@ -123,6 +125,37 @@ async function updateSummary(projectId: string, billing: Billing, scope: { accou
      on conflict (project_id) do update set upto_message_id = excluded.upto_message_id, summary = excluded.summary, updated_at = now()`,
     [projectId, cutoff, summary],
   );
+  await extractMemories(projectId, billing, scope, transcript);
+}
+
+/**
+ * The same turns, read once more for the few facts worth keeping as project memory (the
+ * agents also save them with remember while they work). Only new ones, at most five a pass.
+ */
+async function extractMemories(projectId: string, billing: Billing, scope: { accountId: string; projectId: string }, transcript: string) {
+  if (!(await memorySettings(projectId, scope.accountId)).projectEnabled) return;
+  const known = await q<{ text: string }>(`select text from memories where scope = 'project' and project_id = $1`, [projectId]);
+  const res = await callModel(
+    scope,
+    "summarizer",
+    { complexity: 1, domains: [], needsVision: false },
+    {
+      system: `Extraes la memoria de un proyecto a partir de una conversación entre su dueño y el constructor de la app. Devuelve solo un array JSON, sin texto alrededor, con como mucho 5 objetos {"kind": "${MEMORY_KINDS.join('" | "')}", "text": "…"}: preferencias del dueño, decisiones de diseño o de producto, enfoques que rechazó y datos del negocio (precios, horarios, zonas, palabras prohibidas) que sigan importando en conversaciones futuras. Una frase corta por hecho, en el idioma del dueño. Nada de lo que ya está en la memoria, de tareas puntuales, de suposiciones ni de secretos. Si no hay nada, devuelve [].`,
+      messages: [{ role: "user", content: `Memoria actual:\n${known.map((k) => `- ${k.text}`).join("\n") || "(vacía)"}\n\nConversación:\n${transcript}` }],
+      maxTokens: 600,
+    },
+    { billing },
+  );
+  let facts: { kind?: string; text?: string }[] = [];
+  try {
+    facts = JSON.parse(/\[[\s\S]*\]/.exec(textOf(res.response.content))?.[0] ?? "[]");
+  } catch {
+    return;
+  }
+  for (const f of Array.isArray(facts) ? facts.slice(0, 5) : []) {
+    if (typeof f?.text !== "string" || typeof f.kind !== "string") continue;
+    await addMemory(projectId, scope.accountId, { scope: "project", kind: f.kind, text: f.text, source: "summary" }).catch(() => {});
+  }
 }
 
 // --- Plan validation -------------------------------------------------------------------------------
@@ -193,6 +226,8 @@ interface TurnState {
   request: string;
   images: Block[];
   context: string;
+  /** The "# Memoria" block, loaded once per turn. */
+  memory: string;
   signal: AbortSignal;
   emit: (e: AgentEvent) => void;
   wrote: boolean;
@@ -201,11 +236,13 @@ interface TurnState {
   credits: number;
 }
 
-function projectSection(p: Project, account: Account) {
+function projectSection(s: TurnState) {
+  const p = s.project;
   return [
-    `# This project\nName: ${p.name}\nDescription: ${p.description || "(none)"}\nOwner email: ${account.email}`,
+    `# This project\nName: ${p.name}\nDescription: ${p.description || "(none)"}\nOwner email: ${s.account.email}`,
     p.systemPrompt ? `# Owner's project instructions\n${p.systemPrompt}` : "",
     p.designPrompt ? `# Owner's design guidelines\n${p.designPrompt}` : "",
+    s.memory,
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -261,7 +298,14 @@ async function finishTask(s: TurnState, taskId: string, r: AgentResult | Error) 
 async function runLane(
   s: TurnState,
   task: { id: string; role: Role; goal: string; files: string[]; dependsOn: string[] },
-  spec: { system: string; messages: LlmMessage[]; tools: BuilderTool[]; ctx: ToolContext; routing: { complexity: number; domains: string[]; needsVision: boolean } },
+  spec: {
+    system: string;
+    messages: LlmMessage[];
+    tools: BuilderTool[];
+    ctx: ToolContext;
+    routing: { complexity: number; domains: string[]; needsVision: boolean };
+    requiredTool?: string;
+  },
 ): Promise<AgentResult> {
   await insertTask(s, task);
   try {
@@ -270,6 +314,7 @@ async function runLane(
       billing: s.billing,
       role: task.role,
       routing: spec.routing,
+      requiredTool: spec.requiredTool,
       system: spec.system,
       messages: spec.messages,
       tools: spec.tools,
@@ -297,15 +342,35 @@ async function runLane(
   }
 }
 
+/** Files handed to an agent up front, so it does not spend steps reading them. */
+const preloadSection = (files: Record<string, string>, paths: string[]) =>
+  paths.length ? `# Archivos relevantes (ya leídos; no hace falta volver a pedirlos)\n${paths.map((p) => `### ${p}\n\`\`\`\n${files[p]}\n\`\`\``).join("\n\n")}` : "";
+
+const isNewApp = (s: TurnState) => s.features.intent === "new_app";
+
 async function runFast(s: TurnState): Promise<void> {
   const ctx: ToolContext = { account: s.account, projectId: s.project.id, author: "builder" };
+  // Like the specialists: the map and the files the request most likely touches, already read.
+  const files = await readAllFiles(s.project.id);
+  const map = projectMap(files, await describeSchema(s.project.id, true));
+  // Words in the request pick most files; the request's kind adds the obvious ones.
+  const focus = isNewApp(s) ? ["pages/", "components/", "base.css"] : s.features.intent === "style" || s.features.domains.includes("ui") ? ["base.css"] : [];
+  const preload = selectContext(files, s.request, focus, 20_000);
   const r = await runLane(
     s,
     { id: "fast", role: "fast", goal: s.request.slice(0, 500), files: [], dependsOn: [] },
     {
-      system: `${ROLE_PROMPTS.fast}\n\n${projectSection(s.project, s.account)}`,
-      messages: [{ role: "user", content: [{ type: "text", text: [s.context, `## Petición\n${s.request}`].filter(Boolean).join("\n\n") }, ...s.images] }],
-      tools: builderTools,
+      system: `${ROLE_PROMPTS.fast}\n\n${projectSection(s)}`,
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: [s.context, `## Petición\n${s.request}`, isNewApp(s) ? FIRST_BUILD : "", map, preloadSection(files, preload)].filter(Boolean).join("\n\n") },
+            ...s.images,
+          ],
+        },
+      ],
+      tools: FAST_TOOLS,
       ctx,
       routing: { complexity: s.features.complexity, domains: s.features.domains, needsVision: s.features.needsVision },
     },
@@ -321,14 +386,14 @@ async function runFast(s: TurnState): Promise<void> {
       s,
       { id: `fix${round}`, role: "fast", goal: "Arreglar los errores de compilación", files: [], dependsOn: [] },
       {
-        system: `${ROLE_PROMPTS.fast}\n\n${projectSection(s.project, s.account)}`,
+        system: `${ROLE_PROMPTS.fast}\n\n${projectSection(s)}`,
         messages: [
           {
             role: "user",
             content: `## Petición del dueño (ya hecha)\n${s.request}\n\n## Lo que hiciste\n${reply}\n\n## La app ya no compila\n${formatProblems(broken)}\n\nArregla la causa con el menor cambio posible y comprueba con get_problems. Responde en una o dos frases qué arreglaste.`,
           },
         ],
-        tools: builderTools,
+        tools: FAST_TOOLS,
         ctx: fixCtx,
         routing: { complexity: 2, domains: s.features.domains, needsVision: false },
       },
@@ -341,12 +406,6 @@ async function runFast(s: TurnState): Promise<void> {
   if (reply !== (r.text || "Listo.")) s.emit({ type: "text", text: reply.slice((r.text || "Listo.").length).trim() });
 }
 
-/**
- * The team path. `given` is a plan approved earlier in Plan mode (no re-planning);
- * `planOnly` stops after planning so the owner can review the plan first.
- */
-const CHAT_TOOLS = ["project_map", "read_files", "find_symbol", "related_files", "search_code", "describe_database", "query_database", "get_problems", "get_logs", "list_secrets", "fetch_url"];
-
 /** Chat mode: answers, explains and investigates with read-only tools; changes nothing. */
 async function runChat(s: TurnState): Promise<void> {
   const ctx: ToolContext = { account: s.account, projectId: s.project.id, author: "builder" };
@@ -354,9 +413,9 @@ async function runChat(s: TurnState): Promise<void> {
     s,
     { id: "chat", role: "chat", goal: s.request.slice(0, 500), files: [], dependsOn: [] },
     {
-      system: `${ROLE_PROMPTS.fast}\n\n# Chat mode\nThe owner wants to talk, not build: answer, explain, investigate (code, data, logs, problems) and propose. You cannot change files or data in this mode. When you suggest changes, describe them as concrete steps and end by suggesting Build mode (or Plan mode for big ones). Keep answers short and in the owner's language.\n\n${projectSection(s.project, s.account)}`,
+      system: `${ROLE_PROMPTS.chat}\n\n${projectSection(s)}`,
       messages: [{ role: "user", content: [{ type: "text", text: [s.context, `## Pregunta\n${s.request}`].filter(Boolean).join("\n\n") }, ...s.images] }],
-      tools: tools(CHAT_TOOLS),
+      tools: tools(ROLE_TOOLS.chat),
       ctx,
       routing: { complexity: Math.min(3, s.features.complexity), domains: s.features.domains, needsVision: s.features.needsVision },
     },
@@ -380,31 +439,43 @@ export async function pendingPlan(projectId: string): Promise<{ turnId: string; 
   return row ? { turnId: row.turn_id, plan: row.plan } : null;
 }
 
+/**
+ * The team path. `given` is a plan approved earlier in Plan mode (no re-planning);
+ * `planOnly` stops after planning so the owner can review the plan first.
+ */
 async function runTeam(s: TurnState, opts: { given?: Plan; planOnly?: boolean } = {}): Promise<boolean> {
   const files = await readAllFiles(s.project.id);
   const map = projectMap(files, await describeSchema(s.project.id, true));
-  const head = projectSection(s.project, s.account);
+  const head = projectSection(s);
 
   // 1. Plan.
   let plan: Plan | null = opts.given ?? null;
   const submitPlan: BuilderTool = {
     name: "submit_plan",
-    description: "Entrega el plan final (una sola vez). tasks: 1–6 tareas con id, role (data|backend|ui), goal, files (rutas exactas o carpetas terminadas en /) y depends_on.",
+    description: "Entrega el plan final, una sola vez y al terminar de planificar. Es la única forma de que el equipo empiece a trabajar.",
     input_schema: {
       type: "object",
       properties: {
         summary: { type: "string", description: "Para el dueño, en su idioma: qué se va a construir (2–4 frases)." },
-        contract: { type: "string", description: "Contrato compartido: endpoints (método, ruta, entrada, salida), tablas y columnas, tipos." },
+        contract: {
+          type: "string",
+          description: "Contrato compartido, completo: cada endpoint (método, ruta, JSON de entrada y de salida), cada tabla con sus columnas y tipos, y los nombres de los tipos compartidos.",
+        },
         tasks: {
           type: "array",
+          description: "De 1 a 6 tareas; menos es mejor.",
           items: {
             type: "object",
             properties: {
-              id: { type: "string" },
-              role: { type: "string", enum: ["data", "backend", "ui"] },
-              goal: { type: "string" },
-              files: { type: "array", items: { type: "string" } },
-              depends_on: { type: "array", items: { type: "string" } },
+              id: { type: "string", description: "Identificador corto y único, p. ej. db, api, pages." },
+              role: { type: "string", enum: ["data", "backend", "ui"], description: "Especialista que hace la tarea." },
+              goal: { type: "string", description: "Qué tiene que construir, con el detalle suficiente para hacerlo sin preguntar." },
+              files: {
+                type: "array",
+                items: { type: "string" },
+                description: 'Archivos que solo esta tarea puede escribir: rutas exactas o carpetas terminadas en "/". Dos tareas nunca comparten un archivo.',
+              },
+              depends_on: { type: "array", items: { type: "string" }, description: "ids de las tareas que deben terminar antes (las de datos van primero)." },
             },
             required: ["id", "role", "goal", "files"],
           },
@@ -428,12 +499,13 @@ async function runTeam(s: TurnState, opts: { given?: Plan; planOnly?: boolean } 
       messages: [
         {
           role: "user",
-          content: [{ type: "text", text: [s.context, `## Petición del dueño\n${s.request}`, map, "Planifica y llama a submit_plan."].filter(Boolean).join("\n\n") }, ...s.images],
+          content: [{ type: "text", text: [s.context, `## Petición del dueño\n${s.request}`, isNewApp(s) ? FIRST_BUILD : "", map, "El mapa del proyecto ya está arriba: no llames a project_map. Planifica y llama a submit_plan."].filter(Boolean).join("\n\n") }, ...s.images],
         },
       ],
       // In Plan mode nothing is written until the owner approves.
       tools: [...tools(opts.planOnly ? ROLE_TOOLS.planner.filter((n) => !/write|edit/.test(n)) : ROLE_TOOLS.planner), submitPlan],
       ctx: plannerCtx,
+      requiredTool: "submit_plan",
       routing: { complexity: s.features.complexity, domains: s.features.domains, needsVision: s.features.needsVision },
     },
   );
@@ -476,8 +548,9 @@ async function runTeam(s: TurnState, opts: { given?: Plan; planOnly?: boolean } 
       `# Plan del equipo\n${overview}`,
       extra,
       `# Petición original del dueño\n${s.request}`,
+      isNewApp(s) && !extra && t.role !== "backend" ? FIRST_BUILD : "",
       projectMap(current, await describeSchema(s.project.id, true)),
-      preload.length ? `# Archivos relevantes (ya leídos; no hace falta volver a pedirlos)\n${preload.map((p) => `### ${p}\n\`\`\`\n${current[p]}\n\`\`\``).join("\n\n")}` : "",
+      preloadSection(current, preload),
     ]
       .filter(Boolean)
       .join("\n\n");
@@ -500,17 +573,23 @@ async function runTeam(s: TurnState, opts: { given?: Plan; planOnly?: boolean } 
     let got: Review | null = null;
     const reportReview: BuilderTool = {
       name: "report_review",
-      description: "Entrega el veredicto (una sola vez): ok, summary y issues (role data|backend|ui, files, problem, fix).",
+      description: "Entrega el veredicto de la revisión, una sola vez y al terminar de revisar.",
       input_schema: {
         type: "object",
         properties: {
-          ok: { type: "boolean" },
-          summary: { type: "string" },
+          ok: { type: "boolean", description: "true solo si compila, los endpoints responden bien y no hay problemas de seguridad. Si es false, issues no puede ir vacío." },
+          summary: { type: "string", description: "Qué se comprobó y qué se encontró, en 1–3 frases." },
           issues: {
             type: "array",
+            description: "Solo defectos reales, uno por problema.",
             items: {
               type: "object",
-              properties: { role: { type: "string", enum: ["data", "backend", "ui"] }, files: { type: "array", items: { type: "string" } }, problem: { type: "string" }, fix: { type: "string" } },
+              properties: {
+                role: { type: "string", enum: ["data", "backend", "ui"], description: "Especialista que debe arreglarlo." },
+                files: { type: "array", items: { type: "string" }, description: "Archivos afectados." },
+                problem: { type: "string", description: "Qué está mal y cómo se nota." },
+                fix: { type: "string", description: "Cómo arreglarlo, en concreto." },
+              },
               required: ["role", "problem"],
             },
           },
@@ -519,6 +598,7 @@ async function runTeam(s: TurnState, opts: { given?: Plan; planOnly?: boolean } 
       },
       async run(input) {
         const i = input as Review;
+        if (!i.ok && !(Array.isArray(i.issues) && i.issues.length)) throw new Error("Con ok=false hace falta al menos un issue (role, problem, fix). Vuelve a llamar a report_review.");
         got = {
           ok: !!i.ok,
           summary: String(i.summary ?? ""),
@@ -528,7 +608,7 @@ async function runTeam(s: TurnState, opts: { given?: Plan; planOnly?: boolean } 
       },
     };
     const reports = [...results.entries(), ...fixResults.map((f) => [f.task.id, f.result] as const)]
-      .map(([id, r]) => `## ${id}\n${r instanceof Error ? `FALLÓ: ${r.message}` : r.text.slice(0, 2500)}`)
+      .map(([id, r]) => `## ${id}\n${r instanceof Error ? `FALLÓ: ${r.message}` : `Archivos tocados: ${r.written.join(", ") || "ninguno"}\n${r.text.slice(0, 2500)}`}`)
       .join("\n\n");
     await runLane(
       s,
@@ -543,6 +623,7 @@ async function runTeam(s: TurnState, opts: { given?: Plan; planOnly?: boolean } 
         ],
         tools: [...tools(ROLE_TOOLS.qa), reportReview],
         ctx: { account: s.account, projectId: s.project.id, author: "builder", owned: [] },
+        requiredTool: "report_review",
         routing: { complexity: s.features.complexity, domains: s.features.domains, needsVision: false },
       },
     ).catch(() => null);
@@ -648,6 +729,7 @@ export async function runBuilderTurn(
     request: userText,
     images: [],
     context: "",
+    memory: "",
     signal: abort.signal,
     emit,
     wrote: false,
@@ -664,6 +746,7 @@ export async function runBuilderTurn(
     await save(projectId, { role: "user", content: [{ type: "text", text }] }, turnId);
     s.images = await imageBlocks(projectId, text);
     s.context = await turnContext(projectId, turnId);
+    s.memory = await memorySection(projectId, account.id);
     // Like a developer glancing at the console first: what is broken in the preview right now.
     watchProblems(projectId);
     await recheckBuild(projectId).catch(() => {});

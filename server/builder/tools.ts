@@ -8,7 +8,12 @@ import type { Account } from "../platform/accounts.js";
 import { readLogs } from "../platform/events.js";
 import * as projects from "../platform/projects.js";
 import { formatProblems, listProblems, recheckBuild, watchProblems } from "../platform/problems.js";
+import { ensureDeps, MANIFEST, readDeps, resolvePackage, withManifestLock, writeDeps } from "../runtime/deps.js";
 import { checkProject, compileServerModule, endpointRoutes, formatProblem, jobFiles, pageRoutes } from "../runtime/bundler.js";
+import { runBrowserTest, type BrowserStep } from "../runtime/browser.js";
+import { runQuickScan } from "../platform/security.js";
+import { formatFinding } from "../runtime/securityScan.js";
+import { addMemory, deleteMemory, memorySettings, updateMemory, MEMORY_KINDS } from "../platform/memory.js";
 import { runInSandbox } from "../runtime/sandbox.js";
 import { publishProject } from "../runtime/publish.js";
 import { previewOrigin, previewUrl } from "../runtime/urls.js";
@@ -50,11 +55,14 @@ const noteWrite = (ctx: ToolContext, ...paths: string[]) => {
   for (const p of paths) (ctx.written ??= new Set()).add(p);
 };
 
+/** A tool's answer: text, optionally with images the model gets to see (screenshots). */
+export type ToolOutput = string | { text: string; images: { media_type: string; data: string }[] };
+
 export interface BuilderTool {
   name: string;
   description: string;
   input_schema: Record<string, unknown>;
-  run(input: any, ctx: ToolContext): Promise<string>;
+  run(input: any, ctx: ToolContext): Promise<ToolOutput>;
 }
 
 const obj = (properties: Record<string, unknown>, required: string[] = []) => ({ type: "object", properties, required });
@@ -151,21 +159,39 @@ export const builderTools: BuilderTool[] = [
   {
     name: "edit_file",
     description:
-      "Reemplaza un fragmento exacto de un archivo. old_text debe aparecer una sola vez (o usa replace_all). Úsalo para cambios pequeños en archivos grandes.",
+      'Reemplaza fragmentos exactos de un archivo existente. Un cambio: old_text + new_text. Varios cambios en el mismo archivo: "edits", en una sola llamada; se aplican en orden y, si uno falla, no se guarda ninguno. Cada old_text debe aparecer una sola vez (o usa replace_all).',
     input_schema: obj(
-      { path: str("Ruta"), old_text: str("Texto exacto a reemplazar"), new_text: str("Texto nuevo"), replace_all: { type: "boolean" } },
-      ["path", "old_text", "new_text"],
+      {
+        path: str("Ruta"),
+        old_text: str("Texto exacto a reemplazar (para un solo cambio)"),
+        new_text: str("Texto nuevo (para un solo cambio)"),
+        replace_all: { type: "boolean", description: "Reemplazar todas las apariciones de old_text, no solo una" },
+        edits: {
+          type: "array",
+          description: "Varios cambios en orden, en lugar de old_text/new_text",
+          items: obj({ old_text: str("Texto exacto a reemplazar"), new_text: str("Texto nuevo"), replace_all: { type: "boolean", description: "Reemplazar todas las apariciones" } }, ["old_text", "new_text"]),
+        },
+      },
+      ["path"],
     ),
-    async run(i: { path: string; old_text: string; new_text: string; replace_all?: boolean }, ctx) {
+    async run(i: { path: string; old_text?: string; new_text?: string; replace_all?: boolean; edits?: { old_text: string; new_text: string; replace_all?: boolean }[] }, ctx) {
       assertOwned(ctx, i.path);
-      const c = await projects.readFile(ctx.projectId, i.path);
+      const edits = i.edits?.length ? i.edits : i.old_text !== undefined && i.new_text !== undefined ? [{ old_text: i.old_text, new_text: i.new_text, replace_all: i.replace_all }] : [];
+      if (!edits.length) throw new Error("Hace falta old_text y new_text, o una lista edits.");
+      let c = await projects.readFile(ctx.projectId, i.path);
       if (c === undefined) throw new Error(`No existe ${i.path}`);
-      const count = c.split(i.old_text).length - 1;
-      if (count === 0) throw new Error("old_text no aparece en el archivo. Lee el archivo y vuelve a intentarlo con el texto exacto.");
-      if (count > 1 && !i.replace_all) throw new Error(`old_text aparece ${count} veces; añade contexto o usa replace_all.`);
-      await projects.writeFile(ctx.projectId, i.path, i.replace_all ? c.split(i.old_text).join(i.new_text) : c.replace(i.old_text, () => i.new_text), ctx.author, ctx.actor);
+      let total = 0;
+      for (const [n, e] of edits.entries()) {
+        const which = edits.length > 1 ? ` (cambio ${n + 1})` : "";
+        const count = e.old_text ? c.split(e.old_text).length - 1 : 0;
+        if (count === 0) throw new Error(`old_text${which} no aparece en el archivo. Lee el archivo y vuelve a intentarlo con el texto exacto. No se guardó nada.`);
+        if (count > 1 && !e.replace_all) throw new Error(`old_text${which} aparece ${count} veces; añade contexto o usa replace_all. No se guardó nada.`);
+        c = e.replace_all ? c.split(e.old_text).join(e.new_text) : c.replace(e.old_text, () => e.new_text);
+        total += e.replace_all ? count : 1;
+      }
+      await projects.writeFile(ctx.projectId, i.path, c, ctx.author, ctx.actor);
       noteWrite(ctx, i.path);
-      return `Editado ${i.path} (${count} reemplazo${count > 1 ? "s" : ""})`;
+      return `Editado ${i.path} (${total} reemplazo${total > 1 ? "s" : ""})`;
     },
   },
   {
@@ -192,10 +218,57 @@ export const builderTools: BuilderTool[] = [
     },
   },
   {
+    name: "add_dependency",
+    description:
+      "Instala un paquete de npm para la app (navegador o endpoints): fija la versión exacta en package.json y lo instala sin ejecutar scripts. Hazlo antes de importarlo. react, react-dom, zod y @forja/client ya vienen incluidos. Elige paquetes pequeños y conocidos; no instales nada que se resuelva con unas pocas líneas.",
+    input_schema: obj(
+      {
+        name: str("Nombre en npm, p. ej. date-fns o @tanstack/react-table"),
+        version: str("Versión exacta (3.6.0) o etiqueta (latest). Por defecto, la última."),
+      },
+      ["name"],
+    ),
+    async run(i: { name: string; version?: string }, ctx) {
+      const pkg = await resolvePackage(i.name.trim(), i.version?.trim() || undefined);
+      // package.json is shared by every agent of the turn: this tool may edit it whoever owns it.
+      const before = await withManifestLock(ctx.projectId, async () => {
+        const files = await projects.readAllFiles(ctx.projectId);
+        const deps = readDeps(files);
+        const prev = deps[pkg.name];
+        const next = { ...deps, [pkg.name]: pkg.version };
+        await ensureDeps(next);
+        await projects.writeFile(ctx.projectId, MANIFEST, writeDeps(files, next), ctx.author, ctx.actor);
+        noteWrite(ctx, MANIFEST);
+        return prev;
+      });
+      return [
+        `${before ? `Actualizado ${pkg.name} ${before} → ${pkg.version}` : `Instalado ${pkg.name}@${pkg.version}`}${pkg.description ? ` — ${pkg.description}` : ""}.`,
+        `Impórtalo con import … from "${pkg.name}".`,
+        ...pkg.warnings.map((w) => `Aviso: ${w}`),
+      ].join("\n");
+    },
+  },
+  {
+    name: "remove_dependency",
+    description: "Quita un paquete de npm de package.json. Antes elimina sus imports, o la compilación fallará.",
+    input_schema: obj({ name: str("Nombre del paquete") }, ["name"]),
+    async run(i: { name: string }, ctx) {
+      return withManifestLock(ctx.projectId, async () => {
+        const files = await projects.readAllFiles(ctx.projectId);
+        const deps = readDeps(files);
+        if (!(i.name in deps)) return `${i.name} no estaba instalado. Paquetes: ${Object.keys(deps).join(", ") || "ninguno"}.`;
+        delete deps[i.name];
+        await projects.writeFile(ctx.projectId, MANIFEST, writeDeps(files, deps), ctx.author, ctx.actor);
+        noteWrite(ctx, MANIFEST);
+        return `Quitado ${i.name}.`;
+      });
+    },
+  },
+  {
     name: "search_code",
     description: "Busca un texto o expresión regular en todos los archivos del proyecto y devuelve las líneas que coinciden (archivo:línea).",
     input_schema: obj(
-      { pattern: str("Texto o regex (sin barras)"), path_prefix: str("Limitar a rutas que empiecen así, p. ej. endpoints/"), ignore_case: { type: "boolean" } },
+      { pattern: str("Texto o regex (sin barras)"), path_prefix: str("Limitar a rutas que empiecen así, p. ej. endpoints/"), ignore_case: { type: "boolean", description: "Sin distinguir mayúsculas" } },
       ["pattern"],
     ),
     async run(i: { pattern: string; path_prefix?: string; ignore_case?: boolean }, ctx) {
@@ -221,10 +294,10 @@ export const builderTools: BuilderTool[] = [
       "Llama a un endpoint de la vista previa para comprobar que funciona, como visitante anónimo o como un usuario existente (as_user_email). Devuelve el estado HTTP y el cuerpo. Usa datos reales: no lo uses para borrar datos del dueño.",
     input_schema: obj(
       {
-        method: { type: "string", enum: ["GET", "POST"] },
+        method: { type: "string", enum: ["GET", "POST"], description: "GET para lecturas, POST para escrituras" },
         route: str("Ruta del endpoint sin /_api/, p. ej. todos/list"),
-        query: { type: "object", description: "Parámetros de la URL (GET)" },
-        body: { type: "object", description: "Cuerpo JSON (POST)" },
+        query: { type: "object", additionalProperties: true, description: 'Parámetros de la URL para GET, p. ej. {"q": "pan"}' },
+        body: { type: "object", additionalProperties: true, description: 'Cuerpo JSON para POST, p. ej. {"title": "Prueba"}' },
         as_user_email: str("Correo de un usuario de la app para llamar con su sesión"),
       },
       ["method", "route"],
@@ -249,6 +322,94 @@ export const builderTools: BuilderTool[] = [
       } finally {
         if (session) await endTestSession(ctx.projectId, session.token);
       }
+    },
+  },
+  {
+    name: "browser_test",
+    description:
+      "Abre la vista previa en un navegador real (Chromium sin interfaz) y la usa como un visitante: navega, hace clic, escribe y comprueba textos. Devuelve el resultado de cada paso, los errores de consola, las peticiones fallidas, el texto visible y capturas de pantalla que puedes ver. Úsalo para probar flujos de interfaz (formularios, navegación, estados vacíos y de error) y el diseño en móvil; para la API sola, call_endpoint es más rápido. Se para en el primer paso que falla y adjunta una captura. Usa datos de prueba claramente marcados: la base de datos es real.",
+    input_schema: obj(
+      {
+        steps: {
+          type: "array",
+          description:
+            'Pasos en orden (máx. 25). Selectores: CSS o de Playwright, p. ej. "button:has-text(Guardar)", "text=Entrar", "input[name=email]". Ejemplo: [{"action":"goto","path":"/login"},{"action":"fill","selector":"input[type=email]","text":"ana@ejemplo.com"},{"action":"click","selector":"button[type=submit]"},{"action":"expect_text","text":"Hola"},{"action":"screenshot"}]',
+          items: {
+            type: "object",
+            properties: {
+              action: { type: "string", enum: ["goto", "click", "fill", "press", "select", "wait_for", "expect_text", "screenshot"] },
+              path: str("goto: ruta de la app, p. ej. /notes?filtro=hoy"),
+              selector: str("click, fill, press, select, wait_for: el elemento"),
+              text: str("fill: lo que se escribe; wait_for y expect_text: el texto que debe aparecer"),
+              key: str("press: tecla, p. ej. Enter o Escape"),
+              value: str("select: valor de la opción"),
+              full_page: { type: "boolean", description: "screenshot: la página entera en vez de la pantalla visible" },
+            },
+            required: ["action"],
+          },
+        },
+        viewport: { type: "string", enum: ["desktop", "tablet", "mobile"], description: "Tamaño de pantalla (por defecto desktop)" },
+        as_user_email: str("Correo de un usuario de la app para navegar con su sesión iniciada"),
+      },
+      ["steps"],
+    ),
+    async run(i: { steps: BrowserStep[]; viewport?: "desktop" | "tablet" | "mobile"; as_user_email?: string }, ctx) {
+      const project = (await projects.getProject(ctx.projectId))!;
+      const session = i.as_user_email ? await testSession(ctx.projectId, i.as_user_email) : null;
+      try {
+        return await runBrowserTest(project, {
+          steps: i.steps,
+          viewport: i.viewport,
+          session: session ? { name: sessionCookie(ctx.projectId), token: session.token } : undefined,
+        });
+      } finally {
+        if (session) await endTestSession(ctx.projectId, session.token);
+      }
+    },
+  },
+  {
+    name: "security_scan",
+    description:
+      "Pasa el escaneo rápido de seguridad al código actual: secretos en páginas o escritos en el código, SQL construido con texto, endpoints que cambian datos sin sesión, endpoints de admin sin rol, POST sin validar, importes que vienen del navegador, HTML sin escapar. Es el mismo que bloquea la publicación (solo los críticos bloquean). Úsalo tras tocar endpoints o antes de publicar, y arregla lo que encuentre.",
+    input_schema: obj({}),
+    async run(_i, ctx) {
+      const open = (await runQuickScan(ctx.projectId)).filter((f) => !f.ignored);
+      return open.length ? `${open.length} hallazgo(s):\n${open.map(formatFinding).join("\n")}` : "Sin hallazgos en el escaneo rápido.";
+    },
+  },
+  {
+    name: "remember",
+    description:
+      "Guarda un hecho para las próximas conversaciones: una preferencia del dueño (tono, idioma, estilo), una decisión de diseño o de producto, un enfoque que rechazó (para no volver a proponerlo) o un dato del negocio (precios, horarios, zonas, palabras prohibidas). Un solo hecho por llamada, corto y concreto. No guardes lo que ya dice el código, tareas de este turno ni secretos. scope \"personal\" solo para preferencias de la persona que valen en todos sus proyectos; lo demás es del proyecto. Para corregir una memoria existente pasa su id en replaces.",
+    input_schema: obj(
+      {
+        text: str("El hecho, en una frase y en el idioma del dueño"),
+        kind: { type: "string", enum: MEMORY_KINDS, description: "preference, decision, rejected (enfoque descartado) o business (dato del negocio)" },
+        scope: { type: "string", enum: ["project", "personal"], description: "Por defecto project" },
+        replaces: str("Id de la memoria que este hecho corrige (opcional)"),
+      },
+      ["text", "kind"],
+    ),
+    async run(i: { text: string; kind: string; scope?: "project" | "personal"; replaces?: string }, ctx) {
+      const scope = i.scope === "personal" ? "personal" : "project";
+      const on = await memorySettings(ctx.projectId, ctx.account.id);
+      if (!(scope === "project" ? on.projectEnabled : on.personalEnabled)) return `La memoria ${scope === "project" ? "del proyecto" : "personal"} está apagada: no se guardó.`;
+      if (i.replaces) {
+        const m = await updateMemory(ctx.projectId, ctx.account.id, i.replaces, { text: i.text, kind: i.kind });
+        if (!m) throw new Error(`No hay ninguna memoria con id ${i.replaces}.`);
+        return `Memoria ${m.id} corregida.`;
+      }
+      const { memory, created } = await addMemory(ctx.projectId, ctx.account.id, { scope, kind: i.kind, text: i.text, source: "agent" });
+      return created ? `Guardado en memoria (${memory.id}).` : `Ya estaba en memoria (${memory.id}).`;
+    },
+  },
+  {
+    name: "forget",
+    description: "Borra una memoria que ya no es cierta o que el dueño pidió olvidar. Usa el id que aparece en la sección Memoria.",
+    input_schema: obj({ id: str("Id de la memoria") }, ["id"]),
+    async run(i: { id: string }, ctx) {
+      if (!(await deleteMemory(ctx.projectId, ctx.account.id, i.id))) throw new Error(`No hay ninguna memoria con id ${i.id}.`);
+      return `Memoria ${i.id} borrada.`;
     },
   },
   {
@@ -339,7 +500,10 @@ export const builderTools: BuilderTool[] = [
     name: "get_logs",
     description:
       "Lee los registros recientes: peticiones a endpoints, errores del servidor, errores de la consola del navegador de la vista previa, correos y tareas. Primer paso ante un 500 o una pantalla en blanco.",
-    input_schema: obj({ errors_only: { type: "boolean" }, limit: { type: "number" } }),
+    input_schema: obj({
+      errors_only: { type: "boolean", description: "Solo errores" },
+      limit: { type: "integer", description: "Cuántas entradas, las más recientes (por defecto 60)" },
+    }),
     async run(i: { errors_only?: boolean; limit?: number }, ctx) {
       const logs = readLogs(ctx.projectId, { level: i.errors_only ? "error" : undefined, limit: i.limit ?? 60 });
       return clip(logs.map((l) => `${l.at} [${l.env}/${l.source}/${l.level}] ${l.message}`).join("\n") || "Sin registros.");
@@ -399,7 +563,7 @@ export const builderTools: BuilderTool[] = [
   {
     name: "run_job",
     description: "Ejecuta una tarea de jobs/<nombre>.ts una vez, ahora, con el código actual (sobre los datos reales).",
-    input_schema: obj({ name: str("Nombre de la tarea"), payload: { description: "Datos para ctx.payload" } }, ["name"]),
+    input_schema: obj({ name: str("Nombre de la tarea"), payload: { type: "object", additionalProperties: true, description: "Datos para ctx.payload (opcional)" } }, ["name"]),
     async run(i: { name: string; payload?: unknown }, ctx) {
       await runJob(ctx.projectId, "preview", i.name, i.payload ?? null, "manual");
       return `Tarea ${i.name} terminada. Revisa get_logs para su salida.`;

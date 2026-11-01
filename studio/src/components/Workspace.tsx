@@ -6,6 +6,7 @@ import type { SelectedElement } from "./Chat";
 import { Avatar, copyText, Modal, Switch } from "./ui";
 import { GithubSection } from "./GitHub";
 import { ProjectModels } from "./Models";
+import { MemorySection } from "./Memory";
 
 // --- Preview canvas -----------------------------------------------------------------------
 
@@ -747,6 +748,8 @@ export function ProjectSettings({ project, onChange }: { project: Project; onCha
             </button>
           </div>
         </section>
+
+        <MemorySection projectId={project.id} />
 
         <section className="card section">
           <h3>☺ Colaboradores</h3>

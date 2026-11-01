@@ -51,14 +51,14 @@ const PROJECT_COLS = `id, owner_id as "ownerId", name, description, slug, visibi
   created_at as "createdAt", updated_at as "updatedAt"`;
 
 /** The only places a project file may live; mirrors the conventions the builder is taught. */
-const ALLOWED = /^(pages|components|helpers|endpoints|jobs|static)\/[A-Za-z0-9_.$\-/[\]]+$|^base\.css$/;
+const ALLOWED = /^(pages|components|helpers|endpoints|jobs|static)\/[A-Za-z0-9_.$\-/[\]]+$|^base\.css$|^package\.json$/;
 
 /** Working notes the builder keeps for itself; never served or published. */
 export const isDevFile = (path: string) => path.startsWith("static/__dev/");
 
 export function assertValidPath(path: string) {
   if (!ALLOWED.test(path) || path.includes("..") || path.includes("//")) {
-    throw new Error(`Ruta no válida: "${path}". Usa pages/, components/, helpers/, endpoints/, jobs/, static/ o base.css.`);
+    throw new Error(`Ruta no válida: "${path}". Usa pages/, components/, helpers/, endpoints/, jobs/, static/, base.css o package.json.`);
   }
 }
 

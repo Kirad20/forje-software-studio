@@ -501,6 +501,7 @@ export function Chat({
   insert,
   problems = [],
   fixNonce = 0,
+  outbox = null,
   reloadKey = 0,
 }: {
   projectId: string;
@@ -520,6 +521,8 @@ export function Chat({
   problems?: Problem[];
   /** Bumped when the preview's "Intentar arreglar" button is pressed. */
   fixNonce?: number;
+  /** A message to send now in build mode, from another panel; a new nonce sends it. */
+  outbox?: { nonce: number; text: string } | null;
   /** Bumped when something outside a turn adds to the chat (a commit from GitHub). */
   reloadKey?: number;
 }) {
@@ -648,6 +651,11 @@ export function Chat({
     stick.current = false;
     el.scrollIntoView({ block: "center" });
   }, [items, linked]);
+
+  useEffect(() => {
+    if (outbox) void send(outbox.text, { mode: "build" });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [outbox?.nonce]);
 
   useEffect(() => {
     void load().then((r) => {

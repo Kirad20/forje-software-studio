@@ -121,6 +121,24 @@ try {
   const done = events.find((e) => e.type === "done");
   ok(done && done.usd > 0 && done.baselineUsd > done.usd && done.cachedTokens > 0, "turn reports cost, cache use and savings vs. the strongest model", JSON.stringify(done));
   ok(events.some((e) => e.type === "text" && !e.taskId && /notas/.test(e.text)), "a single final reply for the owner");
+  const teamCalls = llmLog.filter((l) => ["planner", "data", "backend", "ui"].includes(l.role));
+  ok(teamCalls.some((l) => l.role === "planner" && l.firstBuild) && teamCalls.some((l) => l.role === "ui" && l.firstBuild), "a new app gets the first-version guidance", JSON.stringify(teamCalls.map((l) => [l.role, l.firstBuild])));
+  ok(!teamCalls.some((l) => l.role === "backend" && l.firstBuild), "the backend does not get the design-only first-version guidance");
+  ok(llmLog.some((l) => l.role === "qa" && l.sawImage), "QA sees the browser_test screenshot", JSON.stringify(llmLog.filter((l) => l.role === "qa")));
+
+  // Deep security review: a read-only agent in the background; its findings land in the Security view.
+  const deep = await req("POST", `/api/projects/${project.id}/security/deep`, {});
+  ok(deep.status === 202 && deep.json.deep?.status === "running", "deep security review starts in the background", JSON.stringify(deep.json).slice(0, 300));
+  ok((await req("POST", `/api/projects/${project.id}/security/deep`, {})).status === 409, "only one deep review at a time");
+  let sec = deep.json;
+  for (let i = 0; i < 50 && sec.deep?.status === "running"; i++) {
+    await new Promise((r) => setTimeout(r, 200));
+    sec = (await req("GET", `/api/projects/${project.id}/security`)).json;
+  }
+  const deepFinding = sec.deep?.findings?.[0];
+  ok(sec.deep?.status === "done" && deepFinding?.source === "deep" && deepFinding.severity === "high" && /^[0-9a-f]{12}$/.test(deepFinding.id), "deep review reports its findings", JSON.stringify(sec.deep).slice(0, 400));
+  ok(sec.deep.summary.includes("Revisé"), "deep review keeps the reviewer's summary");
+  ok(sec.quick?.status === "done", "the reviewer ran the quick scan as a tool");
 
   // Lanes: backend and ui overlapped in time (they only depend on data).
   const chat = (await req("GET", `/api/projects/${project.id}/chat`)).json;
@@ -159,6 +177,8 @@ try {
   ok(fast.find((e) => e.type === "route")?.fastPath === true, "small change takes the fast path");
   ok(llmLog.slice(before).some((l) => l.model === "fake-flaky") && llmLog.slice(before).some((l) => l.model === "fake-mid" && l.role === "fast"), "a failing model falls back to the next one");
   ok(fast.some((e) => e.type === "text" && /verde/.test(e.text)) && !fast.some((e) => e.type === "error"), "the fast agent finished the change", JSON.stringify(fast.filter((e) => e.type === "error")));
+  const fastCall = llmLog.slice(before).find((l) => l.role === "fast");
+  ok(fastCall?.hasMap && fastCall.preloaded && !fastCall.firstBuild, "the fast agent gets the project map and the relevant files up front", JSON.stringify(fastCall));
   const fastRouter = (await req("GET", `/api/projects/${project.id}/router`)).json;
   ok(fastRouter.decisions.slice(0, 3).some((d) => d.modelId === "openai:fake-mid"), "fallback decision is logged");
 
@@ -169,6 +189,12 @@ try {
   ok(chatTurn.some((e) => e.type === "route" && e.mode === "chat") && chatTurn.some((e) => e.type === "tool_start" && e.name === "get_problems"), "chat mode answers with read-only tools", JSON.stringify(chatTurn.filter((e) => e.type !== "text")));
   ok(chatTurn.some((e) => e.type === "text" && /Respuesta de chat/.test(e.text)), "chat mode replies");
   ok(JSON.stringify((await req("GET", `/api/projects/${project.id}/files`)).json.files.map((f) => f.path)) === filesBefore, "chat mode changes no files");
+
+  // Memory: asked to remember, the chat agent saves the fact; later turns get it in their prompt.
+  const remember = await req("POST", `/api/projects/${project.id}/chat`, { message: "Recuerda que los pedidos se cierran a las 20:00", mode: "chat" }, { stream: true });
+  ok(remember.some((e) => e.type === "tool_start" && e.name === "remember") && !remember.some((e) => e.type === "error"), "the chat agent saves what it is asked to remember", JSON.stringify(remember.filter((e) => e.type !== "text")));
+  const saved = (await req("GET", `/api/projects/${project.id}/memory`)).json;
+  ok(saved.project.some((m) => m.text === "Los pedidos se cierran a las 20:00" && m.kind === "business" && m.source === "agent"), "the fact is in project memory", JSON.stringify(saved));
 
   const callsBefore = llmLog.length;
   const planTurn = await req("POST", `/api/projects/${project.id}/chat`, { message: "Crea una app de notas con tabla en la base de datos, endpoint para usuarios registrados y una página con diseño.", mode: "plan" }, { stream: true });
@@ -181,6 +207,8 @@ try {
   const roles = llmLog.slice(callsAfterPlan).map((l) => l.role);
   ok(implement.some((e) => e.type === "task_start" && e.role === "ui") && !roles.includes("planner") && llmLog.slice(callsBefore, callsAfterPlan).some((l) => l.role === "planner"), "implementing runs the approved plan without re-planning", roles.join(","));
   ok(!(await req("GET", `/api/projects/${project.id}/chat`)).json.pendingPlanTurn, "the plan is consumed");
+  const withMemory = llmLog.slice(callsBefore).filter((l) => ["planner", "data", "backend", "ui", "qa"].includes(l.role));
+  ok(withMemory.length > 0 && withMemory.every((l) => l.memory), "every agent of later turns gets the memory in its prompt", JSON.stringify(withMemory.map((l) => [l.role, l.memory])));
 
   const broken = await req("POST", `/api/projects/${project.id}/chat`, { message: "Rompe la portada", mode: "build" }, { stream: true });
   ok(broken.some((e) => e.type === "task_start" && e.taskId === "fix1"), "a change that breaks the build gets an automatic fix pass", JSON.stringify(broken.filter((e) => e.type === "task_start")));
@@ -194,7 +222,15 @@ try {
   ok(none.some((e) => e.type === "error" && /modelo permitido/.test(e.message)), "empty whitelist gives a clear error", JSON.stringify(none));
   await req("PUT", "/api/models/account", { enabled: null });
 
-  // 4. The next turn starts from a compact context, not the replayed transcript.
+  // 4. Older turns are folded into the summary, and the facts in them into project memory.
+  let extracted;
+  for (let i = 0; i < 50 && !extracted; i++) {
+    await new Promise((r) => setTimeout(r, 200));
+    extracted = (await req("GET", `/api/projects/${project.id}/memory`)).json.project.find((m) => m.source === "summary");
+  }
+  ok(extracted?.kind === "preference" && /verde/.test(extracted.text), "facts from older turns are extracted into project memory", JSON.stringify(extracted));
+
+  // The next turn starts from a compact context, not the replayed transcript.
   const lastFast = llmLog.filter((l) => l.role === "fast").length;
   ok(lastFast > 0, "fast turns were served");
 } finally {
