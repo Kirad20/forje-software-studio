@@ -63,6 +63,9 @@ function vfsPlugin(files: FileMap, pkgs: Packages, opts: { entry?: { path: strin
     name: "forja-vfs",
     setup(build) {
       build.onResolve({ filter: /^@forja\/client$/ }, () => ({ path: SDK_CLIENT }));
+      // Types only (ctx of endpoints and jobs); a value import of it bundles to nothing.
+      build.onResolve({ filter: /^@forja\/server$/ }, () => ({ path: "@forja/server", namespace: "forja-types" }));
+      build.onLoad({ filter: /.*/, namespace: "forja-types" }, () => ({ contents: "export {};", loader: "js" }));
       if (entry) build.onResolve({ filter: /^forja:entry$/ }, () => ({ path: entry.path, namespace: "vfs" }));
       if (!opts.node) {
         build.onResolve({ filter: /^react(-dom)?(\/.*)?$/ }, (args) => (args.pluginData?.forjaSkip ? undefined : resolveFrom(build, args, ROOT_DIR)));

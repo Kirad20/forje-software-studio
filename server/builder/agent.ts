@@ -87,7 +87,18 @@ export interface AgentSpec {
   requiredTool?: string;
   /** Called once the router chose the model, before the first step runs. */
   onModel?: (m: ModelInfo, reason: string) => void;
+  /**
+   * Checks the orchestrator runs itself when an agent that changed files wants to stop
+   * (build, types, runtime problems), so verifying does not depend on the model remembering
+   * to. `check` returns what is wrong, or null. On a failure the agent gets the report and
+   * a few more steps, up to GATE_FIXES times; then it stops with `gate: "failed"`.
+   */
+  finishGate?: { check(): Promise<string | null> };
 }
+
+/** Fix rounds the finish gate grants, and the extra steps each one gets. */
+export const GATE_FIXES = 2;
+const GATE_STEPS = 8;
 
 export interface AgentResult {
   text: string;
@@ -103,18 +114,41 @@ export interface AgentResult {
   hitStepLimit: boolean;
   /** Files the agent wrote, renamed or deleted. */
   written: string[];
+  /** The finish gate's last verdict; null when it did not run (no gate, or nothing written). */
+  gate: "passed" | "failed" | null;
+  /** Times the gate sent the agent back to fix something. */
+  gateFixes: number;
 }
 
 export async function runAgent(spec: AgentSpec): Promise<AgentResult> {
   const history: LlmMessage[] = [...spec.messages];
   const tools: LlmTool[] = spec.tools.map(({ name, description, input_schema }) => ({ name, description, input_schema }));
   const byName = new Map(spec.tools.map((t) => [t.name, t]));
-  const result: AgentResult = { text: "", model: null, usage: emptyUsage(), usd: 0, credits: 0, steps: [], buildOk: null, testsOk: null, toolErrors: 0, hitStepLimit: false, written: [] };
+  const result: AgentResult = { text: "", model: null, usage: emptyUsage(), usd: 0, credits: 0, steps: [], buildOk: null, testsOk: null, toolErrors: 0, hitStepLimit: false, written: [], gate: null, gateFixes: 0 };
   const emit = (e: AgentEvent) => spec.emit(spec.taskId && "type" in e && ["text", "tool_start", "tool_end"].includes(e.type) ? ({ ...e, taskId: spec.taskId } as AgentEvent) : e);
 
   const runId = newRunId();
   let maxSteps = spec.maxSteps;
   let reminded = false;
+  /** result.steps.length when the gate last ran: more steps since then need a fresh verdict. */
+  let gatedAt = -1;
+  /** Runs the gate as a visible step in the lane; returns the report, or null when clean. */
+  const runGate = async (): Promise<string | null> => {
+    const id = `gate-${runId}-${result.gateFixes}`;
+    emit({ type: "tool_start", id, name: "finish_gate", summary: "Comprobación automática antes de terminar" });
+    let report: string | null;
+    gatedAt = result.steps.length;
+    try {
+      report = await spec.finishGate!.check();
+    } catch (e) {
+      // A broken check must not block the agent: record it and let it finish.
+      emit({ type: "tool_end", id, ok: false, output: `No se pudo comprobar: ${(e as Error).message}` });
+      return null;
+    }
+    result.gate = report ? "failed" : "passed";
+    emit({ type: "tool_end", id, ok: !report, output: report ? report.slice(0, 2000) : "Sin problemas nuevos." });
+    return report;
+  };
   for (let step = 0; step < maxSteps; step++) {
     if (spec.signal.aborted) throw new Error("Detenido.");
     const callStarted = performance.now();
@@ -144,11 +178,26 @@ export async function runAgent(spec: AgentSpec): Promise<AgentResult> {
 
     const calls = call.response.content.filter((b): b is Extract<Block, { type: "tool_use" }> => b.type === "tool_use");
     if (!calls.length) {
-      if (!spec.requiredTool || reminded || result.steps.some((st) => st.tool === spec.requiredTool && st.ok)) break;
-      reminded = true;
-      maxSteps = Math.max(maxSteps, step + 2);
-      history.push({ role: "user", content: `Todavía no has llamado a ${spec.requiredTool}. Llámala ahora con la herramienta (no escribas el resultado como texto).` });
-      continue;
+      if (spec.requiredTool && !reminded && !result.steps.some((st) => st.tool === spec.requiredTool && st.ok)) {
+        reminded = true;
+        maxSteps = Math.max(maxSteps, step + 2);
+        history.push({ role: "user", content: `Todavía no has llamado a ${spec.requiredTool}. Llámala ahora con la herramienta (no escribas el resultado como texto).` });
+        continue;
+      }
+      if (spec.finishGate && spec.ctx.wrote && !spec.signal.aborted) {
+        const report = await runGate();
+        if (report && result.gateFixes < GATE_FIXES) {
+          result.gateFixes++;
+          maxSteps = Math.max(maxSteps, step + 1 + GATE_STEPS);
+          // Not persisted: the owner did not write it, and the chat shows it as the gate's step.
+          history.push({
+            role: "user",
+            content: `Comprobación automática antes de terminar: tus cambios dejaron estos problemas.\n\n${report}\n\nArregla la causa (lee el archivo y usa edit_file), comprueba con check_build o get_problems y termina con tu resumen actualizado. Si algo no se puede arreglar dentro de tu tarea, explícalo en el resumen.`,
+          });
+          continue;
+        }
+      }
+      break;
     }
 
     // Independent tool calls of one step run concurrently; results go back in one message,
@@ -169,7 +218,9 @@ export async function runAgent(spec: AgentSpec): Promise<AgentResult> {
           if (typeof out === "string") output = out;
           else {
             output = out.text;
-            for (const img of out.images) images.push({ type: "image", source: { type: "base64", ...img } });
+            // A model without vision would reject the request (or ignore the pixels): say so instead.
+            if (result.model?.vision === false) output += `\n(${out.images.length} captura(s) omitida(s): el modelo actual no ve imágenes; fíate del texto y los errores.)`;
+            else for (const img of out.images) images.push({ type: "image", source: { type: "base64", ...img } });
           }
         } catch (e) {
           ok = false;
@@ -200,6 +251,8 @@ export async function runAgent(spec: AgentSpec): Promise<AgentResult> {
     if (spec.persist) await save(spec.persist.projectId, { role: "user", content: results }, spec.turnId);
     if (step === maxSteps - 1) result.hitStepLimit = true;
   }
+  // Ran out of steps before the gate saw the last changes: still record an objective verdict.
+  if (spec.finishGate && spec.ctx.wrote && gatedAt !== result.steps.length && !spec.signal.aborted) await runGate();
   result.written = [...(spec.ctx.written ?? [])];
   return result;
 }

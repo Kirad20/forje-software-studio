@@ -13,6 +13,7 @@ import { holdSync, releaseSync } from "../platform/github.js";
 import { projectMap, selectContext } from "./index.js";
 import { FAST_EXCLUDED_TOOLS, FIRST_BUILD, MAX_STEPS, PLANNER_FILES, ROLE_PROMPTS, ROLE_TOOLS } from "./roles.js";
 import { builderTools, toolByName, type BuilderTool, type ToolContext } from "./tools.js";
+import { createFinishGate } from "./gate.js";
 
 /**
  * One builder turn. A request is analysed and routed:
@@ -45,6 +46,7 @@ interface Review {
 }
 
 const RECENT_TURNS = 4;
+const GATED_ROLES = new Set<Role>(["fast", "data", "backend", "ui"]);
 const tools = (names: string[]) => names.map((n) => toolByName.get(n)).filter((t): t is BuilderTool => !!t);
 const FAST_TOOLS = builderTools.filter((t) => !FAST_EXCLUDED_TOOLS.includes(t.name));
 
@@ -254,10 +256,17 @@ function track(s: TurnState, r: AgentResult) {
   s.credits += r.credits;
 }
 
-/** Reward in [0, 1] for one agent run, from what can be observed without a human. */
-function rewardOf(r: AgentResult, reviewOk: boolean | null): number {
+/**
+ * Reward in [0, 1] for one agent run, from what can be observed without a human. The finish
+ * gate is the orchestrator's own check, so it outweighs what the agent says it verified.
+ */
+export function rewardOf(r: Pick<AgentResult, "buildOk" | "testsOk" | "hitStepLimit" | "toolErrors" | "gate" | "gateFixes" | "written">, reviewOk: boolean | null): number {
   let reward = reviewOk === false ? 0.4 : reviewOk === true ? 1 : 0.7;
-  if (r.buildOk === false) reward = Math.min(reward, 0.2);
+  if (r.buildOk === false || r.gate === "failed") reward = Math.min(reward, 0.2);
+  // Changed files but nothing (agent or gate) ever checked them: not a success we can see.
+  else if (r.written.length && r.gate === null && r.buildOk === null) reward = Math.min(reward, 0.5);
+  // Needed the gate to notice its own breakage.
+  reward -= 0.1 * r.gateFixes;
   if (r.testsOk === false) reward -= 0.2;
   if (r.hitStepLimit) reward -= 0.3;
   reward -= Math.min(0.3, r.toolErrors * 0.05);
@@ -309,7 +318,10 @@ async function runLane(
 ): Promise<AgentResult> {
   await insertTask(s, task);
   try {
+    // Roles that write app code are checked before they may stop (see gate.ts).
+    const finishGate = GATED_ROLES.has(task.role) ? await createFinishGate(s.project.id, spec.ctx).catch(() => undefined) : undefined;
     const r = await runAgent({
+      finishGate,
       scope: s.scope,
       billing: s.billing,
       role: task.role,
@@ -379,7 +391,7 @@ async function runFast(s: TurnState): Promise<void> {
   let reply = r.text || "Listo.";
   // If the change left the app not compiling, fix it before handing back (at most twice).
   let broken = s.wrote ? await recheckBuild(s.project.id) : [];
-  if (r.model) await recordOutcome(taskClassOf("fast", s.features), r.model, rewardOf({ ...r, buildOk: r.buildOk && !broken.length }, null), r.usd);
+  if (r.model) await recordOutcome(taskClassOf("fast", s.features), r.model, rewardOf({ ...r, buildOk: broken.length ? false : r.buildOk }, null), r.usd);
   for (let round = 1; round <= 2 && broken.length && !s.signal.aborted; round++) {
     const fixCtx: ToolContext = { account: s.account, projectId: s.project.id, author: "builder" };
     const fix = await runLane(
@@ -447,6 +459,9 @@ async function runTeam(s: TurnState, opts: { given?: Plan; planOnly?: boolean } 
   const files = await readAllFiles(s.project.id);
   const map = projectMap(files, await describeSchema(s.project.id, true));
   const head = projectSection(s);
+  // ui and QA judge layouts from browser_test screenshots: ask for a model that sees them
+  // whenever one is allowed (without one, runAgent tells the model the screenshots were left out).
+  const canSee = (await allowedModels(s.scope)).some((m) => m.vision && m.tools);
 
   // 1. Plan.
   let plan: Plan | null = opts.given ?? null;
@@ -559,7 +574,7 @@ async function runTeam(s: TurnState, opts: { given?: Plan; planOnly?: boolean } 
       messages: [{ role: "user", content: [{ type: "text", text }, ...(t.role === "ui" ? s.images : [])] }],
       tools: tools(ROLE_TOOLS[t.role]),
       ctx,
-      routing: { complexity: s.features.complexity, domains: [t.role === "ui" ? "ui" : t.role === "data" ? "data" : (s.features.domains.find((d) => d !== "ui") ?? "data")], needsVision: s.features.needsVision && t.role === "ui" },
+      routing: { complexity: s.features.complexity, domains: [t.role === "ui" ? "ui" : t.role === "data" ? "data" : (s.features.domains.find((d) => d !== "ui") ?? "data")], needsVision: t.role === "ui" && (canSee || s.features.needsVision) },
     });
   };
   const project = await one<{ agent_concurrency: number }>(`select agent_concurrency from projects where id = $1`, [s.project.id]);
@@ -624,7 +639,7 @@ async function runTeam(s: TurnState, opts: { given?: Plan; planOnly?: boolean } 
         tools: [...tools(ROLE_TOOLS.qa), reportReview],
         ctx: { account: s.account, projectId: s.project.id, author: "builder", owned: [] },
         requiredTool: "report_review",
-        routing: { complexity: s.features.complexity, domains: s.features.domains, needsVision: false },
+        routing: { complexity: s.features.complexity, domains: s.features.domains, needsVision: canSee },
       },
     ).catch(() => null);
     // Assigned inside report_review's closure, which TypeScript cannot see.

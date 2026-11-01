@@ -14,9 +14,9 @@ const { server: llm, port: llmPort } = await startFakeLlm();
 const PORT = 4800 + Math.floor(Math.random() * 400);
 const DATA = mkdtempSync(path.join(tmpdir(), "forja-agents-"));
 const MODELS = [
-  { provider: "openai", model: "fake-strong", label: "Fuerte", tier: 5, inPrice: 2, outPrice: 10, cacheReadPrice: 0.2, speed: 2 },
-  { provider: "openai", model: "fake-mid", label: "Mediano", tier: 3, inPrice: 0.1, outPrice: 0.5, cacheReadPrice: 0.01, speed: 5 },
-  { provider: "openai", model: "fake-flaky", label: "Inestable", tier: 5, inPrice: 0, outPrice: 0, speed: 5 },
+  { provider: "openai", model: "fake-strong", label: "Fuerte", tier: 5, inPrice: 2, outPrice: 10, cacheReadPrice: 0.2, speed: 2, vision: true },
+  { provider: "openai", model: "fake-mid", label: "Mediano", tier: 3, inPrice: 0.1, outPrice: 0.5, cacheReadPrice: 0.01, speed: 5, vision: true },
+  { provider: "openai", model: "fake-flaky", label: "Inestable", tier: 5, inPrice: 0, outPrice: 0, speed: 5, vision: true },
 ];
 let serverLog = "";
 const app = spawn(process.execPath, ["--import", "tsx", "server/index.ts"], {
@@ -215,6 +215,14 @@ try {
   ok(broken.some((e) => e.type === "text" && /Arreglé la portada/.test(e.text)), "the fix is reported to the owner");
   const after = (await req("GET", `/api/projects/${project.id}/problems`)).json.problems;
   ok(!after.some((p) => p.kind === "build"), "and the app compiles again", JSON.stringify(after));
+  ok(broken.some((e) => e.type === "tool_end" && e.id.startsWith("gate-") && !e.ok), "the finish gate checks the build before the agent stops", JSON.stringify(broken.filter((e) => e.type === "tool_end")));
+
+  // A type error compiles with esbuild; the finish gate catches it and the agent fixes it in the same run.
+  const typed = await req("POST", `/api/projects/${project.id}/chat`, { message: "Tipo roto en la portada", mode: "build" }, { stream: true });
+  const gates = typed.filter((e) => e.type === "tool_end" && e.id.startsWith("gate-"));
+  ok(gates.length === 2 && !gates[0].ok && /Tipo:.*titel/.test(gates[0].output) && gates[1].ok, "the finish gate reports a type error and passes once it is fixed", JSON.stringify(gates));
+  const home = (await req("GET", `/api/projects/${project.id}/file?path=pages/_index.tsx`)).json;
+  ok(home.content?.includes("data?.title"), "the type error was fixed in the same run", JSON.stringify(home));
 
   // 3. Account whitelist: nothing allowed → a clear error, no model call.
   await req("PUT", "/api/models/account", { enabled: [] });
