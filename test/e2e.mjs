@@ -457,7 +457,7 @@ ok((await req("GET", `/api/projects/${project.id}/changes`)).json.changes[0].act
 const bobMem = (await req("GET", `/api/projects/${project.id}/memory`)).json;
 ok(bobMem.project.some((m) => m.id === priceId) && bobMem.personal.length === 0, "editors share project memory but not the owner's personal memory", JSON.stringify(bobMem));
 ok((await req("PATCH", `/api/projects/${project.id}/memory/${mem.personal[0].id}`, { body: { text: "hack" } })).status === 404, "an editor cannot change the owner's personal memory");
-// Evals spend real model credit: a normal member cannot reach them, and with FORJA_EVALS unset not even an admin can.
+// Evals spend real model credit: a normal member cannot reach them, and with the evals setting off not even an admin can.
 ok((await req("GET", "/api/admin/evals/config")).status === 403, "a member cannot reach the evals");
 await signInAs("carol@example.com");
 ok((await req("GET", `/api/projects/${project.id}`)).status === 404, "strangers cannot see the project");

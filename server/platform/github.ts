@@ -415,6 +415,8 @@ export async function handleWebhook(rawBody: string, signature: string | undefin
   return rows.length;
 }
 
+let poller: NodeJS.Timeout | undefined;
+
 /** Starts listeners for linked projects and polls them for commits pushed elsewhere. */
 export function startGithubSync() {
   const tick = async () => {
@@ -425,7 +427,13 @@ export function startGithubSync() {
     }
   };
   void tick();
-  setInterval(() => void tick(), config.github.pollMs).unref();
+  clearInterval(poller);
+  poller = setInterval(() => void tick(), config.github.pollMs).unref();
+}
+
+/** The poll interval changed: keep polling at the new pace (only if polling had started). */
+export function reschedulePoll() {
+  if (poller) startGithubSync();
 }
 
 /** Called after linking so edits start syncing without waiting for the next poll. */

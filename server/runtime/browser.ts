@@ -188,7 +188,7 @@ async function openPreview(project: ShareScope, viewport: BrowserTestInput["view
 
 /** Runs the steps against the project's preview and reports what happened. Stops at the first failing step. */
 export async function runBrowserTest(project: ShareScope, input: BrowserTestInput): Promise<BrowserTestResult> {
-  if (!config.browser.enabled) throw new Error("Las pruebas en navegador están desactivadas en este servidor (FORJA_BROWSER=0).");
+  if (!config.browser.enabled) throw new Error("Las pruebas en navegador están desactivadas en este servidor (Administración → General → Constructor).");
   const steps = (input.steps ?? []).slice(0, MAX_STEPS);
   if (!steps.length) throw new Error("Pasa al menos un paso, p. ej. [{action:'goto', path:'/'}, {action:'screenshot'}]");
   if (steps[0]!.action !== "goto") steps.unshift({ action: "goto", path: "/" });
@@ -262,7 +262,7 @@ export async function inspectPreview(
   project: ShareScope,
   opts: { paths: string[]; viewport?: BrowserTestInput["viewport"]; session?: BrowserTestInput["session"]; screenshot?: boolean },
 ): Promise<PageInspection[]> {
-  if (!config.browser.enabled) throw new Error("Las pruebas en navegador están desactivadas en este servidor (FORJA_BROWSER=0).");
+  if (!config.browser.enabled) throw new Error("Las pruebas en navegador están desactivadas en este servidor (Administración → General → Constructor).");
   running++;
   let opened: PreviewPage | undefined;
   try {

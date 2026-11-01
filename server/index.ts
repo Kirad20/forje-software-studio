@@ -13,6 +13,9 @@ import { handleMcp } from "./mcp/server.js";
 import { accountFromApiToken } from "./platform/accounts.js";
 import { initBootstrap } from "./platform/bootstrap.js";
 import { closePlatformDb, platformDb } from "./platform/db.js";
+import { seedLocal } from "./db/seeds/local.js";
+import { wireSettingReactions } from "./settings/reactions.js";
+import { loadSettings, warnMovedEnv } from "./settings/store.js";
 import { getProject, getProjectBySlug, type Project } from "./platform/projects.js";
 import { cookie, parseCookies, serveApp } from "./runtime/appServer.js";
 import { stopAllSandboxes } from "./runtime/sandbox.js";
@@ -110,6 +113,11 @@ function page(title: string, body: string) {
 }
 
 await platformDb();
+warnMovedEnv();
+const seeded = await seedLocal(config.seedFile);
+if (seeded.length) console.log(`[forja] ${config.seedFile}: ${seeded.join(", ")}`);
+await loadSettings();
+wireSettingReactions();
 await initBootstrap();
 await startJobRunner();
 startCatalogSync();

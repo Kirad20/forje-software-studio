@@ -22,7 +22,7 @@ import { designSignals, renderReport, scoreCase, summarize, type CaseResult, typ
  * Quality evals: run the real builder on fixed requests and score what it produces.
  *
  * Safe to run in production because of how it is fenced in, not because it is careful:
- *  - Off unless FORJA_EVALS=1, and only platform admins reach it (see api.ts).
+ *  - Off unless the evals.enabled setting is on, and only platform admins reach it (see api.ts).
  *  - Every case runs in a throwaway project owned by a dedicated, disabled account
  *    (EVAL_EMAIL) with its own credits. It touches no user's project, data, credits or
  *    daily quota, and the router's bandit learns nothing from it (`synthetic` turns).
@@ -148,7 +148,7 @@ export async function evalConfig(admin: Account) {
 }
 
 export async function startRun(admin: Account, req: RunRequest): Promise<{ runId: string; jobs: number; budgetUsd: number }> {
-  if (!config.evals.enabled) throw new EvalError(404, "Los evals están desactivados en este servidor (FORJA_EVALS=1 los activa).");
+  if (!config.evals.enabled) throw new EvalError(404, "Los evals están desactivados en este servidor (se activan en Administración → General → Evals de calidad).");
   if (active) throw new EvalError(409, "Ya hay una ejecución de evals en curso.");
 
   const sizes = (req.sizes ?? []).filter((s) => ["small", "medium", "large"].includes(s));

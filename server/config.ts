@@ -10,6 +10,36 @@ export const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)
  */
 const env = new Proxy(process.env, { get: (t, k) => (typeof k === "string" && t[k] !== "" ? t[k] : undefined) });
 
+/**
+ * Platform defaults when FORJA_MODELS_ALLOW is empty: Sonnet and Haiku, every model of
+ * self-declared OpenAI-compatible providers, and a curated, cheap-to-strong spread from
+ * OpenRouter. Opus is declared but only used when explicitly allowed.
+ */
+export const DEFAULT_MODELS_ALLOW = [
+  "anthropic:claude-sonnet-5-5",
+  "anthropic:claude-haiku-5-5",
+  "openai:*",
+  "custom:*",
+  "openrouter:anthropic/claude-sonnet*",
+  "openrouter:anthropic/claude-haiku*",
+  "openrouter:google/gemini-*",
+  "openrouter:openai/gpt-*",
+  "openrouter:deepseek/*",
+  "openrouter:qwen/*",
+  "openrouter:mistralai/*",
+  "openrouter:meta-llama/*",
+  "openrouter:moonshotai/*",
+  "openrouter:z-ai/*",
+];
+
+/**
+ * Two kinds of configuration live here:
+ *  - Start-up settings, read from the environment once: what the process needs before it can
+ *    reach its database (port, URLs, DATABASE_URL, SECRETS_KEY…).
+ *  - Platform settings, whose values below are only the defaults. An admin changes them in the
+ *    studio (server/settings): they are stored in the database and written onto this same
+ *    object, so code that reads `config.x` at call time always sees the current value.
+ */
 export const config = {
   port: Number(env.PORT ?? 4100),
   publicUrl: (env.PUBLIC_URL ?? `http://localhost:${env.PORT ?? 4100}`).replace(/\/$/, ""),
@@ -23,14 +53,13 @@ export const config = {
    * appended; without it, rate limits would see every user as the proxy. 0 = direct exposure.
    */
   trustProxy: Math.max(0, Math.floor(Number(env.FORJA_TRUST_PROXY ?? 0)) || 0),
-  builder: {
-    provider: (env.BUILDER_PROVIDER ?? "anthropic") as "anthropic" | "openai",
-    model: env.BUILDER_MODEL ?? "claude-sonnet-5-5",
-  },
-  appAi: {
-    provider: (env.APP_AI_PROVIDER ?? "anthropic") as "anthropic" | "openai",
-    model: env.APP_AI_MODEL ?? "claude-haiku-5-5",
-  },
+  /**
+   * First-run setup. While there are no accounts, the server only accepts POST /api/auth/setup with this
+   * token. Unset, a random one is generated at startup and printed to the log.
+   */
+  bootstrapToken: env.FORJA_BOOTSTRAP_TOKEN ?? "",
+  /** Optional seed file (settings, providers, models) applied at start-up; see server/db/seeds/local.ts. */
+  seedFile: env.FORJA_SEED_FILE === undefined ? path.join(ROOT_DIR, "seed.local.json") : env.FORJA_SEED_FILE,
   anthropicKey: env.ANTHROPIC_API_KEY ?? "",
   openaiBaseUrl: (env.OPENAI_BASE_URL ?? "https://api.openai.com/v1").replace(/\/$/, ""),
   openaiKey: env.OPENAI_API_KEY ?? "",
@@ -41,69 +70,74 @@ export const config = {
   extraProviders: env.FORJA_PROVIDERS ?? "",
   /** Extra models: [{"provider":"lab","model":"qwen3.8:latest","tier":3,"inPrice":0,"outPrice":0}]. */
   extraModels: env.FORJA_MODELS ?? "",
-  /** Platform whitelist: comma-separated globs over "provider:model" ids. Empty = the defaults in llm/catalog.ts. */
-  modelsAllow: env.FORJA_MODELS_ALLOW ?? "",
-  /** 1 credit = $0.001 of model usage. */
-  creditsPerUsd: Number(env.CREDITS_PER_USD ?? 1000),
-  freeCredits: Number(env.FREE_CREDITS ?? 3000),
-  /**
-   * First-run setup. While there are no accounts, the server only accepts POST /api/auth/setup with this
-   * token. Unset, a random one is generated at startup and printed to the log.
-   */
-  bootstrapToken: env.FORJA_BOOTSTRAP_TOKEN ?? "",
+
+  // --- Platform settings (defaults; see server/settings/registry.ts) ---
   /** Who may create an account: "open" (anyone, by email code), "invite" (only invited emails), "closed" (admins add people). */
-  signup: (["open", "invite", "closed"].includes(env.FORJA_SIGNUP ?? "") ? env.FORJA_SIGNUP : "open") as "open" | "invite" | "closed",
-  smtpUrl: env.SMTP_URL ?? "",
-  emailFrom: env.EMAIL_FROM ?? "noreply@forja.local",
-  stripeKey: env.STRIPE_SECRET_KEY ?? "",
+  signup: "open" as "open" | "invite" | "closed",
+  /** 1 credit = $0.001 of model usage. */
+  creditsPerUsd: 1000,
+  freeCredits: 3000,
+  smtpUrl: "",
+  emailFrom: "noreply@forja.local",
+  stripeKey: "",
+  models: {
+    /** Platform whitelist: globs over "provider:model" ids. Each account and project can narrow it. */
+    allow: [...DEFAULT_MODELS_ALLOW],
+  },
   github: {
     /** REST API base (GitHub Enterprise: https://host/api/v3). */
-    apiUrl: (env.GITHUB_API_URL ?? "https://api.github.com").replace(/\/$/, ""),
+    apiUrl: "https://api.github.com",
     /** Optional OAuth app for "Conectar con GitHub"; without it, accounts connect with a personal access token. */
-    clientId: env.GITHUB_CLIENT_ID ?? "",
-    clientSecret: env.GITHUB_CLIENT_SECRET ?? "",
-    webUrl: (env.GITHUB_WEB_URL ?? "https://github.com").replace(/\/$/, ""),
+    clientId: "",
+    clientSecret: "",
+    webUrl: "https://github.com",
     /** Verifies push webhooks (POST /api/github/webhook); without it, linked repos are polled. */
-    webhookSecret: env.GITHUB_WEBHOOK_SECRET ?? "",
-    pollMs: Number(env.GITHUB_POLL_MS ?? 60_000),
+    webhookSecret: "",
+    pollMs: 60_000,
   },
   npm: {
     /** Registry the builder resolves and installs project packages from. */
-    registry: (env.FORJA_NPM_REGISTRY ?? "https://registry.npmjs.org").replace(/\/$/, ""),
-    /** "0" turns project packages off: apps get only react, react-dom and zod. */
-    enabled: env.FORJA_NPM !== "0",
+    registry: "https://registry.npmjs.org",
+    /** Off: apps get only react, react-dom and zod. */
+    enabled: true,
   },
   browser: {
-    /** "0" turns off browser_test (the builder's headless Chromium against the preview). */
-    enabled: env.FORJA_BROWSER !== "0",
-    /** A Chrome/Chromium binary to use instead of Playwright's own download. */
+    /** browser_test (the builder's headless Chromium against the preview). FORJA_BROWSER=0 (an image without Chromium) forces it off. */
+    enabled: true,
+    /** A Chrome/Chromium binary to use instead of Playwright's own download. Depends on the image: stays in the environment. */
     executablePath: env.FORJA_CHROMIUM ?? "",
   },
   /** Optional agent tracing to Langfuse (cloud or self-hosted). Off unless both keys are set. */
   langfuse: {
-    publicKey: env.LANGFUSE_PUBLIC_KEY ?? "",
-    secretKey: env.LANGFUSE_SECRET_KEY ?? "",
-    baseUrl: (env.LANGFUSE_BASE_URL ?? env.LANGFUSE_HOST ?? "https://cloud.langfuse.com").replace(/\/$/, ""),
+    publicKey: "",
+    secretKey: "",
+    baseUrl: "https://cloud.langfuse.com",
   },
   /**
    * Quality evals (server/evals): run the builder on a fixed set of requests, in throwaway
-   * projects, and score the result. Off unless FORJA_EVALS=1: it spends real model credit.
-   * The limits are deploy-time on purpose; the admin UI can ask for less, never for more.
+   * projects, and score the result. Off by default: it spends real model credit.
+   * The limits are platform settings; the evals page can ask for less, never for more.
    */
   evals: {
-    enabled: env.FORJA_EVALS === "1",
+    enabled: false,
     /** Most one run may spend, in USD (model calls of the builder and the judge). */
-    maxRunUsd: Math.max(0.1, Number(env.FORJA_EVALS_MAX_RUN_USD ?? 5)),
+    maxRunUsd: 5,
     /** Most all runs together may spend in a rolling 24 hours. */
-    maxDailyUsd: Math.max(0.1, Number(env.FORJA_EVALS_MAX_DAILY_USD ?? 20)),
+    maxDailyUsd: 20,
     /** Cases building at the same time (each one is a full builder turn plus a headless browser). */
-    concurrency: Math.min(4, Math.max(1, Math.floor(Number(env.FORJA_EVALS_CONCURRENCY ?? 2)) || 1)),
+    concurrency: 2,
   },
   /** A project database closes after this long without queries ("sleeps"). */
   dbIdleMs: 60_000,
   /** Longest a single endpoint call or job run may take. */
   maxRunMs: 15 * 60_000,
 };
+
+/** The platform settings' defaults, before anything from the database is applied. */
+export const CONFIG_DEFAULTS: Readonly<typeof config> = structuredClone(config);
+
+/** False when the image was built without Chromium (FORJA_BROWSER=0): no setting can turn it on. */
+export const browserAvailable = env.FORJA_BROWSER !== "0";
 
 if (config.secretsKey && !/^[0-9a-f]{64}$/i.test(config.secretsKey)) {
   // AES-256-GCM needs exactly 32 bytes; a wrong key would only fail at the first encrypt.

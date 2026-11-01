@@ -415,7 +415,7 @@ studioApi.patch("/admin/users/:id", async (c) => {
   return c.json({ ok: true });
 });
 
-// Quality evals (admin only, and only with FORJA_EVALS=1): see server/evals.
+// Quality evals (admin only, and only with the evals.enabled setting on): see server/evals.
 studioApi.route("/admin/evals", evalsApi);
 
 // --- Projects -------------------------------------------------------------------------

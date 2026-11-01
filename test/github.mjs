@@ -2,7 +2,7 @@
 //   npm run test:github
 import http from "node:http";
 import { spawn } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -14,6 +14,9 @@ const gh = await startFakeGithub();
 const PORT = 5200 + Math.floor(Math.random() * 400);
 const DATA = mkdtempSync(path.join(tmpdir(), "forja-github-"));
 const pgdb = await freshDatabase();
+// Platform settings live in the database: the server applies this seed file at start-up.
+const SEED = path.join(DATA, "seed.json");
+writeFileSync(SEED, JSON.stringify({ settings: { "github.apiUrl": `http://127.0.0.1:${gh.port}`, "github.webhookSecret": "whsec", "github.pollMs": 3600000 } }));
 let serverLog = "";
 const app = spawn(process.execPath, ["--import", "tsx", "server/index.ts"], {
   cwd: ROOT,
@@ -23,6 +26,7 @@ const app = spawn(process.execPath, ["--import", "tsx", "server/index.ts"], {
     PUBLIC_URL: `http://localhost:${PORT}`,
     DATA_DIR: DATA,
     DATABASE_URL: pgdb.url,
+    FORJA_SEED_FILE: SEED,
     SECRETS_KEY: "ef".repeat(32),
     ANTHROPIC_API_KEY: "",
     OPENROUTER_API_KEY: "",
@@ -31,11 +35,7 @@ const app = spawn(process.execPath, ["--import", "tsx", "server/index.ts"], {
     BUILDER_MODEL: "",
     APP_AI_MODEL: "",
     FORJA_MODELS: "",
-    SMTP_URL: "",
     FORJA_BOOTSTRAP_TOKEN: "e2e-bootstrap-token-0123456789",
-    GITHUB_API_URL: `http://127.0.0.1:${gh.port}`,
-    GITHUB_WEBHOOK_SECRET: "whsec",
-    GITHUB_POLL_MS: "3600000",
   },
 });
 app.stdout.on("data", (d) => (serverLog += d));

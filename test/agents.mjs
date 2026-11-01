@@ -3,7 +3,7 @@
 // whitelists, fallback and cost metrics.   npm run test:agents
 import http from "node:http";
 import { spawn } from "node:child_process";
-import { mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -15,6 +15,9 @@ const { server: llm, port: llmPort } = await startFakeLlm();
 const PORT = 4800 + Math.floor(Math.random() * 400);
 const DATA = mkdtempSync(path.join(tmpdir(), "forja-agents-"));
 const pgdb = await freshDatabase();
+// Platform settings live in the database: the server applies this seed file at start-up.
+const SEED = path.join(DATA, "seed.json");
+writeFileSync(SEED, JSON.stringify({ settings: { "evals.enabled": true, "evals.maxRunUsd": 1, "evals.maxDailyUsd": 5, "evals.concurrency": 1 } }));
 const MODELS = [
   { provider: "openai", model: "fake-strong", label: "Fuerte", tier: 5, inPrice: 2, outPrice: 10, cacheReadPrice: 0.2, speed: 2, vision: true },
   { provider: "openai", model: "fake-mid", label: "Mediano", tier: 3, inPrice: 0.1, outPrice: 0.5, cacheReadPrice: 0.01, speed: 5, vision: true },
@@ -29,6 +32,7 @@ const app = spawn(process.execPath, ["--import", "tsx", "server/index.ts"], {
     PUBLIC_URL: `http://localhost:${PORT}`,
     DATA_DIR: DATA,
     DATABASE_URL: pgdb.url,
+    FORJA_SEED_FILE: SEED,
     SECRETS_KEY: "cd".repeat(32),
     ANTHROPIC_API_KEY: "",
     OPENROUTER_API_KEY: "",
@@ -38,12 +42,7 @@ const app = spawn(process.execPath, ["--import", "tsx", "server/index.ts"], {
     APP_AI_MODEL: "",
     FORJA_MODELS: JSON.stringify(MODELS),
     FORJA_MODELS_ALLOW: "",
-    SMTP_URL: "",
     FORJA_BOOTSTRAP_TOKEN: "e2e-bootstrap-token-0123456789",
-    FORJA_EVALS: "1",
-    FORJA_EVALS_MAX_RUN_USD: "1",
-    FORJA_EVALS_MAX_DAILY_USD: "5",
-    FORJA_EVALS_CONCURRENCY: "1",
   },
 });
 app.stdout.on("data", (d) => (serverLog += d));

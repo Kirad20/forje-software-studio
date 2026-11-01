@@ -100,8 +100,8 @@ function npm(args: string[], cwd: string): Promise<void> {
 /** Installs a dependency set if needed and returns its folder; null when there is nothing to install. */
 export async function ensureDeps(deps: Deps): Promise<string | null> {
   if (!Object.keys(deps).length) return null;
-  if (!config.npm.enabled) throw new Error("Los paquetes npm están desactivados en esta instalación de Forja (FORJA_NPM=0).");
-  if (!/^https?:\/\/[^\s"'`$&|;<>]+$/.test(config.npm.registry)) throw new Error("FORJA_NPM_REGISTRY no es una URL válida.");
+  if (!config.npm.enabled) throw new Error("Los paquetes npm están desactivados en esta instalación de Forja (Administración → General → Constructor).");
+  if (!/^https?:\/\/[^\s"'`$&|;<>]+$/.test(config.npm.registry)) throw new Error("El registro npm configurado no es una URL válida.");
   const dir = depsDir(deps);
   if (existsSync(path.join(dir, READY))) return dir;
   let p = installing.get(dir);

@@ -55,28 +55,6 @@ const ANTHROPIC: ModelInfo[] = [
   },
 ];
 
-/**
- * Platform defaults when FORJA_MODELS_ALLOW is empty: Sonnet and Haiku, every model of
- * self-declared OpenAI-compatible providers, and a curated, cheap-to-strong spread from
- * OpenRouter. Opus is declared but only used when explicitly allowed.
- */
-const DEFAULT_ALLOW = [
-  "anthropic:claude-sonnet-5-5",
-  "anthropic:claude-haiku-5-5",
-  "openai:*",
-  "custom:*",
-  "openrouter:anthropic/claude-sonnet*",
-  "openrouter:anthropic/claude-haiku*",
-  "openrouter:google/gemini-*",
-  "openrouter:openai/gpt-*",
-  "openrouter:deepseek/*",
-  "openrouter:qwen/*",
-  "openrouter:mistralai/*",
-  "openrouter:meta-llama/*",
-  "openrouter:moonshotai/*",
-  "openrouter:z-ai/*",
-];
-
 function parseJson<T>(raw: string, what: string): T[] {
   if (!raw.trim()) return [];
   try {
@@ -183,7 +161,7 @@ export async function availableModels(): Promise<ModelInfo[]> {
 const globToRegex = (glob: string) => new RegExp(`^${glob.trim().replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*")}$`);
 
 export function platformAllows(model: ModelInfo): boolean {
-  const globs = config.modelsAllow.trim() ? config.modelsAllow.split(",") : DEFAULT_ALLOW;
+  const globs = config.models.allow;
   // "custom:*" stands for every model declared in configuration.
   return globs.some((g) => (g.trim() === "custom:*" ? model.source === "custom" : globToRegex(g).test(model.id)));
 }
