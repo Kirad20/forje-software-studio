@@ -4,13 +4,23 @@ import { randomBytes } from "node:crypto";
 
 export const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
-const env = process.env;
+/**
+ * Empty counts as unset: a compose file passes `VAR=` for every variable it lists, and
+ * `PORT=""` must mean "default", not port 0.
+ */
+const env = new Proxy(process.env, { get: (t, k) => (typeof k === "string" && t[k] !== "" ? t[k] : undefined) });
 
 export const config = {
   port: Number(env.PORT ?? 4100),
   publicUrl: (env.PUBLIC_URL ?? `http://localhost:${env.PORT ?? 4100}`).replace(/\/$/, ""),
   dataDir: path.resolve(ROOT_DIR, env.DATA_DIR ?? "data"),
   secretsKey: env.SECRETS_KEY ?? "",
+  /**
+   * Reverse proxies in front of Forja (Traefik in Coolify, nginx…). With N > 0 the client IP is
+   * the N-th address from the right of X-Forwarded-For, the one the outermost trusted proxy
+   * appended; without it, rate limits would see every user as the proxy. 0 = direct exposure.
+   */
+  trustProxy: Math.max(0, Math.floor(Number(env.FORJA_TRUST_PROXY ?? 0)) || 0),
   builder: {
     provider: (env.BUILDER_PROVIDER ?? "anthropic") as "anthropic" | "openai",
     model: env.BUILDER_MODEL ?? "claude-sonnet-5-5",
@@ -93,6 +103,10 @@ export const config = {
   maxRunMs: 15 * 60_000,
 };
 
+if (config.secretsKey && !/^[0-9a-f]{64}$/i.test(config.secretsKey)) {
+  // AES-256-GCM needs exactly 32 bytes; a wrong key would only fail at the first encrypt.
+  throw new Error("SECRETS_KEY debe ser de 64 caracteres hexadecimales (32 bytes): openssl rand -hex 32");
+}
 if (!config.secretsKey) {
   // Dev fallback: secrets stay readable only for this process lifetime.
   config.secretsKey = randomBytes(32).toString("hex");

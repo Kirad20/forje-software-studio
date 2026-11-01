@@ -1,0 +1,118 @@
+# Forja en Docker Compose, lista para Coolify (build pack «Docker Compose").
+#
+# Coolify:   ver docs/despliegue-coolify.md. Coolify genera el dominio (SERVICE_URL_FORJA_4100),
+#            la clave de cifrado (SERVICE_HEX_64_SECRETSKEY) y el token de instalación
+#            (SERVICE_PASSWORD_BOOTSTRAP); el resto se edita en «Environment Variables».
+# Local:     cp .env.example .env   (rellena SERVICE_HEX_64_SECRETSKEY y una clave de modelo)
+#            docker compose -f docker-compose.yml -f docker-compose.local.yml up --build
+#
+# Una sola instancia a propósito: las bases de datos son PGlite embebido sobre el volumen
+# forja-data, y dos procesos escribiendo la misma carpeta la corromperían. No escales réplicas.
+
+services:
+  forja:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        # 0 quita Chromium (browser_test deja de estar disponible): imagen ~300 MB menor.
+        BROWSER: ${FORJA_BROWSER:-1}
+    restart: unless-stopped
+    expose:
+      - "4100"
+    environment:
+      # --- Coolify: dominio, proxy y secretos generados ---
+      # Coolify crea el dominio del studio y lo enruta al puerto 4100 del contenedor.
+      - SERVICE_URL_FORJA_4100
+      - PUBLIC_URL=${SERVICE_URL_FORJA_4100}
+      # 64 caracteres hex (32 bytes) generados una vez y guardados por Coolify. Cifra los secretos
+      # de los proyectos: si se pierde o cambia, esos secretos dejan de poder leerse. Respáldala.
+      - SECRETS_KEY=${SERVICE_HEX_64_SECRETSKEY}
+      # Token de un solo uso para crear la primera cuenta de administrador (también sale en el log).
+      - FORJA_BOOTSTRAP_TOKEN=${SERVICE_PASSWORD_BOOTSTRAP}
+      # Traefik (el proxy de Coolify) está delante: la IP del cliente sale de X-Forwarded-For.
+      - FORJA_TRUST_PROXY=${FORJA_TRUST_PROXY:-1}
+      - PORT=4100
+      - DATA_DIR=/app/data
+      - NODE_ENV=production
+
+      # --- Cuentas ---
+      # open (cualquiera, con código por correo) | invite (solo invitados) | closed (los admins las crean)
+      - FORJA_SIGNUP=${FORJA_SIGNUP:-invite}
+      - FREE_CREDITS=${FREE_CREDITS:-3000}
+      - CREDITS_PER_USD=${CREDITS_PER_USD:-1000}
+
+      # --- Modelos (al menos un proveedor) ---
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - FORJA_PROVIDERS=${FORJA_PROVIDERS:-}
+      - FORJA_MODELS=${FORJA_MODELS:-}
+      - FORJA_MODELS_ALLOW=${FORJA_MODELS_ALLOW:-}
+      - BUILDER_MODEL=${BUILDER_MODEL:-}
+      - APP_AI_MODEL=${APP_AI_MODEL:-}
+
+      # --- Observabilidad (opcional): Langfuse Cloud o autoalojado como recurso aparte ---
+      - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY:-}
+      - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY:-}
+      - LANGFUSE_BASE_URL=${LANGFUSE_BASE_URL:-}
+
+      # --- Evals de calidad (opcional, gastan crédito real) ---
+      - FORJA_EVALS=${FORJA_EVALS:-}
+      - FORJA_EVALS_MAX_RUN_USD=${FORJA_EVALS_MAX_RUN_USD:-5}
+      - FORJA_EVALS_MAX_DAILY_USD=${FORJA_EVALS_MAX_DAILY_USD:-20}
+      - FORJA_EVALS_CONCURRENCY=${FORJA_EVALS_CONCURRENCY:-2}
+
+      # --- GitHub (opcional) ---
+      - GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID:-}
+      - GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET:-}
+      - GITHUB_WEBHOOK_SECRET=${GITHUB_WEBHOOK_SECRET:-}
+      - GITHUB_POLL_MS=${GITHUB_POLL_MS:-60000}
+      - GITHUB_API_URL=${GITHUB_API_URL:-}
+      - GITHUB_WEB_URL=${GITHUB_WEB_URL:-}
+
+      # --- Correo y pagos (opcionales) ---
+      # Sin SMTP los códigos de acceso solo quedan en el log: con FORJA_SIGNUP=open configúralo.
+      - SMTP_URL=${SMTP_URL:-}
+      - EMAIL_FROM=${EMAIL_FROM:-noreply@forja.local}
+      - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY:-}
+
+      # --- Paquetes npm de las apps ---
+      - FORJA_NPM=${FORJA_NPM:-1}
+      - FORJA_NPM_REGISTRY=${FORJA_NPM_REGISTRY:-}
+    volumes:
+      # Bases de datos (PGlite), archivos subidos y versiones publicadas. Lo único que hay que respaldar.
+      - forja-data:/app/data
+      # Caché de paquetes npm de las apps: se reconstruye sola, solo evita reinstalar tras cada despliegue.
+      - forja-deps:/app/node_modules/.forja-deps
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4100/healthz').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    # Deja que PGlite cierre limpio (SIGTERM → closeAll) antes de matar el proceso.
+    stop_grace_period: 30s
+    labels:
+      # Apps publicadas (<slug>.<dominio>) y vistas previas (pv-<id>.<dominio>) viven en subdominios
+      # del dominio del studio. Este router los manda a Forja; el certificado comodín
+      # *.FORJA_DOMAIN lo emite Traefik con DNS challenge (ver la guía). Prioridad baja para que el
+      # dominio propio del studio (router de Coolify) gane siempre.
+      - traefik.enable=true
+      - traefik.http.routers.forja-apps.rule=HostRegexp(`^[a-z0-9-]+\.${FORJA_DOMAIN:-forja.localhost}$$`)
+      - traefik.http.routers.forja-apps.entrypoints=https
+      - traefik.http.routers.forja-apps.tls=true
+      - traefik.http.routers.forja-apps.priority=1
+      - traefik.http.routers.forja-apps.service=forja-apps
+      - traefik.http.routers.forja-apps-http.rule=HostRegexp(`^[a-z0-9-]+\.${FORJA_DOMAIN:-forja.localhost}$$`)
+      - traefik.http.routers.forja-apps-http.entrypoints=http
+      - traefik.http.routers.forja-apps-http.priority=1
+      - traefik.http.routers.forja-apps-http.middlewares=forja-apps-https
+      - traefik.http.routers.forja-apps-http.service=forja-apps
+      - traefik.http.middlewares.forja-apps-https.redirectscheme.scheme=https
+      - traefik.http.services.forja-apps.loadbalancer.server.port=4100
+
+volumes:
+  forja-data:
+  forja-deps:

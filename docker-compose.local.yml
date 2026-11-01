@@ -1,0 +1,10 @@
+# Uso local, sin Coolify ni Traefik delante:
+#   docker compose -f docker-compose.yml -f docker-compose.local.yml up --build
+# Studio en http://localhost:4100; apps publicadas en http://<slug>.localhost:4100.
+services:
+  forja:
+    ports:
+      - "${FORJA_PORT:-4100}:4100"
+    environment:
+      # Sin proxy delante: X-Forwarded-For lo manda el cliente y no es de fiar.
+      - FORJA_TRUST_PROXY=0

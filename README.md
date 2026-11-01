@@ -18,6 +18,15 @@ docker build -t forja .
 docker run -p 4100:4100 -v forja-data:/app/data -e SECRETS_KEY=... -e ANTHROPIC_API_KEY=... forja
 ```
 
+Con Docker Compose (volúmenes, healthcheck y variables listos; el mismo archivo se importa en Coolify):
+
+```bash
+cp .env.example .env   # SERVICE_HEX_64_SECRETSKEY=$(openssl rand -hex 32) y una clave de modelo
+docker compose -f docker-compose.yml -f docker-compose.local.yml up --build
+```
+
+Producción en Coolify, con dominio, HTTPS y subdominios comodín para las apps: [docs/despliegue-coolify.md](docs/despliegue-coolify.md).
+
 Desarrollo con recarga: `npm run dev` (servidor en :4100 + studio Vite en :5173). Sin SMTP, el código de acceso al studio aparece en la consola del servidor.
 
 **Primer arranque (sin usuario por defecto).** Una instalación nueva no tiene cuentas ni contraseñas conocidas: el servidor imprime en su log un token de un solo uso (o usa `FORJA_BOOTSTRAP_TOKEN`, mínimo 16 caracteres) y con él se crea la primera cuenta de administración en la pantalla de configuración. Al existir una cuenta, el token deja de servir. Después se entra con correo + contraseña, o con un código por correo (que también crea cuentas nuevas). `FORJA_SIGNUP` controla quién puede crear cuenta: `open` (por defecto), `invite` (solo correos invitados) o `closed`.
