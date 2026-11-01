@@ -35,7 +35,13 @@
 .msg-actions button { height: 24px; min-width: 26px; padding: 0 6px; color: var(--muted); font-size: 13px; }
 .msg-actions button:hover { color: var(--text); }
 .msg-actions .marked, .change-head .marked { color: #f59e0b !important; opacity: 1; }
-@media (hover: none) { .msg-actions { opacity: 1; } }
+/* Under your messages the time stays visible; the buttons appear on hover. */
+.msg-user-wrap .msg-actions { opacity: 1; align-items: center; }
+.msg-user-wrap .msg-actions button { opacity: 0; transition: opacity 0.12s; }
+.msg-user-wrap:hover .msg-actions button, .msg-user-wrap .msg-actions button:focus-visible { opacity: 1; }
+.msg-time { font-size: 11.5px; color: var(--muted); padding: 0 4px; }
+.msg-user-wrap.linked .msg-user { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent); }
+@media (hover: none) { .msg-actions, .msg-user-wrap .msg-actions button { opacity: 1; } }
 
 .steps { display: grid; gap: 1px; border-left: 2px solid var(--border); padding-left: 10px; margin-left: 2px; }
 .step { display: flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--muted); min-width: 0; width: 100%; height: 24px; padding: 0 6px; border: 0; border-radius: 6px; background: transparent; font-weight: 400; justify-content: flex-start; }
@@ -98,6 +104,12 @@ button.step:disabled { opacity: 1; cursor: default; }
 .composer-hint kbd { font-size: 10px; line-height: 14px; min-width: 16px; }
 .chat.dropping .composer-box { border-style: dashed; border-color: var(--accent); }
 .drop-hint { position: absolute; inset: 8px; display: grid; place-items: center; border-radius: 16px; border: 2px dashed var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); color: var(--accent); font-weight: 600; pointer-events: none; z-index: 5; }
+
+/* Notices over the stage (visual edits) */
+.toast { position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); z-index: 30; display: flex; align-items: center; gap: 10px; max-width: min(560px, calc(100% - 32px)); padding: 8px 8px 8px 14px; border-radius: 12px; background: var(--surface); border: 1px solid var(--border-strong); box-shadow: var(--shadow-pop); font-size: 13px; animation: pop 0.15s ease-out; }
+.toast.ok { border-color: color-mix(in srgb, var(--ok) 45%, var(--border)); }
+.toast.ok::before { content: "✓"; color: var(--ok); font-weight: 700; }
+.toast.warn { border-color: color-mix(in srgb, var(--warn) 45%, var(--border)); }
 
 /* Slash and @ menus */
 .slash-menu { width: 100%; max-height: 320px; overflow: auto; }

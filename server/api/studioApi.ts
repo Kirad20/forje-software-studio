@@ -9,6 +9,7 @@ import { deleteSecret, listSecrets, setSecret } from "../baas/secrets.js";
 import { deleteObject, listObjects, storageUsage } from "../baas/storage.js";
 import { loadHistory, type AgentEvent } from "../builder/agent.js";
 import { isBuilding, penalizeTurn, pendingPlan, runBuilderTurn, stopBuilding, type ChatMode } from "../builder/orchestrator.js";
+import { replaceVisibleText } from "../builder/textEdit.js";
 import * as accounts from "../platform/accounts.js";
 import { projectEvents, readLogs, type ProjectEvent } from "../platform/events.js";
 import { clearProblems, listProblems, recheckBuild, watchProblems } from "../platform/problems.js";
@@ -590,6 +591,22 @@ studioApi.put("/projects/:id/file", async (c) => {
   const { path, content } = await c.req.json<{ path: string; content: string }>();
   await projects.writeFile(pid(c), path, content, "owner", c.get("account").email);
   return c.json({ ok: true });
+});
+
+/**
+ * A text rewritten in place in the preview. Patched straight into the source when it appears
+ * exactly once in a page or component (no builder, no credits); otherwise the studio asks the builder.
+ */
+studioApi.post("/projects/:id/text-edit", async (c) => {
+  const { before, after } = await c.req.json<{ before: string; after: string }>();
+  if (typeof before !== "string" || typeof after !== "string" || before.length > 2000 || after.length > 2000) return c.json({ error: "Texto no válido" }, 400);
+  if (isBuilding(pid(c))) return c.json({ ok: false, reason: "building" });
+  const r = replaceVisibleText(await projects.readAllFiles(pid(c)), before, after);
+  if (!r.ok) return c.json(r);
+  // The point to restore for "Deshacer": the last change before this edit.
+  const prev = await one<{ id: number | null }>(`select max(id) as id from project_changes where project_id = $1`, [pid(c)]);
+  await projects.writeFile(pid(c), r.path, r.content, "owner", c.get("account").email);
+  return c.json({ ok: true, path: r.path, undo: prev?.id ?? null });
 });
 
 // Chat with the builder

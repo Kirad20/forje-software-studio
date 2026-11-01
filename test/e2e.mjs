@@ -294,6 +294,16 @@ const beforeRestore = (await req("GET", `/api/projects/${project.id}/changes`)).
 await req("POST", `/api/projects/${project.id}/changes/${beforeRestore.id}/restore`, { body: {} });
 ok(restoreEntry.kind === "restore" && (await req("GET", `/api/projects/${project.id}/files`)).json.files.length > 3, "a restore can itself be undone");
 
+// Visual text edits from the preview: patched into the source without the builder, and undoable
+await req("PUT", `/api/projects/${project.id}/file`, { body: { path: "pages/about.tsx", content: "export default function About() {\n  return <h1>Sobre   nosotros</h1>;\n}\n" } });
+const edit = await req("POST", `/api/projects/${project.id}/text-edit`, { body: { before: "Sobre nosotros", after: "Quiénes somos" } });
+const about = (await req("GET", `/api/projects/${project.id}/file?path=pages/about.tsx`)).json.content;
+ok(edit.json?.ok === true && edit.json.path === "pages/about.tsx" && about.includes("<h1>Quiénes somos</h1>"), "a text rewritten in the preview is saved in the source", edit.text);
+const missing = await req("POST", `/api/projects/${project.id}/text-edit`, { body: { before: "Texto que no existe", after: "x" } });
+ok(missing.json?.ok === false && missing.json.reason === "not_found", "text that is not in the code is left to the builder", missing.text);
+await req("POST", `/api/projects/${project.id}/changes/${edit.json.undo}/restore`, { body: {} });
+ok((await req("GET", `/api/projects/${project.id}/file?path=pages/about.tsx`)).json.content.includes("Sobre   nosotros"), "a visual text edit can be undone");
+
 // Folders, favorites and duplicate (copies the database too)
 const folder = await req("POST", "/api/folders", { body: { name: "Clientes" } });
 await req("PATCH", `/api/projects/${project.id}`, { body: { folderId: folder.json.id, favorite: true } });

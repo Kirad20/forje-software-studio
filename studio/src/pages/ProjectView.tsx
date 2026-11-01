@@ -8,7 +8,17 @@ import { External, Refresh } from "../components/Icons";
 import { AiPanel, CodePanel, EmailPanel, JobsPanel, LogsPanel, UsersPanel } from "../components/Panels";
 import { AnalyticsPanel, DataPanel, DocsPanel, IntegrationsPanel, PaymentsPanel, SeoPanel, StoragePanel } from "../components/ServicePanels";
 import { Avatar, copyText, Menu, MenuItem, useDismiss } from "../components/ui";
-import { CheckpointPanel, Collaborators, DEVICES, PagePalette, PreviewCanvas, ProjectSettings, PublishPanel, type Device, type PreviewHandle } from "../components/Workspace";
+import { CheckpointPanel, Collaborators, DEVICES, PagePalette, PreviewCanvas, ProjectSettings, PublishPanel, type Device, type PreviewHandle, type TextEdit } from "../components/Workspace";
+
+type Notice = { text: string; tone?: "ok" | "warn"; action?: { label: string; run: () => void } };
+
+const TEXT_EDIT_WHY: Record<string, string> = {
+  not_found: "Ese texto no está escrito en el código (puede venir de la base de datos).",
+  ambiguous: "Ese texto aparece en varios sitios.",
+  unsafe: "El texto nuevo tiene caracteres que el código interpretaría.",
+  building: "El constructor está trabajando.",
+  empty: "El texto no puede quedar vacío.",
+};
 
 type View = "preview" | "services" | "settings" | "details";
 type ServiceKey = "data" | "users" | "ai" | "integrations" | "analytics" | "seo" | "docs" | "jobs" | "storage" | "email" | "payments" | "logs" | "code";
@@ -65,6 +75,54 @@ export function ProjectView({ id, me, onCredits }: { id: string; me: Me; onCredi
   const preview = useRef<PreviewHandle>(null);
   const closePanel = useCallback(() => setPanel(null), []);
   const closeDetails = useCallback(() => setView("preview"), []);
+  const [editingText, setEditingText] = useState(false);
+  const [notice, setNotice] = useState<Notice | null>(null);
+  useEffect(() => {
+    if (!notice) return;
+    const t = setTimeout(() => setNotice(null), notice.action ? 9000 : 4500);
+    return () => clearTimeout(t);
+  }, [notice]);
+  const toggleEditText = () => {
+    const on = !editingText;
+    setEditingText(on);
+    if (on && selecting) setSelecting(false);
+    preview.current?.setEditingText(on);
+  };
+  const onEditEnded = useCallback(() => setEditingText(false), []);
+  // A text rewritten in the preview: patched directly when unambiguous, otherwise handed to the builder.
+  const onTextEdit = useCallback(
+    async (e: TextEdit) => {
+      try {
+        const r = await api<{ ok: boolean; path?: string; undo?: number | null; reason?: string; matches?: string[] }>(`/projects/${id}/text-edit`, {
+          body: { before: e.before, after: e.after },
+        });
+        if (r.ok) {
+          setNotice({
+            text: `Texto cambiado en ${r.path} · sin créditos`,
+            tone: "ok",
+            action:
+              r.undo != null
+                ? {
+                    label: "Deshacer",
+                    run: () => void api(`/projects/${id}/changes/${r.undo}/restore`, { body: {} }).then(() => setNotice({ text: "Cambio deshecho" })),
+                  }
+                : undefined,
+          });
+          return;
+        }
+        const why = TEXT_EDIT_WHY[r.reason ?? ""] ?? "No pude cambiarlo directamente.";
+        setDrawer(true);
+        setInsert({
+          text: `Cambia el texto «${e.before.trim()}» por «${e.after.trim()}» en la página ${e.path}${r.matches?.length ? ` (aparece en ${r.matches.join(", ")})` : ""}.`,
+          nonce: Date.now(),
+        });
+        setNotice({ text: `${why} Te dejé la petición en el chat para el constructor.`, tone: "warn" });
+      } catch (err) {
+        setNotice({ text: (err as Error).message, tone: "warn" });
+      }
+    },
+    [id],
+  );
   const checkpointRef = useDismiss<HTMLDivElement>(panel === "checkpoints", closePanel);
   const publishRef = useDismiss<HTMLDivElement>(panel === "publish", closePanel);
 
@@ -118,6 +176,7 @@ export function ProjectView({ id, me, onCredits }: { id: string; me: Me; onCredi
   const toggleSelect = () => {
     const on = !selecting;
     setSelecting(on);
+    if (on) setEditingText(false);
     preview.current?.setSelecting(on);
     if (on && !drawer) toggleDrawer();
   };
@@ -266,6 +325,14 @@ export function ProjectView({ id, me, onCredits }: { id: string; me: Me; onCredi
             <button className={`tool ${selecting ? "on" : ""}`} onClick={toggleSelect} title="Elige un elemento de la vista previa para pedir un cambio sobre él">
               ⌖ Seleccionar
             </button>
+            <button
+              className={`tool ${editingText ? "on" : ""}`}
+              aria-pressed={editingText}
+              onClick={toggleEditText}
+              title="Haz clic en un texto de la vista previa y reescríbelo. Se guarda sin gastar créditos cuando el texto está en el código."
+            >
+              <span style={{ fontFamily: "Georgia, serif", fontWeight: 700 }}>T</span> Editar texto
+            </button>
             <Menu
               button={(_, toggle) => (
                 <button className="tool" onClick={toggle}>
@@ -284,6 +351,7 @@ export function ProjectView({ id, me, onCredits }: { id: string; me: Me; onCredi
               }
             </Menu>
             {selecting && <span className="small muted">Haz clic en un elemento de la vista previa · Esc para cancelar</span>}
+            {editingText && <span className="small muted">Haz clic en un texto y escribe · Enter guarda · Esc cancela</span>}
           </div>
         )}
       </div>
@@ -333,11 +401,41 @@ export function ProjectView({ id, me, onCredits }: { id: string; me: Me; onCredi
         ) : (
           <div />
         )}
-        <section style={{ minWidth: 0, minHeight: 0, display: "grid" }}>
+        <section style={{ minWidth: 0, minHeight: 0, display: "grid", position: "relative" }}>
           {/* The preview stays mounted while other views are open, so it does not reload. */}
           <div style={{ display: view === "preview" ? "grid" : "none", minHeight: 0 }}>
-            <PreviewCanvas ref={preview} project={project} device={device} fullscreen={fullscreen} onPath={setPath} onSelected={onSelected} onSelectEnded={onSelectEnded} onFix={onFix} />
+            <PreviewCanvas
+              ref={preview}
+              project={project}
+              device={device}
+              fullscreen={fullscreen}
+              onPath={setPath}
+              onSelected={onSelected}
+              onSelectEnded={onSelectEnded}
+              onFix={onFix}
+              onTextEdit={onTextEdit}
+              onEditEnded={onEditEnded}
+            />
           </div>
+          {notice && (
+            <div className={`toast ${notice.tone ?? ""}`} role="status">
+              <span>{notice.text}</span>
+              {notice.action && (
+                <button
+                  className="sm"
+                  onClick={() => {
+                    notice.action!.run();
+                    setNotice(null);
+                  }}
+                >
+                  {notice.action.label}
+                </button>
+              )}
+              <button className="sm ghost icon-btn" style={{ height: 24, width: 24 }} aria-label="Cerrar aviso" onClick={() => setNotice(null)}>
+                ×
+              </button>
+            </div>
+          )}
           {view === "services" && (
             <div className="services">
               <nav className="svc-nav">

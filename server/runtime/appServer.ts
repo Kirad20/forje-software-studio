@@ -275,8 +275,20 @@ document.addEventListener("mousemove",e=>{if(!selecting)return;hovered=e.target;
 document.addEventListener("click",e=>{if(!selecting)return;e.preventDefault();e.stopPropagation();const el=e.target;
 tell({type:"forja:selected",element:{tag:el.tagName.toLowerCase(),text:(el.innerText||"").trim().slice(0,200),selector:cssPath(el),html:el.outerHTML.slice(0,600),path:path()}});stop();tell({type:"forja:select-ended"})},true);
 addEventListener("keydown",e=>{if(selecting&&e.key==="Escape"){stop();tell({type:"forja:select-ended"})}});
+let editing=false,editEl=null,orig="";
+const isText=el=>el&&el.nodeType===1&&el!==document.body&&el.childElementCount===0&&!/^(INPUT|TEXTAREA|SELECT|SCRIPT|STYLE|IMG|svg|path)$/.test(el.tagName)&&(el.textContent||"").trim().length>0;
+const endEdit=keep=>{if(!editEl)return;const el=editEl,now=el.textContent||"";editEl=null;el.removeAttribute("contenteditable");el.style.outline="";
+if(!keep){el.textContent=orig;return}if(now.trim()&&now.trim()!==orig.trim())tell({type:"forja:text-edit",before:orig,after:now,selector:cssPath(el),path:path()})};
+const stopEditing=()=>{endEdit(true);editing=false;box&&box.remove();document.documentElement.style.cursor=""};
+document.addEventListener("mousemove",e=>{if(!editing||editEl)return;if(isText(e.target))outline(e.target);else box&&box.remove()},true);
+document.addEventListener("click",e=>{if(!editing)return;if(editEl&&editEl.contains(e.target))return;e.preventDefault();e.stopPropagation();endEdit(true);const el=e.target;if(!isText(el))return;
+box&&box.remove();editEl=el;orig=el.textContent||"";try{el.contentEditable="plaintext-only"}catch(_){el.contentEditable="true"}el.style.outline="2px solid #6366f1";el.focus();
+const r=document.createRange();r.selectNodeContents(el);const s=getSelection();s.removeAllRanges();s.addRange(r)},true);
+document.addEventListener("keydown",e=>{if(!editing)return;if(editEl&&e.key==="Enter"&&!e.shiftKey){e.preventDefault();endEdit(true)}else if(e.key==="Escape"){e.preventDefault();if(editEl)endEdit(false);else{stopEditing();tell({type:"forja:edit-ended"})}}},true);
+document.addEventListener("focusout",e=>{if(editEl&&e.target===editEl)endEdit(true)},true);
 addEventListener("message",e=>{if(!allowed.includes(e.origin))return;const m=e.data||{};
-if(m.type==="forja:select"){selecting=!!m.on;if(selecting)document.documentElement.style.cursor="crosshair";else stop()}
+if(m.type==="forja:edit-text"){if(m.on){stop();editing=true;document.documentElement.style.cursor="text"}else stopEditing()}
+if(m.type==="forja:select"){selecting=!!m.on;if(selecting){stopEditing();document.documentElement.style.cursor="crosshair"}else stop()}
 if(m.type==="forja:navigate"&&typeof m.path==="string"){history.pushState(null,"",b+m.path);dispatchEvent(new PopStateEvent("popstate"))}});
 document.addEventListener("click",e=>{const t=e.target.closest&&e.target.closest("[data-forja-fix]");if(t){e.preventDefault();tell({type:"forja:fix"})}});
 })();</script>`;

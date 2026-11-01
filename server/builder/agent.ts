@@ -27,12 +27,12 @@ export async function save(projectId: string, msg: LlmMessage, turnId: string) {
 }
 
 /** Raw history, for the chat UI. The model never gets this verbatim (see orchestrator.turnContext). */
-export async function loadHistory(projectId: string): Promise<(LlmMessage & { turnId: string | null })[]> {
-  const rows = await q<{ role: "user" | "assistant"; content: Block[]; turn_id: string | null }>(
-    `select role, content, turn_id from chat_messages where project_id = $1 order by id`,
+export async function loadHistory(projectId: string): Promise<(LlmMessage & { turnId: string | null; createdAt: string })[]> {
+  const rows = await q<{ role: "user" | "assistant"; content: Block[]; turn_id: string | null; created_at: string }>(
+    `select role, content, turn_id, created_at from chat_messages where project_id = $1 order by id`,
     [projectId],
   );
-  return rows.map((r) => ({ role: r.role, content: r.content, turnId: r.turn_id }));
+  return rows.map((r) => ({ role: r.role, content: r.content, turnId: r.turn_id, createdAt: r.created_at }));
 }
 
 export const UPLOADS = "static/uploads/";

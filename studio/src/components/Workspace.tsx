@@ -22,6 +22,15 @@ export interface PreviewHandle {
   navigate(path: string): void;
   reload(): void;
   setSelecting(on: boolean): void;
+  setEditingText(on: boolean): void;
+}
+
+/** A text the owner rewrote in place in the preview. */
+export interface TextEdit {
+  before: string;
+  after: string;
+  selector: string;
+  path: string;
 }
 
 const LOADING_STEPS = ["Preparando el entorno", "Compilando la app", "Cargando la vista previa"];
@@ -33,9 +42,21 @@ const LOADING_STEPS = ["Preparando el entorno", "Compilando la app", "Cargando l
  */
 export const PreviewCanvas = forwardRef<
   PreviewHandle,
-  { project: Project; device: Device; fullscreen: boolean; onPath: (p: string) => void; onSelected: (el: SelectedElement) => void; onSelectEnded: () => void; onFix?: () => void }
->(function PreviewCanvas({ project, device, fullscreen, onPath, onSelected, onSelectEnded, onFix }, ref) {
+  {
+    project: Project;
+    device: Device;
+    fullscreen: boolean;
+    onPath: (p: string) => void;
+    onSelected: (el: SelectedElement) => void;
+    onSelectEnded: () => void;
+    onFix?: () => void;
+    onTextEdit?: (e: TextEdit) => void;
+    onEditEnded?: () => void;
+  }
+>(function PreviewCanvas({ project, device, fullscreen, onPath, onSelected, onSelectEnded, onFix, onTextEdit, onEditEnded }, ref) {
   const frame = useRef<HTMLIFrameElement>(null);
+  // Text editing survives the live reload that follows each saved edit.
+  const editingText = useRef(false);
   const [nonce, setNonce] = useState(0);
   const [step, setStep] = useState(0);
   const [loaded, setLoaded] = useState(false);
@@ -50,7 +71,14 @@ export const PreviewCanvas = forwardRef<
       setLoaded(false);
       setNonce((n) => n + 1);
     },
-    setSelecting: (on) => post({ type: "forja:select", on }),
+    setSelecting: (on) => {
+      if (on) editingText.current = false;
+      post({ type: "forja:select", on });
+    },
+    setEditingText: (on) => {
+      editingText.current = on;
+      post({ type: "forja:edit-text", on });
+    },
   }));
 
   useEffect(() => {
@@ -61,10 +89,15 @@ export const PreviewCanvas = forwardRef<
       if (m.type === "forja:selected") onSelected(m.element);
       if (m.type === "forja:select-ended") onSelectEnded();
       if (m.type === "forja:fix") onFix?.();
+      if (m.type === "forja:text-edit" && typeof m.before === "string" && typeof m.after === "string") onTextEdit?.({ before: m.before, after: m.after, selector: String(m.selector ?? ""), path: String(m.path ?? "/") });
+      if (m.type === "forja:edit-ended") {
+        editingText.current = false;
+        onEditEnded?.();
+      }
     };
     window.addEventListener("message", onMsg);
     return () => window.removeEventListener("message", onMsg);
-  }, [origin, onPath, onSelected, onSelectEnded, onFix]);
+  }, [origin, onPath, onSelected, onSelectEnded, onFix, onTextEdit, onEditEnded]);
 
   useEffect(() => {
     if (loaded) return;
@@ -81,7 +114,10 @@ export const PreviewCanvas = forwardRef<
       ref={frame}
       title="Vista previa"
       src={src}
-      onLoad={() => setLoaded(true)}
+      onLoad={() => {
+        setLoaded(true);
+        if (editingText.current) post({ type: "forja:edit-text", on: true });
+      }}
       style={
         device === "desktop" || fullscreen
           ? { width: "100%", height: "100%" }

@@ -26,6 +26,15 @@ interface Message {
   role: "user" | "assistant";
   content: Block[];
   turnId?: string | null;
+  createdAt?: string;
+}
+
+/** "30 jun, 16:53" — the year only when it is not this one. */
+function when(iso: string) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const sameYear = d.getFullYear() === new Date().getFullYear();
+  return d.toLocaleString(undefined, { day: "numeric", month: "short", year: sameYear ? undefined : "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
 /** One agent's run in a turn, as stored by the server (agent_tasks). */
@@ -74,7 +83,7 @@ interface Step {
 
 /** A rendered chat item. `turn` ties it to the turn it belongs to (for change cards and details). */
 type Item = (
-  | { kind: "user"; text: string; element?: string; attachments?: string[] }
+  | { kind: "user"; text: string; element?: string; attachments?: string[]; at?: string }
   | { kind: "ai"; text: string }
   | { kind: "steps"; steps: Step[] }
   | { kind: "team"; team: TeamTurn }
@@ -200,7 +209,7 @@ function toItems(messages: Message[], tasks: TaskRow[] = []): Item[] {
         if (m.role === "user") {
           const it = userItem(b.text);
           if (turn && !firstText.has(turn) && it.kind === "user") firstText.set(turn, it.text);
-          items.push({ ...it, turn });
+          items.push(it.kind === "user" ? { ...it, at: m.createdAt, turn } : { ...it, turn });
         } else items.push({ kind: "ai", text: b.text, turn });
       }
       if (b.type === "tool_use") {
@@ -628,6 +637,18 @@ export function Chat({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [insert?.nonce]);
 
+  // A link to a message (?msg=<turn>) opens the chat on it.
+  const [linked] = useState(() => new URLSearchParams(location.search).get("msg"));
+  const jumped = useRef(false);
+  useEffect(() => {
+    if (!linked || jumped.current || !items.length) return;
+    const el = document.getElementById(`turn-${linked}`);
+    if (!el) return;
+    jumped.current = true;
+    stick.current = false;
+    el.scrollIntoView({ block: "center" });
+  }, [items, linked]);
+
   useEffect(() => {
     void load().then((r) => {
       // First message from the dashboard prompt box.
@@ -892,7 +913,7 @@ export function Chat({
         {onlyMarked && visible.length === 0 && <div className="small muted chat-empty">Aún no has marcado nada. Usa ☆ en una respuesta o en una tarjeta de cambios.</div>}
         {visible.map((it, i) =>
           it.kind === "user" ? (
-            <div key={i} className="msg-user-wrap">
+            <div key={i} className={`msg-user-wrap ${it.turn && it.turn === linked ? "linked" : ""}`} id={it.turn ? `turn-${it.turn}` : undefined}>
               <div className="msg-user">
                 {it.attachments?.map((a) => (
                   <div key={a} className="bubble-chip">
@@ -904,6 +925,21 @@ export function Chat({
               </div>
               {!building && (
                 <div className="msg-actions right">
+                  {it.at && (
+                    <time className="msg-time" dateTime={it.at} title={new Date(it.at).toLocaleString()}>
+                      {when(it.at)}
+                    </time>
+                  )}
+                  {it.turn && (
+                    <button
+                      className="ghost sm"
+                      aria-label="Copiar enlace del mensaje"
+                      title="Copiar enlace del mensaje"
+                      onClick={() => void copyMsg(-1 - i, `${location.origin}${location.pathname}?msg=${encodeURIComponent(it.turn!)}`)}
+                    >
+                      {copied === -1 - i ? "✓" : "🔗"}
+                    </button>
+                  )}
                   <button className="ghost sm" aria-label="Copiar mensaje" title="Copiar" onClick={() => void copyMsg(i, it.text)}>
                     {copied === i ? "✓" : "⧉"}
                   </button>
