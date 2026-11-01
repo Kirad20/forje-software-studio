@@ -86,6 +86,7 @@ studio, porque su cookie exige `Secure`).
    | Variable | Valor |
    |---|---|
    | `FORJA_DOMAIN` | `forja.tudominio.com` (el host del studio, sin `https://`) **obligatoria** |
+   | `PUBLIC_URL` | opcional: vacía, Forja usa `SERVICE_URL_FORJA_4100` o, si Coolify no la define, `https://FORJA_DOMAIN`. El log de arranque dice cuál quedó (`plataforma en …`) |
 
    Nada más: proveedores y modelos, registro de cuentas, SMTP, GitHub, Langfuse, evals… se
    configuran en el studio (**Administración**) y se guardan en Postgres, con los secretos cifrados

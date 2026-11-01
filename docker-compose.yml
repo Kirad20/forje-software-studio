@@ -26,7 +26,10 @@ services:
       # --- Coolify: dominio, proxy y secretos generados ---
       # Coolify crea el dominio del studio y lo enruta al puerto 4100 del contenedor.
       - SERVICE_URL_FORJA_4100
-      - PUBLIC_URL=${SERVICE_URL_FORJA_4100}
+      # URL pública del studio. Vacía: Forja usa SERVICE_URL_FORJA_4100 y, si Coolify no la define,
+      # https://FORJA_DOMAIN. Rellénala solo si el studio vive en otra dirección.
+      - PUBLIC_URL=${PUBLIC_URL:-}
+      - FORJA_DOMAIN=${FORJA_DOMAIN:-}
       # 64 caracteres hex (32 bytes) generados una vez y guardados por Coolify. Cifra los secretos
       # de los proyectos: si se pierde o cambia, esos secretos dejan de poder leerse. Respáldala.
       - SECRETS_KEY=${SERVICE_HEX_64_SECRETSKEY}
@@ -39,7 +42,10 @@ services:
       - NODE_ENV=production
 
       # Base de datos de la plataforma (servicio postgres de abajo).
-      - DATABASE_URL=postgres://forja:${SERVICE_PASSWORD_POSTGRES}@postgres:5432/forja
+      # Si Coolify no genera SERVICE_PASSWORD_POSTGRES se usa un valor fijo: Postgres no publica puerto y
+      # solo se alcanza desde la red interna de este compose. Defínela antes del primer arranque si
+      # quieres una propia: Postgres guarda la contraseña con la que se inicializó su volumen.
+      - DATABASE_URL=postgres://forja:${SERVICE_PASSWORD_POSTGRES:-forja-internal-db}@postgres:5432/forja
       # El resto de la configuración (registro, créditos, modelos y proveedores, SMTP, GitHub,
       # Langfuse, evals, npm…) ya no va aquí: se edita en el studio, Administración → General.
     depends_on:
@@ -82,7 +88,7 @@ services:
     restart: unless-stopped
     environment:
       - POSTGRES_USER=forja
-      - POSTGRES_PASSWORD=${SERVICE_PASSWORD_POSTGRES}
+      - POSTGRES_PASSWORD=${SERVICE_PASSWORD_POSTGRES:-forja-internal-db}
       - POSTGRES_DB=forja
     volumes:
       - forja-pg:/var/lib/postgresql/data

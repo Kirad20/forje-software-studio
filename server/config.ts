@@ -11,8 +11,9 @@ export const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)
 const env = new Proxy(process.env, { get: (t, k) => (typeof k === "string" && t[k] !== "" ? t[k] : undefined) });
 
 /**
- * The studio's public origin. PUBLIC_URL wins; without it, Coolify's SERVICE_URL_FORJA_4100 (the
- * compose derives PUBLIC_URL from it, but an empty interpolation must not leave us on localhost).
+ * The studio's public origin, from the first of: PUBLIC_URL; Coolify's SERVICE_URL_FORJA_4100
+ * (not every Coolify version sets it for compose services); https://FORJA_DOMAIN, the domain the
+ * proxy routes apps and the studio under; and only then localhost.
  * Behind a trusted proxy, a port equal to our own PORT is the container port the proxy routes to
  * (Coolify writes https://host:4100), not the one browsers use: it is dropped, or no browser
  * Origin would ever match it.
@@ -20,7 +21,8 @@ const env = new Proxy(process.env, { get: (t, k) => (typeof k === "string" && t[
 export function resolvePublicUrl(vars: Record<string, string | undefined>): string {
   const get = (k: string) => (vars[k] ? vars[k] : undefined);
   const port = get("PORT") ?? "4100";
-  const raw = get("PUBLIC_URL") ?? get("SERVICE_URL_FORJA_4100");
+  const domain = get("FORJA_DOMAIN")?.replace(/^https?:\/\//, "").replace(/\/.*$/, "");
+  const raw = get("PUBLIC_URL") ?? get("SERVICE_URL_FORJA_4100") ?? (domain ? `https://${domain}` : undefined);
   if (!raw) return `http://localhost:${port}`;
   try {
     const url = new URL(raw);
