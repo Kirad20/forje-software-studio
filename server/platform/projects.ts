@@ -6,8 +6,10 @@ import { emitProject } from "./events.js";
 import { ensurePersonalOrg, personalOrgId } from "./orgs.js";
 import {
   ProjectPath,
+  Checkpoint,
   writeFileUseCase,
   deleteFileUseCase,
+  createCheckpointUseCase,
 } from "../modules/projects/index.js";
 
 export type FileMap = Record<string, string>;
@@ -244,8 +246,14 @@ async function touch(projectId: string, paths: string[]) {
 // --- Checkpoints: named points on the change timeline ------------------------------
 
 export async function createCheckpoint(projectId: string, label: string, author: Author = "owner", description?: string, actor?: string) {
-  await logChange(projectId, { kind: "checkpoint", paths: [], author, actor, label: label.slice(0, 120), description });
-  return (await one<{ id: number }>(`select max(id) as id from project_changes where project_id = $1`, [projectId]))!.id;
+  const cp = new Checkpoint({
+    projectId,
+    label,
+    author,
+    actor,
+    description,
+  });
+  return createCheckpointUseCase.execute(projectId, cp);
 }
 
 export interface ChangeEntry {
