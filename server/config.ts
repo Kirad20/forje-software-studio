@@ -11,9 +11,9 @@ export const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)
 const env = new Proxy(process.env, { get: (t, k) => (typeof k === "string" && t[k] !== "" ? t[k] : undefined) });
 
 /**
- * The studio's public origin, from the first of: PUBLIC_URL; Coolify's SERVICE_URL_FORJA_4100
- * (not every Coolify version sets it for compose services); https://FORJA_DOMAIN, the domain the
- * proxy routes apps and the studio under; and only then localhost.
+ * The studio's public origin, from the first of: PUBLIC_URL; Coolify's generated service URL;
+ * COOLIFY_URL; https://FORJA_DOMAIN, the domain the proxy routes apps and the studio under; and
+ * only then localhost. In production, a public candidate wins over a leftover localhost value.
  * Behind a trusted proxy, a port equal to our own PORT is the container port the proxy routes to
  * (Coolify writes https://host:4100), not the one browsers use: it is dropped, or no browser
  * Origin would ever match it.
@@ -22,7 +22,26 @@ export function resolvePublicUrl(vars: Record<string, string | undefined>): stri
   const get = (k: string) => (vars[k] ? vars[k] : undefined);
   const port = get("PORT") ?? "4100";
   const domain = get("FORJA_DOMAIN")?.replace(/^https?:\/\//, "").replace(/\/.*$/, "");
-  const raw = get("PUBLIC_URL") ?? get("SERVICE_URL_FORJA_4100") ?? (domain ? `https://${domain}` : undefined);
+  const publicUrl = get("PUBLIC_URL");
+  if (publicUrl) {
+    try {
+      new URL(publicUrl);
+    } catch {
+      throw new Error(`PUBLIC_URL no es una URL válida: ${publicUrl}`);
+    }
+  }
+  const absolute = (value: string | undefined) =>
+    value && /^https?:\/\//i.test(value) ? value.split(",", 1)[0]!.trim() : undefined;
+  const candidates = [
+    publicUrl,
+    absolute(get("SERVICE_URL_FORJA_4100")),
+    absolute(get("SERVICE_URL_FORJA")),
+    absolute(get("COOLIFY_URL")),
+    domain ? `https://${domain}` : undefined,
+  ].filter((value): value is string => Boolean(value));
+  const isLoopback = (value: string) => /^https?:\/\/(localhost|127\.0\.0\.1)(:|\/|$)/i.test(value);
+  const raw =
+    get("NODE_ENV") === "production" ? candidates.find((value) => !isLoopback(value)) ?? candidates[0] : candidates[0];
   if (!raw) return `http://localhost:${port}`;
   try {
     const url = new URL(raw);
