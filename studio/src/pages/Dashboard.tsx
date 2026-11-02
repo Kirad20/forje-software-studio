@@ -184,7 +184,7 @@ export function Dashboard() {
   const links = (p: Project) => (
     <>
       {p.appUrl && (
-        <a className="btn sm icon-btn" href={p.appUrl} target="_blank" rel="noreferrer" title="Abrir app en vivo" onClick={(e) => e.stopPropagation()}>
+        <a className="btn sm icon-btn" href={p.appUrl} target="_blank" rel="noreferrer" title="Abrir app en vivo" aria-label="Abrir app en vivo" onClick={(e) => e.stopPropagation()}>
           <External />
         </a>
       )}
@@ -275,6 +275,7 @@ export function Dashboard() {
                   <button
                     className="ghost sm icon-btn"
                     title="Borrar carpeta"
+                    aria-label={`Borrar carpeta ${f.name}`}
                     onClick={async () => {
                       await api(`/folders/${f.id}`, { method: "DELETE" });
                       if (folder === f.id) setFolder("all");
