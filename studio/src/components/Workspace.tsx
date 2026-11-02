@@ -197,10 +197,10 @@ export function CheckpointPanel({ projectId, reloadKey, onClose, myEmail }: { pr
     <div className="panel-pop" style={{ left: 0 }}>
       <div className="row" style={{ padding: "10px 12px", borderBottom: "1px solid var(--border)", position: "sticky", top: 0, background: "var(--surface)", zIndex: 1 }}>
         <strong className="grow">Checkpoints</strong>
-        <button className={`sm icon-btn ${onlyNamed ? "primary" : "ghost"}`} title="Solo checkpoints con nombre" onClick={() => setOnlyNamed((v) => !v)}>
+        <button className={`sm icon-btn ${onlyNamed ? "primary" : "ghost"}`} title="Solo checkpoints con nombre" aria-label="Solo checkpoints con nombre" aria-pressed={onlyNamed} onClick={() => setOnlyNamed((v) => !v)}>
           ⚑
         </button>
-        <button className="sm icon-btn ghost" title="Guardar un checkpoint" onClick={() => setNaming((v) => !v)}>
+        <button className="sm icon-btn ghost" title="Guardar un checkpoint" aria-label="Guardar un checkpoint" onClick={() => setNaming((v) => !v)}>
           ＋
         </button>
         <button className="sm icon-btn ghost" aria-label="Cerrar" onClick={onClose}>
@@ -248,6 +248,7 @@ export function CheckpointPanel({ projectId, reloadKey, onClose, myEmail }: { pr
               <button
                 className="sm icon-btn ghost"
                 title="Restaurar el código a este punto"
+                aria-label="Restaurar el código a este punto"
                 onClick={async () => {
                   if (!confirm("¿Restaurar el código a este punto? Los datos de la app no cambian, y puedes deshacerlo desde aquí.")) return;
                   await api(`/projects/${projectId}/changes/${c.id}/restore`, { body: {} });

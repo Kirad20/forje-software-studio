@@ -78,7 +78,7 @@ export function DataPanel({ projectId, projectName, reloadKey }: { projectId: st
           <div className="row" style={{ padding: "10px 12px", borderBottom: "1px solid var(--border)", flexWrap: "wrap" }}>
             <Menu
               button={(_, toggle) => (
-                <button className="sm icon-btn" title="Ajustes de la base de datos" onClick={toggle}>
+                <button className="sm icon-btn" title="Ajustes de la base de datos" aria-label="Ajustes de la base de datos" onClick={toggle}>
                   ⚙
                 </button>
               )}

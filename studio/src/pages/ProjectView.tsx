@@ -233,13 +233,13 @@ export function ProjectView({ id, me, onCredits }: { id: string; me: Me; onCredi
           <div className="center">
             {view === "preview" ? (
               <>
-                <button className="sm icon-btn ghost" title="Pantalla completa (Esc para salir)" onClick={() => setFullscreen(true)}>
+                <button className="sm icon-btn ghost" title="Pantalla completa (Esc para salir)" aria-label="Pantalla completa" onClick={() => setFullscreen(true)}>
                   ⛶
                 </button>
                 <button className="page-chip" title="Ir a una página (Ctrl+K)" onClick={() => setPalette(true)}>
                   ▭ {pageLabel} {project.appUrl && <span className="live-dot" title="Publicada" />} ▾
                 </button>
-                <button className="sm icon-btn ghost" title="Recargar" onClick={() => preview.current?.reload()}>
+                <button className="sm icon-btn ghost" title="Recargar" aria-label="Recargar vista previa" onClick={() => preview.current?.reload()}>
                   <Refresh />
                 </button>
               </>
