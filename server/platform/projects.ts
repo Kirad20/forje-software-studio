@@ -4,6 +4,11 @@ import { starterFiles } from "../templates/starter.js";
 import { one, platformDb, q } from "./db.js";
 import { emitProject } from "./events.js";
 import { ensurePersonalOrg, personalOrgId } from "./orgs.js";
+import {
+  ProjectPath,
+  writeFileUseCase,
+  deleteFileUseCase,
+} from "../modules/projects/index.js";
 
 export type FileMap = Record<string, string>;
 
@@ -53,16 +58,11 @@ const PROJECT_COLS = `id, owner_id as "ownerId", org_id as "orgId", name, descri
   system_prompt as "systemPrompt", design_prompt as "designPrompt", seo, share_epoch as "shareEpoch",
   created_at as "createdAt", updated_at as "updatedAt"`;
 
-/** The only places a project file may live; mirrors the conventions the builder is taught. */
-const ALLOWED = /^(pages|components|helpers|endpoints|jobs|static)\/[A-Za-z0-9_.$\-/[\]]+$|^base\.css$|^package\.json$/;
-
 /** Working notes the builder keeps for itself; never served or published. */
 export const isDevFile = (path: string) => path.startsWith("static/__dev/");
 
 export function assertValidPath(path: string) {
-  if (!ALLOWED.test(path) || path.includes("..") || path.includes("//")) {
-    throw new Error(`Ruta no válida: "${path}". Usa pages/, components/, helpers/, endpoints/, jobs/, static/, base.css o package.json.`);
-  }
+  ProjectPath.assertValid(path);
 }
 
 /** `orgId` defaults to the owner's personal organization; the caller has checked the owner belongs to it. */
@@ -218,24 +218,11 @@ export async function projectVersion(projectId: string): Promise<number> {
 }
 
 export async function writeFile(projectId: string, path: string, content: string, author: Author = "owner", actor?: string) {
-  assertValidPath(path);
-  const before = await readFile(projectId, path);
-  if (before === content) return;
-  await q(
-    `insert into project_files (project_id, path, content) values ($1, $2, $3)
-     on conflict (project_id, path) do update set content = excluded.content, updated_at = now()`,
-    [projectId, path, content],
-  );
-  await logChange(projectId, { kind: before === undefined ? "create" : "edit", paths: [path], author, actor, before: { [path]: before ?? null } });
-  await touch(projectId, [path]);
+  await writeFileUseCase.execute(projectId, path, content, author, actor);
 }
 
 export async function deleteFile(projectId: string, path: string, author: Author = "owner") {
-  const before = await readFile(projectId, path);
-  if (before === undefined) return;
-  await q(`delete from project_files where project_id = $1 and path = $2`, [projectId, path]);
-  await logChange(projectId, { kind: "delete", paths: [path], author, before: { [path]: before } });
-  await touch(projectId, [path]);
+  await deleteFileUseCase.execute(projectId, path, author);
 }
 
 export async function renameFile(projectId: string, from: string, to: string, author: Author = "owner") {
