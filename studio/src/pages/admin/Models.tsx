@@ -188,7 +188,7 @@ export function Models() {
         </div>
       </section>
 
-      <AddModel providers={providers} onAdded={load} />
+      <AddModel onAdded={load} />
     </div>
   );
 }
@@ -294,9 +294,19 @@ function Whitelist({ models, onSaved }: { models: CatalogModel[]; onSaved: () =>
   );
 }
 
-function AddModel({ providers, onAdded }: { providers: string[]; onAdded: () => void }) {
+function AddModel({ onAdded }: { onAdded: () => void }) {
   const [open, setOpen] = useState(false);
-  const [f, setF] = useState({ provider: providers.find((p) => p !== "anthropic" && p !== "openrouter") ?? "openai", model: "", label: "", inPrice: 0, outPrice: 0, context: 128000, tier: 3, speed: 3, tools: true, vision: false });
+  // Registered providers, not the ones that already have models: a freshly added provider has none.
+  const [providers, setProviders] = useState<string[]>([]);
+  useEffect(() => {
+    if (!open) return;
+    void api<{ providers: { id: string }[] }>("/admin/providers").then((r) => {
+      const ids = r.providers.map((p) => p.id).filter((id) => id !== "openrouter");
+      setProviders(ids);
+      setF((cur) => (ids.includes(cur.provider) ? cur : { ...cur, provider: ids.find((id) => id !== "anthropic") ?? ids[0] ?? "" }));
+    });
+  }, [open]);
+  const [f, setF] = useState({ provider: "", model: "", label: "", inPrice: 0, outPrice: 0, context: 128000, tier: 3, speed: 3, tools: true, vision: false });
   const [error, setError] = useState("");
   if (!open)
     return (
@@ -336,11 +346,9 @@ function AddModel({ providers, onAdded }: { providers: string[]; onAdded: () => 
         <label className="small">
           Proveedor
           <select value={f.provider} onChange={(e) => setF({ ...f, provider: e.target.value })} style={{ width: 160 }}>
-            {providers
-              .filter((p) => p !== "openrouter")
-              .map((p) => (
-                <option key={p}>{p}</option>
-              ))}
+            {providers.map((p) => (
+              <option key={p}>{p}</option>
+            ))}
           </select>
         </label>
         {field("model", "Nombre en la API", "text", 200)}
@@ -359,7 +367,7 @@ function AddModel({ providers, onAdded }: { providers: string[]; onAdded: () => 
       </div>
       {error && <div className="error-box">{error}</div>}
       <div className="row">
-        <button className="primary" disabled={!f.model.trim()}>
+        <button className="primary" disabled={!f.model.trim() || !f.provider}>
           Añadir
         </button>
         <button type="button" className="ghost" onClick={() => setOpen(false)}>
