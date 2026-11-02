@@ -11,6 +11,35 @@ describe("resolvePublicUrl", () => {
     expect(resolvePublicUrl({ PUBLIC_URL: "", SERVICE_URL_FORJA_4100: "https://forja-abc.example.com" })).toBe("https://forja-abc.example.com");
   });
 
+  it("ignores Coolify's declaration placeholder outside Coolify", () => {
+    expect(resolvePublicUrl({ SERVICE_URL_FORJA_4100: "/", PORT: "4100" })).toBe("http://localhost:4100");
+  });
+
+  it("does not let localhost placeholders override a production domain", () => {
+    expect(
+      resolvePublicUrl({
+        NODE_ENV: "production",
+        PUBLIC_URL: "http://localhost:4100",
+        SERVICE_URL_FORJA_4100: "https://forja.example.com:4100",
+        FORJA_TRUST_PROXY: "1",
+      }),
+    ).toBe("https://forja.example.com");
+    expect(
+      resolvePublicUrl({
+        NODE_ENV: "production",
+        PUBLIC_URL: "http://localhost:4100",
+        SERVICE_URL_FORJA_4100: "http://localhost:4100",
+        FORJA_DOMAIN: "forja.example.com",
+      }),
+    ).toBe("https://forja.example.com");
+  });
+
+  it("uses Coolify's predefined URL as a compatibility fallback", () => {
+    expect(resolvePublicUrl({ NODE_ENV: "production", COOLIFY_URL: "https://forja.example.com,https://alias.example.com" })).toBe(
+      "https://forja.example.com",
+    );
+  });
+
   it("drops the container port behind a proxy (Coolify writes https://host:4100)", () => {
     expect(resolvePublicUrl({ SERVICE_URL_FORJA_4100: "https://forja-abc.example.com:4100", FORJA_TRUST_PROXY: "1" })).toBe("https://forja-abc.example.com");
     expect(resolvePublicUrl({ PUBLIC_URL: "https://forja-abc.example.com:4100", FORJA_TRUST_PROXY: "1", PORT: "4100" })).toBe("https://forja-abc.example.com");
@@ -22,7 +51,7 @@ describe("resolvePublicUrl", () => {
   });
 
   it("falls back to https://FORJA_DOMAIN when Coolify does not set the service URL", () => {
-    expect(resolvePublicUrl({ PUBLIC_URL: "", SERVICE_URL_FORJA_4100: "", FORJA_DOMAIN: "forja-abc.example.com", FORJA_TRUST_PROXY: "1" })).toBe("https://forja-abc.example.com");
+    expect(resolvePublicUrl({ PUBLIC_URL: "", SERVICE_URL_FORJA_4100: "/", FORJA_DOMAIN: "forja-abc.example.com", FORJA_TRUST_PROXY: "1" })).toBe("https://forja-abc.example.com");
     expect(resolvePublicUrl({ FORJA_DOMAIN: "https://forja-abc.example.com/" })).toBe("https://forja-abc.example.com");
     expect(resolvePublicUrl({ PUBLIC_URL: "https://studio.example.com", FORJA_DOMAIN: "apps.example.com" })).toBe("https://studio.example.com");
   });

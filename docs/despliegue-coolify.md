@@ -76,8 +76,9 @@ studio, porque su cookie exige `Secure`).
    puerto. Sin dominio en `forja`, Coolify no genera las reglas del proxy y el sitio responde
    503 «Site not available» aunque el contenedor esté sano. `postgres` no lleva dominio.
 3. **Environment Variables**. Coolify ya habrá generado y guardado:
-   - `SERVICE_URL_FORJA_4100` → la URL del dominio de `forja` (se usa como `PUBLIC_URL`). Coolify
-     la deriva de **Domains**: no se edita aquí. Si está vacía, revisa el paso anterior.
+   - `SERVICE_URL_FORJA_4100` → la URL del dominio de `forja` (se usa como `PUBLIC_URL`). El compose
+     la declara con el valor especial `/`; Coolify lo reemplaza por la URL generada a partir de
+     **Domains**. No la edites ni copies el `/` a otra variable.
    - `SERVICE_HEX_64_SECRETSKEY` → la clave que cifra los secretos de los proyectos.
      **Cópiala a tu gestor de contraseñas**: si se pierde, los secretos guardados no se pueden
      descifrar. No la cambies nunca después del primer arranque.
@@ -89,7 +90,7 @@ studio, porque su cookie exige `Secure`).
    | Variable | Valor |
    |---|---|
    | `FORJA_DOMAIN` | `forja.tudominio.com` (el host del studio, sin `https://` ni puerto) **obligatoria**: de ella salen las URLs de las apps y vistas previas |
-   | `PUBLIC_URL` | opcional: vacía, Forja usa `SERVICE_URL_FORJA_4100` o, si Coolify no la define, `https://FORJA_DOMAIN`. El log de arranque dice cuál quedó (`plataforma en …`) |
+   | `PUBLIC_URL` | opcional: déjala vacía. Forja usa `SERVICE_URL_FORJA_4100`, `COOLIFY_URL` o, si Coolify no las define, `https://FORJA_DOMAIN`. El log de arranque dice cuál quedó (`plataforma en …`) |
 
    Nada más: proveedores y modelos, registro de cuentas, SMTP, GitHub, Langfuse, evals… se
    configuran en el studio (**Administración**) y se guardan en Postgres, con los secretos cifrados
@@ -113,8 +114,9 @@ studio, porque su cookie exige `Secure`).
 ## 4. Comprobaciones
 
 - El log de `forja` dice `plataforma en https://forja.tudominio.com`. Si dice `http://localhost:4100`,
-  Forja no recibió ni `SERVICE_URL_FORJA_4100` ni `FORJA_DOMAIN`: revisa Domains y Environment
-  Variables y vuelve a desplegar (los cambios de variables no se aplican sin redeploy).
+  revisa que `SERVICE_URL_FORJA_4100` tenga la URL resuelta (no `/`), que `FORJA_DOMAIN` tenga el
+  host y que `PUBLIC_URL` esté vacía; después vuelve a desplegar. En producción Forja ignora un
+  `PUBLIC_URL=http://localhost:4100` si Coolify o `FORJA_DOMAIN` ofrecen una dirección pública.
 - `https://forja.tudominio.com/healthz` → `{"ok":true}`. Una página «Site not available» o
   «No available server» es del proxy, no de Forja: el servicio `forja` no tiene dominio, le falta
   el `:4100` o no está sano (Coolify lo marca *unhealthy* si `/healthz` falla).
