@@ -3,6 +3,13 @@ import { burnPasswordCheck, hashPassword, newId, newToken, numericCode, password
 import { sendPlatformEmail } from "../baas/email.js";
 import { one, platformDb, q } from "./db.js";
 import { createPersonalOrg, personalOrgId } from "./orgs.js";
+import {
+  requestLoginCodeUseCase,
+  verifyLoginCodeUseCase,
+  loginWithPasswordUseCase,
+  Password,
+  sessionRepository,
+} from "../modules/identity/index.js";
 
 export interface Account {
   id: string;
@@ -24,44 +31,11 @@ const SESSION_DAYS = 30;
  */
 /** Returns true when the code went out by email. */
 export async function requestLoginCode(email: string): Promise<boolean> {
-  const code = numericCode(6);
-  await q(
-    `insert into login_codes (email, code_hash, attempts, expires_at) values ($1, $2, 0, now() + interval '15 minutes')
-     on conflict (email) do update set code_hash = excluded.code_hash, attempts = 0, expires_at = excluded.expires_at`,
-    [email.toLowerCase(), sha256(code)],
-  );
-  const sent = await sendPlatformEmail(
-    email,
-    `Tu código de acceso a Forja: ${code}`,
-    `<p>Tu código para entrar en Forja es:</p><p style="font-size:28px;letter-spacing:4px"><b>${code}</b></p><p>Caduca en 15 minutos. Si no lo pediste, ignora este correo.</p>`,
-  );
-  // Without SMTP (local use) the console is the delivery channel.
-  if (!sent) console.log(`[forja] código de acceso para ${email}: ${code}`);
-  return sent;
+  return requestLoginCodeUseCase.execute(email);
 }
 
 export async function verifyLoginCode(email: string, code: string): Promise<string | null> {
-  email = email.toLowerCase();
-  const row = await one<{ code_hash: string; attempts: number; expired: boolean }>(
-    `select code_hash, attempts, expires_at < now() as expired from login_codes where email = $1`,
-    [email],
-  );
-  if (!row || row.expired || row.attempts >= 5) return null;
-  if (row.code_hash !== sha256(code.trim())) {
-    await q(`update login_codes set attempts = attempts + 1 where email = $1`, [email]);
-    return null;
-  }
-  await q(`delete from login_codes where email = $1`, [email]);
-  let account = await one<{ id: string; disabled: boolean }>(`select id, disabled from accounts where email = $1`, [email]);
-  if (account?.disabled) return null;
-  if (!account) {
-    // The code proves the email is theirs, but whether a new account may exist is the platform's call.
-    if (!(await canSignUp(email))) return null;
-    account = { id: await createAccount(email, null, null), disabled: false };
-  }
-  const { claimInvites } = await import("./members.js");
-  await claimInvites(account.id, email);
-  return createSession(account.id);
+  return verifyLoginCodeUseCase.execute(email, code);
 }
 
 /** Signup policy. With no accounts yet, only the first-run setup (with its token) may create one. */
@@ -98,12 +72,7 @@ export async function createAccount(email: string, name: string | null, password
 }
 
 export async function createSession(accountId: string): Promise<string> {
-  const token = newToken();
-  await q(
-    `insert into account_sessions (token_hash, account_id, expires_at) values ($1, $2, now() + ($3 || ' days')::interval)`,
-    [sha256(token), accountId, String(SESSION_DAYS)],
-  );
-  return token;
+  return sessionRepository.createSession(accountId, SESSION_DAYS);
 }
 
 // --- Passwords -------------------------------------------------------------------------
@@ -112,28 +81,12 @@ const COMMON = new Set(["password", "contraseña", "1234567890", "qwertyuiop", "
 
 /** Throws a message fit for the user. */
 export function assertStrongPassword(password: string, email: string) {
-  if (typeof password !== "string" || password.length < 10) throw new Error("La contraseña debe tener al menos 10 caracteres.");
-  if (password.length > 128) throw new Error("La contraseña es demasiado larga (máximo 128 caracteres).");
-  if (password.toLowerCase() === email.toLowerCase() || COMMON.has(password.toLowerCase())) throw new Error("Elige una contraseña menos predecible.");
+  Password.assertStrong(password, email);
 }
 
 /** Returns a session token, or null for any failure (unknown email, wrong password, disabled, no password set). */
 export async function loginWithPassword(email: string, password: string): Promise<string | null> {
-  const row = await one<{ id: string; password_hash: string | null; disabled: boolean }>(
-    `select id, password_hash, disabled from accounts where email = $1`,
-    [email.trim().toLowerCase()],
-  );
-  if (!row?.password_hash) {
-    await burnPasswordCheck(String(password ?? "")); // same cost whether or not the account exists
-    return null;
-  }
-  if (!(await verifyPassword(String(password ?? ""), row.password_hash)) || row.disabled) return null;
-  if (passwordNeedsRehash(row.password_hash)) {
-    await q(`update accounts set password_hash = $2 where id = $1`, [row.id, await hashPassword(password)]);
-  }
-  const { claimInvites } = await import("./members.js");
-  await claimInvites(row.id, email);
-  return createSession(row.id);
+  return loginWithPasswordUseCase.execute(email, password);
 }
 
 /** Sets the password and ends every session; the caller then opens a fresh one if the person is signed in. */
@@ -198,7 +151,7 @@ export async function accountFromSession(token: string | undefined): Promise<Acc
 }
 
 export async function endSession(token: string): Promise<void> {
-  await q(`delete from account_sessions where token_hash = $1`, [sha256(token)]);
+  await sessionRepository.deleteSession(token);
 }
 
 export async function accountFromApiToken(token: string | undefined): Promise<Account | null> {
@@ -243,12 +196,11 @@ export async function updateAccountName(id: string, name: string) {
 
 /** Ends every studio session except the one making the request. */
 export async function signOutOtherSessions(accountId: string, currentToken: string) {
-  const r = await q(`delete from account_sessions where account_id = $1 and token_hash <> $2 returning 1`, [accountId, sha256(currentToken)]);
-  return r.length;
+  return sessionRepository.deleteOtherSessions(accountId, currentToken);
 }
 
 export async function countSessions(accountId: string) {
-  return (await one<{ n: number }>(`select count(*)::int as n from account_sessions where account_id = $1 and expires_at > now()`, [accountId]))!.n;
+  return sessionRepository.countActiveSessions(accountId);
 }
 
 /** Deletes the account and, by cascade, every project, file, log and token it owns. */
