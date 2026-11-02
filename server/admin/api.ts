@@ -6,7 +6,7 @@ import type { Account } from "../platform/accounts.js";
 import { GROUPS } from "../settings/registry.js";
 import { listSettings, resetSetting, SettingsError, updateSettings } from "../settings/store.js";
 import { cancelPlayground, listPlaygroundRuns, PlaygroundError, playgroundRoles, playgroundRun, startPlayground } from "./playground.js";
-import { probeModel, probeProvider } from "./probe.js";
+import { listProviderModels, probeModel, probeProvider } from "./probe.js";
 import { resetRouter, routerStats } from "./router.js";
 
 /**
@@ -59,6 +59,11 @@ adminApi.delete("/providers/:id", async (c) => {
 adminApi.post("/providers/:id/test", async (c) => {
   rateLimit(`probe:${me(c)}`, 30, 60_000);
   return c.json(await probeProvider(c.req.param("id")!));
+});
+
+adminApi.get("/providers/:id/models", async (c) => {
+  rateLimit(`probe:${me(c)}`, 30, 60_000);
+  return c.json(await listProviderModels(c.req.param("id")!));
 });
 
 // --- Models ------------------------------------------------------------------------------

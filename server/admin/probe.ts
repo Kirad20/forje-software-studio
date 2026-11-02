@@ -47,6 +47,57 @@ export async function probeProvider(id: string): Promise<ProviderProbe> {
   }
 }
 
+export interface ProviderModel {
+  /** Name in the provider's API. */
+  id: string;
+  label?: string;
+  context?: number;
+  /** USD per million tokens, when the provider publishes them. */
+  inPrice?: number;
+  outPrice?: number;
+}
+
+const perMillion = (v: unknown) => {
+  const n = Number(v) * 1e6;
+  return v !== undefined && v !== null && v !== "" && Number.isFinite(n) && n >= 0 ? n : undefined;
+};
+
+/** What the provider says it serves (GET /models), to pick from instead of typing names by hand. */
+export async function listProviderModels(id: string): Promise<{ models: ProviderModel[]; error?: string }> {
+  const view = (await listProviders()).find((p) => p.id === id);
+  if (!view) return { models: [], error: `No existe el proveedor «${id}».` };
+  if (!view.available) return { models: [], error: view.missing ?? "No disponible" };
+  try {
+    if (view.kind === "anthropic") {
+      const sdk = new Anthropic({ apiKey: providerSecret(id)!, maxRetries: 0, timeout: TIMEOUT_MS });
+      const page = await sdk.models.list({ limit: 1000 });
+      return { models: page.data.map((m) => ({ id: m.id, label: m.display_name })) };
+    }
+    const endpoint = providerOf(id)!.endpoint!;
+    const res = await fetch(`${endpoint.baseUrl}/models`, {
+      headers: { ...(endpoint.apiKey ? { authorization: `Bearer ${endpoint.apiKey}` } : {}), ...endpoint.headers },
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+    if (!res.ok) return { models: [], error: `HTTP ${res.status}: ${(await res.text().catch(() => "")).slice(0, 300)}` };
+    const body = (await res.json().catch(() => ({}))) as {
+      data?: { id?: unknown; name?: unknown; context_length?: unknown; pricing?: { prompt?: unknown; completion?: unknown } }[];
+    };
+    const models = (Array.isArray(body.data) ? body.data : [])
+      .filter((m) => typeof m.id === "string" && m.id)
+      .map((m): ProviderModel => ({
+        id: m.id as string,
+        label: typeof m.name === "string" ? m.name : undefined,
+        context: typeof m.context_length === "number" ? m.context_length : undefined,
+        inPrice: perMillion(m.pricing?.prompt),
+        outPrice: perMillion(m.pricing?.completion),
+      }))
+      .sort((a, b) => a.id.localeCompare(b.id));
+    return { models };
+  } catch (e) {
+    return { models: [], error: errorOf(e) };
+  }
+}
+
 export interface ModelProbe {
   ok: boolean;
   ms: number;

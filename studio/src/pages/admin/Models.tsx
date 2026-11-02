@@ -188,7 +188,7 @@ export function Models() {
         </div>
       </section>
 
-      <AddModel onAdded={load} />
+      <AddModel existing={new Set(data.models.map((m) => m.id))} onAdded={load} />
     </div>
   );
 }
@@ -294,7 +294,15 @@ function Whitelist({ models, onSaved }: { models: CatalogModel[]; onSaved: () =>
   );
 }
 
-function AddModel({ onAdded }: { onAdded: () => void }) {
+interface RemoteModel {
+  id: string;
+  label?: string;
+  context?: number;
+  inPrice?: number;
+  outPrice?: number;
+}
+
+function AddModel({ existing, onAdded }: { existing: Set<string>; onAdded: () => void }) {
   const [open, setOpen] = useState(false);
   // Registered providers, not the ones that already have models: a freshly added provider has none.
   const [providers, setProviders] = useState<string[]>([]);
@@ -308,6 +316,29 @@ function AddModel({ onAdded }: { onAdded: () => void }) {
   }, [open]);
   const [f, setF] = useState({ provider: "", model: "", label: "", inPrice: 0, outPrice: 0, context: 128000, tier: 3, speed: 3, tools: true, vision: false });
   const [error, setError] = useState("");
+  // What the chosen provider lists in its API, to pick from; typing a name by hand still works.
+  const [remote, setRemote] = useState<{ loading: boolean; models: RemoteModel[]; error?: string }>({ loading: false, models: [] });
+  useEffect(() => {
+    if (!open || !f.provider) return;
+    let stale = false;
+    setRemote({ loading: true, models: [] });
+    api<{ models: RemoteModel[]; error?: string }>(`/admin/providers/${encodeURIComponent(f.provider)}/models`)
+      .then((r) => !stale && setRemote({ loading: false, models: r.models, error: r.error }))
+      .catch((e) => !stale && setRemote({ loading: false, models: [], error: (e as Error).message }));
+    return () => {
+      stale = true;
+    };
+  }, [open, f.provider]);
+  const pickable = remote.models.filter((m) => !existing.has(`${f.provider}:${m.id}`));
+  const pick = (name: string) => {
+    const m = remote.models.find((x) => x.id === name);
+    // Whatever the provider publishes fills the form; the rest keeps its value.
+    setF((cur) => ({
+      ...cur,
+      model: name,
+      ...(m ? { label: m.label ?? cur.label, context: m.context ?? cur.context, inPrice: m.inPrice ?? cur.inPrice, outPrice: m.outPrice ?? cur.outPrice } : {}),
+    }));
+  };
   if (!open)
     return (
       <div>
@@ -351,7 +382,17 @@ function AddModel({ onAdded }: { onAdded: () => void }) {
             ))}
           </select>
         </label>
-        {field("model", "Nombre en la API", "text", 200)}
+        <label className="small">
+          Nombre en la API
+          <input list="provider-models" value={f.model} onChange={(e) => pick(e.target.value)} placeholder={remote.loading ? "Cargando modelos…" : "Elige de la lista o escribe"} style={{ width: 260 }} />
+          <datalist id="provider-models">
+            {pickable.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.label}
+              </option>
+            ))}
+          </datalist>
+        </label>
         {field("label", "Nombre visible", "text", 160)}
         {field("inPrice", "$ entrada/MTok", "number", 90)}
         {field("outPrice", "$ salida/MTok", "number", 90)}
@@ -364,6 +405,13 @@ function AddModel({ onAdded }: { onAdded: () => void }) {
         <label className="row small" style={{ color: "var(--text)" }}>
           <input type="checkbox" checked={f.vision} onChange={(e) => setF({ ...f, vision: e.target.checked })} style={{ width: "auto" }} /> Imágenes
         </label>
+      </div>
+      <div className="small muted">
+        {remote.loading
+          ? "Consultando los modelos del proveedor…"
+          : remote.error
+            ? `No se pudo listar los modelos del proveedor (${remote.error}); escribe el nombre a mano.`
+            : `${pickable.length} modelos del proveedor sin añadir; también puedes escribir el nombre a mano.`}
       </div>
       {error && <div className="error-box">{error}</div>}
       <div className="row">
