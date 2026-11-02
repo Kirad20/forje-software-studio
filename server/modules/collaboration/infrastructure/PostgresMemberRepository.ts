@@ -35,4 +35,12 @@ export class PostgresMemberRepository implements IMemberRepository {
     ]);
     await q(`delete from project_invites where project_id = $1 and email = $2`, [projectId, emailOrAccount.toLowerCase()]);
   }
+
+  async addMember(projectId: string, accountId: string, _role = "member"): Promise<void> {
+    await q(`insert into project_members (project_id, account_id) values ($1, $2) on conflict do nothing`, [projectId, accountId]);
+  }
+
+  async createInvite(projectId: string, email: string, invitedBy: string, _role = "member"): Promise<void> {
+    await q(`insert into project_invites (project_id, email, invited_by) values ($1, $2, $3) on conflict do nothing`, [projectId, email, invitedBy]);
+  }
 }
