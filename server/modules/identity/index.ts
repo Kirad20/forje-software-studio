@@ -6,6 +6,7 @@ import { PlatformMailerService } from "./infrastructure/PlatformMailerService.js
 import { RequestLoginCodeUseCase } from "./application/RequestLoginCodeUseCase.js";
 import { VerifyLoginCodeUseCase } from "./application/VerifyLoginCodeUseCase.js";
 import { LoginWithPasswordUseCase } from "./application/LoginWithPasswordUseCase.js";
+import { UpdateAccountNameUseCase } from "./application/UpdateAccountNameUseCase.js";
 
 // Domain & Models
 export * from "./domain/Account.js";
@@ -60,3 +61,5 @@ export const verifyLoginCodeUseCase = new VerifyLoginCodeUseCase(
     return createAccount(email, null, null);
   },
 );
+
+export const updateAccountNameUseCase = new UpdateAccountNameUseCase(accountRepository);

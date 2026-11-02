@@ -5,6 +5,7 @@ import { PlatformCollaborationMailerService } from "./infrastructure/PlatformCol
 import { PostgresOrganizationRepository } from "./infrastructure/PostgresOrganizationRepository.js";
 import { CheckAccessUseCase } from "./application/CheckAccessUseCase.js";
 import { InviteMemberUseCase } from "./application/InviteMemberUseCase.js";
+import { RemoveMemberUseCase } from "./application/RemoveMemberUseCase.js";
 import { CreateOrgUseCase } from "./application/CreateOrgUseCase.js";
 import { ManageOrgMemberUseCase } from "./application/ManageOrgMemberUseCase.js";
 
@@ -28,6 +29,7 @@ export const inviteMemberUseCase = new InviteMemberUseCase(
   collaborationAccountRepository,
   collaborationMailerService,
 );
+export const removeMemberUseCase = new RemoveMemberUseCase(memberRepository);
 export const createOrgUseCase = new CreateOrgUseCase(organizationRepository, newId);
 export const manageOrgMemberUseCase = new ManageOrgMemberUseCase(
   organizationRepository,

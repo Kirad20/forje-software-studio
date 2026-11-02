@@ -9,6 +9,7 @@ import {
   loginWithPasswordUseCase,
   Password,
   sessionRepository,
+  updateAccountNameUseCase,
 } from "../modules/identity/index.js";
 
 export interface Account {
@@ -191,7 +192,7 @@ export async function deleteApiToken(accountId: string, id: string) {
 }
 
 export async function updateAccountName(id: string, name: string) {
-  await q(`update accounts set name = $2 where id = $1`, [id, name.trim().slice(0, 80) || null]);
+  await updateAccountNameUseCase.execute(id, name);
 }
 
 /** Ends every studio session except the one making the request. */

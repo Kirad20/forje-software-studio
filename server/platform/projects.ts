@@ -9,6 +9,7 @@ import {
   Checkpoint,
   writeFileUseCase,
   deleteFileUseCase,
+  renameFileUseCase,
   createCheckpointUseCase,
 } from "../modules/projects/index.js";
 
@@ -228,14 +229,7 @@ export async function deleteFile(projectId: string, path: string, author: Author
 }
 
 export async function renameFile(projectId: string, from: string, to: string, author: Author = "owner") {
-  assertValidPath(to);
-  const content = await readFile(projectId, from);
-  if (content === undefined) throw new Error(`No existe ${from}`);
-  const existing = await readFile(projectId, to);
-  await q(`delete from project_files where project_id = $1 and path = $2`, [projectId, to]);
-  await q(`update project_files set path = $3, updated_at = now() where project_id = $1 and path = $2`, [projectId, from, to]);
-  await logChange(projectId, { kind: "rename", paths: [from, to], author, before: { [from]: content, [to]: existing ?? null } });
-  await touch(projectId, [from, to]);
+  await renameFileUseCase.execute(projectId, from, to, author);
 }
 
 async function touch(projectId: string, paths: string[]) {
