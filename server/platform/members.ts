@@ -2,36 +2,21 @@ import { sendPlatformEmail } from "../baas/email.js";
 import { config } from "../config.js";
 import { one, q } from "./db.js";
 import type { Project } from "./projects.js";
+import {
+  checkAccessUseCase,
+  memberRepository,
+  type Access,
+} from "../modules/collaboration/index.js";
 
-/**
- * Who can open a project: its owner, members of the organization it belongs to, and invited
- * collaborators. The owner invites by email; an existing account joins at once, anyone
- * else joins the first time they sign in with that email. Editors (collaborators and
- * organization members) can build, test and publish; only the owner can delete the project,
- * manage collaborators or connect account integrations. AI credits are always charged to the owner.
- */
-export type Access = "owner" | "editor";
+export type { Access };
 
 export async function accessOf(accountId: string, project: Project | undefined): Promise<Access | null> {
-  if (!project) return null;
-  if (project.ownerId === accountId) return "owner";
-  const m = await one(
-    `select 1 from project_members where project_id = $1 and account_id = $2
-     union all select 1 from org_members where org_id = $3 and account_id = $2`,
-    [project.id, accountId, project.orgId],
-  );
-  return m ? "editor" : null;
+  return checkAccessUseCase.execute(accountId, project);
 }
 
 /** Projects the account can open without owning them: as a collaborator or through an organization. */
 export async function sharedProjectIds(accountId: string): Promise<string[]> {
-  return (
-    await q<{ id: string }>(
-      `select project_id as id from project_members where account_id = $1
-       union select p.id from projects p join org_members m on m.org_id = p.org_id where m.account_id = $1 and p.owner_id <> $1`,
-      [accountId],
-    )
-  ).map((r) => r.id);
+  return memberRepository.getSharedProjectIds(accountId);
 }
 
 export async function listMembers(projectId: string) {
@@ -67,15 +52,10 @@ export async function inviteMember(project: Project, inviterEmail: string, rawEm
 }
 
 export async function removeMember(projectId: string, emailOrAccount: string) {
-  await q(`delete from project_members where project_id = $1 and account_id in (select id from accounts where email = $2 or id = $2)`, [
-    projectId,
-    emailOrAccount.toLowerCase(),
-  ]);
-  await q(`delete from project_invites where project_id = $1 and email = $2`, [projectId, emailOrAccount.toLowerCase()]);
+  await memberRepository.removeMember(projectId, emailOrAccount);
 }
 
 /** Turns pending invites for this email into memberships; called on every sign-in. */
 export async function claimInvites(accountId: string, email: string) {
-  const rows = await q<{ project_id: string }>(`delete from project_invites where email = $1 returning project_id`, [email.toLowerCase()]);
-  for (const r of rows) await q(`insert into project_members (project_id, account_id) values ($1, $2) on conflict do nothing`, [r.project_id, accountId]);
+  await memberRepository.claimInvites(accountId, email);
 }
