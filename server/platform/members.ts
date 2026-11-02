@@ -3,6 +3,7 @@ import type { Project } from "./projects.js";
 import {
   checkAccessUseCase,
   inviteMemberUseCase,
+  removeMemberUseCase,
   memberRepository,
   type Access,
 } from "../modules/collaboration/index.js";
@@ -36,7 +37,7 @@ export async function inviteMember(project: Project, inviterEmail: string, rawEm
 }
 
 export async function removeMember(projectId: string, emailOrAccount: string) {
-  await memberRepository.removeMember(projectId, emailOrAccount);
+  await removeMemberUseCase.execute(projectId, emailOrAccount);
 }
 
 /** Turns pending invites for this email into memberships; called on every sign-in. */
