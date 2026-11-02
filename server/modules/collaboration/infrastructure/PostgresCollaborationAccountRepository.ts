@@ -4,7 +4,7 @@ import type { CollaborationAccount, ICollaborationAccountRepository } from "../p
 export class PostgresCollaborationAccountRepository implements ICollaborationAccountRepository {
   async findByEmail(email: string): Promise<CollaborationAccount | null> {
     const row = await one<{ id: string; email: string }>(
-      `select id, email from accounts where email = $1`,
+      `select id, email from accounts where email = $1 and not disabled`,
       [email.trim().toLowerCase()],
     );
     if (!row) return null;
