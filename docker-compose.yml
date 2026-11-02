@@ -70,16 +70,17 @@ services:
       # Apps publicadas (<slug>.<dominio>) y vistas previas (pv-<id>.<dominio>) viven en subdominios
       # del dominio del studio. Este router los manda a Forja; el certificado comodín
       # *.FORJA_DOMAIN lo emite Traefik con DNS challenge (ver la guía). Prioridad baja para que el
-      # dominio propio del studio (router de Coolify) gane siempre.
+      # dominio propio del studio (router de Coolify) gane siempre. La prioridad 100 también hace
+      # que este router gane al router wildcard-placeholder (prioridad 1) que solicita el certificado.
       - traefik.enable=true
       - traefik.http.routers.forja-apps.rule=HostRegexp(`^[a-z0-9-]+\.${FORJA_DOMAIN:-forja.localhost}$$`)
       - traefik.http.routers.forja-apps.entrypoints=https
       - traefik.http.routers.forja-apps.tls=true
-      - traefik.http.routers.forja-apps.priority=1
+      - traefik.http.routers.forja-apps.priority=100
       - traefik.http.routers.forja-apps.service=forja-apps
       - traefik.http.routers.forja-apps-http.rule=HostRegexp(`^[a-z0-9-]+\.${FORJA_DOMAIN:-forja.localhost}$$`)
       - traefik.http.routers.forja-apps-http.entrypoints=http
-      - traefik.http.routers.forja-apps-http.priority=1
+      - traefik.http.routers.forja-apps-http.priority=100
       - traefik.http.routers.forja-apps-http.middlewares=forja-apps-https
       - traefik.http.routers.forja-apps-http.service=forja-apps
       - traefik.http.middlewares.forja-apps-https.redirectscheme.scheme=https
