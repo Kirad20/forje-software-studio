@@ -70,11 +70,14 @@ studio, porque su cookie exige `Secure`).
 1. **Projects → (tu proyecto) → + New → Docker Compose** (o «Public/Private Repository» con build
    pack **Docker Compose**). Repositorio `Kirad20/forje-software-studio`, rama `main`, archivo
    `/docker-compose.yml`. Para un repositorio privado usa la GitHub App de Coolify.
-2. Coolify lee el compose y muestra el servicio `forja`. En su **Domains** pon
-   `https://forja.tudominio.com` (sin puerto: Coolify ya sabe que es el 4100 por
-   `SERVICE_URL_FORJA_4100`).
+2. Coolify lee el compose y muestra los servicios `forja` y `postgres`. En **Domains** del servicio
+   `forja` pon `https://forja.tudominio.com:4100`. El sufijo `:4100` es el puerto interno del
+   contenedor: le dice al proxy a dónde enrutar, y el navegador sigue entrando por el 443 sin
+   puerto. Sin dominio en `forja`, Coolify no genera las reglas del proxy y el sitio responde
+   503 «Site not available» aunque el contenedor esté sano. `postgres` no lleva dominio.
 3. **Environment Variables**. Coolify ya habrá generado y guardado:
-   - `SERVICE_URL_FORJA_4100` → la URL del dominio (se usa como `PUBLIC_URL`).
+   - `SERVICE_URL_FORJA_4100` → la URL del dominio de `forja` (se usa como `PUBLIC_URL`). Coolify
+     la deriva de **Domains**: no se edita aquí. Si está vacía, revisa el paso anterior.
    - `SERVICE_HEX_64_SECRETSKEY` → la clave que cifra los secretos de los proyectos.
      **Cópiala a tu gestor de contraseñas**: si se pierde, los secretos guardados no se pueden
      descifrar. No la cambies nunca después del primer arranque.
@@ -85,7 +88,7 @@ studio, porque su cookie exige `Secure`).
 
    | Variable | Valor |
    |---|---|
-   | `FORJA_DOMAIN` | `forja.tudominio.com` (el host del studio, sin `https://`) **obligatoria** |
+   | `FORJA_DOMAIN` | `forja.tudominio.com` (el host del studio, sin `https://` ni puerto) **obligatoria**: de ella salen las URLs de las apps y vistas previas |
    | `PUBLIC_URL` | opcional: vacía, Forja usa `SERVICE_URL_FORJA_4100` o, si Coolify no la define, `https://FORJA_DOMAIN`. El log de arranque dice cuál quedó (`plataforma en …`) |
 
    Nada más: proveedores y modelos, registro de cuentas, SMTP, GitHub, Langfuse, evals… se
@@ -109,7 +112,12 @@ studio, porque su cookie exige `Secure`).
 
 ## 4. Comprobaciones
 
-- `https://forja.tudominio.com/healthz` → `{"ok":true}`.
+- El log de `forja` dice `plataforma en https://forja.tudominio.com`. Si dice `http://localhost:4100`,
+  Forja no recibió ni `SERVICE_URL_FORJA_4100` ni `FORJA_DOMAIN`: revisa Domains y Environment
+  Variables y vuelve a desplegar (los cambios de variables no se aplican sin redeploy).
+- `https://forja.tudominio.com/healthz` → `{"ok":true}`. Una página «Site not available» o
+  «No available server» es del proxy, no de Forja: el servicio `forja` no tiene dominio, le falta
+  el `:4100` o no está sano (Coolify lo marca *unhealthy* si `/healthz` falla).
 - Publica una app de prueba y ábrela en `https://<slug>.forja.tudominio.com` con candado válido.
 - La vista previa dentro del studio carga (si no, revisa el certificado comodín).
 

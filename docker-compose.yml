@@ -24,8 +24,10 @@ services:
       - "4100"
     environment:
       # --- Coolify: dominio, proxy y secretos generados ---
-      # Coolify crea el dominio del studio y lo enruta al puerto 4100 del contenedor.
-      - SERVICE_URL_FORJA_4100
+      # El dominio del studio: en Coolify, Domains del servicio forja = https://tu-dominio:4100 (el
+      # sufijo :4100 dice al proxy a qué puerto del contenedor enrutar). Coolify solo reconoce sus
+      # variables mágicas cuando aparecen como ${...}: así guarda aquí la URL de ese dominio.
+      - SERVICE_URL_FORJA_4100=${SERVICE_URL_FORJA_4100:-}
       # URL pública del studio. Vacía: Forja usa SERVICE_URL_FORJA_4100 y, si Coolify no la define,
       # https://FORJA_DOMAIN. Rellénala solo si el studio vive en otra dirección.
       - PUBLIC_URL=${PUBLIC_URL:-}

@@ -150,9 +150,9 @@
     "semantic_hash": ""
   },
   "server/index.ts": {
-    "mtime": 1793569783.5937915,
-    "seen": 1793569800.8367152,
-    "ast_hash": "ced9eab4d7d4562509abb0c7cd1be429",
+    "mtime": 1793583615.801417,
+    "seen": 1793583647.6132808,
+    "ast_hash": "57834120ca84e7814d14e03990dee4c1",
     "semantic_hash": ""
   },
   "server/lib/crypto.ts": {
@@ -720,9 +720,9 @@
     "semantic_hash": ""
   },
   "docker-compose.yml": {
-    "mtime": 1793571202.4782755,
-    "seen": 1793571344.1949112,
-    "ast_hash": "4a24fc2fc9bae2bef295f154bb5fabc9",
+    "mtime": 1793583610.347412,
+    "seen": 1793583647.6132808,
+    "ast_hash": "a52397946f205c961f0a5b6b16aa418c",
     "semantic_hash": ""
   },
   "sdk/server/index.ts": {
@@ -834,9 +834,9 @@
     "semantic_hash": ""
   },
   "docs/despliegue-coolify.md": {
-    "mtime": 1793571220.5646973,
-    "seen": 1793571344.1949112,
-    "ast_hash": "94835c34c568bf0a355da8adc50eacec",
+    "mtime": 1793583610.6015155,
+    "seen": 1793583647.6132808,
+    "ast_hash": "243344bd73bcb2c254eafd230cab1b2c",
     "semantic_hash": ""
   },
   "docs/superpowers/plans/2026-11-01-panel-admin.md": {
@@ -1035,6 +1035,12 @@
     "mtime": 1793571201.9380417,
     "seen": 1793571344.1949112,
     "ast_hash": "1191e3b2c3b3f9662261bc3bafc9b79a",
+    "semantic_hash": ""
+  },
+  "soclo-cal.py": {
+    "mtime": 1793580524.2658103,
+    "seen": 1793583647.6132808,
+    "ast_hash": "99f69e2cbe9cc4f9fd07088eb22225ff",
     "semantic_hash": ""
   },
   "package-lock.json": {
