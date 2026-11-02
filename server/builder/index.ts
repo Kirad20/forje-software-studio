@@ -155,9 +155,13 @@ export function projectMap(files: FileMap, schema: Record<string, { name: string
   return lines.join("\n");
 }
 
-/** Graph neighbours: what it imports, who imports it, and endpoint ↔ page links. */
-export function relatedFiles(files: FileMap, p: string): string[] {
-  const idx = buildIndex(files);
+/**
+ * Graph neighbours: what it imports, who imports it, and endpoint ↔ page links.
+ * Accepts an optional pre-computed `index` to avoid re-running buildIndex(files)
+ * when traversing multiple nodes in the file graph (e.g., inside selectContext).
+ */
+export function relatedFiles(files: FileMap, p: string, index?: ProjectIndex): string[] {
+  const idx = index ?? buildIndex(files);
   const f = idx.facts.get(p);
   if (!f) return [];
   const out = new Set<string>([...f.imports, ...(idx.importers.get(p) ?? [])]);
@@ -206,7 +210,9 @@ export function selectContext(files: FileMap, goal: string, owned: string[], bud
     const hay = `${f.path} ${f.exports.join(" ")} ${f.tables.join(" ")} ${f.apiCalls.join(" ")} ${f.summary}`.toLowerCase();
     for (const w of words) if (hay.includes(w)) bump(f.path, 2);
   }
-  for (const [p, s] of [...scores]) if (s >= 10) for (const n of relatedFiles(files, p)) bump(n, 3);
+  // Performance optimization: pass the already computed `idx` into relatedFiles to prevent
+  // re-building the full project index for every high-scoring file (O(1) index reuse vs O(K*N) rebuilds).
+  for (const [p, s] of [...scores]) if (s >= 10) for (const n of relatedFiles(files, p, idx)) bump(n, 3);
   if ("base.css" in files && owned.some((o) => o.startsWith("pages") || o.startsWith("components") || o === "base.css")) bump("base.css", 4);
   const ranked = [...scores.entries()].sort((a, b) => b[1] - a[1]).map(([p]) => p);
   const out: string[] = [];
