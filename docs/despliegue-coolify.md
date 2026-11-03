@@ -21,25 +21,71 @@ procesos escribiendo la misma carpeta la corromperían. No actives réplicas ni 
 1. Un servidor con Coolify v4 y el proxy **Traefik** (el que trae por defecto). Mínimo 2 GB de
    RAM; 4 GB si usarás `browser_test` o los evals (cada uno lanza un Chromium).
 2. Un dominio para el studio, por ejemplo `forja.tudominio.com`.
-3. DNS, ambos apuntando a la IP del servidor:
+3. DNS en un proveedor con API compatible con el DNS challenge de Traefik (Cloudflare es la
+   opción recomendada), con ambos registros apuntando a la IP del servidor:
    - `forja.tudominio.com` (registro A)
    - `*.forja.tudominio.com` (registro A comodín): las apps publicadas viven en
      `<slug>.forja.tudominio.com` y las vistas previas en `pv-<id>.forja.tudominio.com`.
 4. Una clave de al menos un proveedor de modelos (Anthropic, OpenRouter u OpenAI-compatible). Se
    pone en el studio tras el primer acceso, no en variables de entorno.
 
-## 1. Certificado comodín (una vez por servidor)
+## 1. DNS y certificado comodín (una vez por servidor)
 
-Let's Encrypt solo emite `*.forja.tudominio.com` con el **DNS challenge**: el HTTP challenge
-no sirve para comodines. Sin este paso el studio funciona con HTTPS, pero las apps publicadas y
-las vistas previas muestran un certificado inválido (y las vistas previas no cargan dentro del
-studio, porque su cookie exige `Secure`).
+Let's Encrypt solo emite `*.forja.tudominio.com` con el **DNS challenge**: el HTTP challenge no
+sirve para comodines. Sin este paso el studio puede funcionar con HTTPS, pero las apps publicadas
+y las vistas previas no tendrán un certificado válido.
 
-1. En Coolify: **Servers → tu servidor → Proxy**. Configura el DNS challenge de Traefik con tu
-   proveedor DNS (Cloudflare, Route 53, etc.) según
-   <https://coolify.io/docs/core/networking/proxy/traefik/dns-challenge>. Las credenciales del
-   proveedor DNS van ahí, en el servidor, no en Forja.
-2. **Proxy → Dynamic Configurations**, crea `wildcard-forja.yaml` (cambia el dominio):
+### Cloudflare DNS
+
+El dominio puede seguir registrado y el servidor alojado en otro proveedor; solo los nameservers
+deben delegarse a Cloudflare:
+
+1. Añade el dominio raíz (`tudominio.com`) a Cloudflare y copia todos los registros vigentes antes
+   de cambiar los nameservers. Conserva especialmente los registros MX, SPF, DKIM y DMARC si hay
+   correo. No copies los NS ni el SOA del proveedor anterior.
+2. En el registrador, sustituye los nameservers anteriores por los dos que asigne Cloudflare. Si
+   DNSSEC está activo, desactívalo antes del cambio y vuelve a activarlo en Cloudflare después.
+3. Crea estos registros con **Proxy status: DNS only** (nube gris):
+
+   ```text
+   A  forja     IP_PUBLICA_DEL_SERVIDOR
+   A  *.forja   IP_PUBLICA_DEL_SERVIDOR
+   ```
+
+   El proxy gratuito de Cloudflare no presenta por defecto un certificado para nombres de segundo
+   nivel como `<slug>.forja.tudominio.com`; mantenlos en DNS only salvo que hayas contratado y
+   configurado esa cobertura en Cloudflare.
+4. Crea un API Token limitado a la zona, con `Zone / DNS / Edit` y `Zone / Zone / Read`. No uses la
+   Global API Key.
+
+### DNS challenge de Traefik
+
+1. En Coolify abre **Servers → tu servidor → Proxy → Configuration**. Edita la configuración en la
+   interfaz: Coolify puede sobrescribir cambios hechos directamente en
+   `/data/coolify/proxy/docker-compose.yml`.
+2. Dentro del servicio `traefik`, añade el token restringido:
+
+   ```yaml
+   environment:
+     - CF_DNS_API_TOKEN=TOKEN_RESTRINGIDO
+   ```
+
+3. Elimina las dos opciones `httpchallenge` del resolver `letsencrypt` y añade:
+
+   ```yaml
+   command:
+     # Conserva las demás opciones existentes.
+     - '--certificatesresolvers.letsencrypt.acme.dnschallenge.provider=cloudflare'
+     - '--certificatesresolvers.letsencrypt.acme.dnschallenge.delaybeforecheck=30'
+     - '--certificatesresolvers.letsencrypt.acme.storage=/traefik/acme.json'
+   ```
+
+4. Guarda y pulsa **Restart Proxy**. Nunca pegues el token ni una salida completa de la
+   configuración del proxy en incidencias o chats: puede aparecer en texto plano.
+
+### Certificado y ruta de los subdominios
+
+En **Proxy → Dynamic Configurations**, crea `wildcard-forja.yaml` (cambia el dominio):
 
    ```yaml
    http:
@@ -48,22 +94,35 @@ studio, porque su cookie exige `Secure`).
          rule: 'HostRegexp(`^[a-z0-9-]+\.forja\.tudominio\.com$`)'
          entryPoints: [https]
          priority: 1
-         service: wildcard-placeholder
+         service: forja-runtime
          tls:
            certResolver: letsencrypt
            domains:
              - main: forja.tudominio.com
                sans: ['*.forja.tudominio.com']
      services:
-       wildcard-placeholder:
+       forja-runtime:
          loadBalancer:
-           servers: []
+           servers:
+             - url: http://forja:4100
    ```
 
-   Este router solo sirve para pedir el certificado; el tráfico de los subdominios lo enruta el
-   propio `docker-compose.yml` (etiquetas `forja-apps`), y Traefik le aplica el certificado que
-   tiene guardado. `letsencrypt` es el nombre del resolver por defecto de Coolify.
-3. Mira **Proxy → Logs** hasta que la petición ACME salga bien.
+Este router solicita el certificado y enruta los subdominios directamente al alias Docker estable
+`forja` en el puerto 4100. Se usa esta ruta explícita porque algunas versiones de Coolify conservan
+`${FORJA_DOMAIN:-forja.localhost}` como texto literal dentro de las etiquetas Compose; en ese caso
+el router `forja-apps@docker` nunca coincide con el dominio real. `letsencrypt` debe coincidir con
+el nombre del resolver configurado en el proxy.
+
+Comprueba la conectividad desde el proxy:
+
+```sh
+docker exec coolify-proxy wget -qO- http://forja:4100/healthz
+```
+
+Debe responder `{"ok":true}`. Traefik crea temporalmente el TXT
+`_acme-challenge.forja.tudominio.com`, emite un certificado con el dominio principal y el wildcard,
+y elimina el TXT. Después de la primera emisión puede no haber nuevos mensajes ACME hasta la
+renovación.
 
 ## 2. Crear el recurso
 
@@ -118,8 +177,10 @@ studio, porque su cookie exige `Secure`).
   host y que `PUBLIC_URL` esté vacía; después vuelve a desplegar. En producción Forja ignora un
   `PUBLIC_URL=http://localhost:4100` si Coolify o `FORJA_DOMAIN` ofrecen una dirección pública.
 - `https://forja.tudominio.com/healthz` → `{"ok":true}`. Una página «Site not available» o
-  «No available server» es del proxy, no de Forja: el servicio `forja` no tiene dominio, le falta
-  el `:4100` o no está sano (Coolify lo marca *unhealthy* si `/healthz` falla).
+  «No available server» es del proxy, no de Forja: comprueba el dominio y el puerto 4100 del
+  servicio, que `forja` esté sano y que el `wget` desde `coolify-proxy` funcione. Si la etiqueta
+  `traefik.http.routers.forja-apps.rule` contiene literalmente `${FORJA_DOMAIN...}`, conserva la
+  ruta `forja-runtime` de la configuración dinámica anterior.
 - Publica una app de prueba y ábrela en `https://<slug>.forja.tudominio.com` con candado válido.
 - La vista previa dentro del studio carga (si no, revisa el certificado comodín).
 
@@ -151,8 +212,9 @@ studio, porque su cookie exige `Secure`).
 ## Notas de diseño
 
 - **Detrás de Traefik**: `FORJA_TRUST_PROXY=1` hace que los límites de intentos (login, códigos,
-  setup) cuenten por IP real del cliente (`X-Forwarded-For`) y no por la del proxy. Si pones
-  Cloudflare con proxy delante de Coolify, súbelo a `2`.
+  setup) cuenten por IP real del cliente (`X-Forwarded-For`) y no por la del proxy. Cloudflare en
+  modo DNS only no añade otro proxy; usa `2` únicamente si activas la nube naranja delante de
+  Coolify y tienes cobertura TLS para los subdominios de segundo nivel.
 - **Postgres y PGlite**: la plataforma vive en Postgres (servicio `postgres`). Las apps siguen
   con una base PGlite por proyecto que se duerme cuando no se usa; llevarlas a Postgres es otro
   cambio de código (esquemas por proyecto, límites), y tendrá sentido cuando haga falta más de una
