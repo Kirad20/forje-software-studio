@@ -20,6 +20,9 @@ interface RoleProfile {
   estOut: number;
 }
 
+/** Output budget of one step. Writers keep the full 16k (a cut-off write_file is lost); short roles get less. */
+export const maxTokensFor = (role: Role) => Math.min(16_000, Math.max(6_000, ROLES[role].estOut * 4));
+
 export const ROLES: Record<Role, RoleProfile> = {
   router: { minTier: 1, effort: "low", needsTools: false, estIn: 1_500, estOut: 200 },
   summarizer: { minTier: 1, effort: "low", needsTools: false, estIn: 6_000, estOut: 600 },

@@ -564,13 +564,14 @@ async function runTeam(s: TurnState, opts: { given?: Plan; planOnly?: boolean } 
     const current = await readAllFiles(s.project.id);
     const preload = selectContext(current, `${t.goal}\n${finalPlan.contract}`, t.files, 30_000);
     const ctx: ToolContext = { account: s.account, projectId: s.project.id, author: "builder", owned: t.files };
-    const text = [
+    // Constant for the whole turn first, cached as a prefix: a later task of the same role
+    // (after its dependencies, or a fix round) reads it from the cache. What changes per task
+    // (goal, files, project map, preloaded files) comes after the breakpoint.
+    const shared = [finalPlan.contract && `# Contrato compartido\n${finalPlan.contract}`, `# Plan del equipo\n${overview}`, `# Petición original del dueño\n${s.request}`].filter(Boolean).join("\n\n");
+    const own = [
       `# Tu tarea (${t.role}, id ${t.id})\n${t.goal}`,
       `# Tus archivos (solo puedes escribir estos)\n${t.files.join("\n") || "(ninguno)"}`,
-      finalPlan.contract && `# Contrato compartido\n${finalPlan.contract}`,
-      `# Plan del equipo\n${overview}`,
       extra,
-      `# Petición original del dueño\n${s.request}`,
       isNewApp(s) && !extra && t.role !== "backend" ? FIRST_BUILD : "",
       projectMap(current, await describeSchema(s.project.id, true)),
       preloadSection(current, preload),
@@ -579,7 +580,7 @@ async function runTeam(s: TurnState, opts: { given?: Plan; planOnly?: boolean } 
       .join("\n\n");
     return runLane(s, t, {
       system: `${ROLE_PROMPTS[t.role]}\n\n${head}`,
-      messages: [{ role: "user", content: [{ type: "text", text }, ...(t.role === "ui" ? s.images : [])] }],
+      messages: [{ role: "user", content: [{ type: "text", text: shared, cache_control: { type: "ephemeral" } }, { type: "text", text: own }, ...(t.role === "ui" ? s.images : [])] }],
       tools: tools(ROLE_TOOLS[t.role]),
       ctx,
       routing: { complexity: s.features.complexity, domains: [t.role === "ui" ? "ui" : t.role === "data" ? "data" : (s.features.domains.find((d) => d !== "ui") ?? "data")], needsVision: t.role === "ui" && (canSee || s.features.needsVision) },

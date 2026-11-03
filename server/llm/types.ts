@@ -3,7 +3,8 @@
  * (content blocks); the OpenAI-compatible transport converts at the edge.
  */
 export type Block =
-  | { type: "text"; text: string }
+  /** `cache_control` marks the end of a prefix worth caching across calls (Anthropic only; other transports ignore it). */
+  | { type: "text"; text: string; cache_control?: { type: "ephemeral" } }
   | { type: "tool_use"; id: string; name: string; input: Record<string, unknown> }
   | { type: "tool_result"; tool_use_id: string; content: string; is_error?: boolean }
   | { type: "image"; source: { type: "base64"; media_type: string; data: string } }
