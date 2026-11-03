@@ -6,6 +6,7 @@ import type { IdentityModule } from "../../../server/modules/identity/index.js";
 import type { ProjectsModule } from "../../../server/modules/projects/index.js";
 import type { SettingsModule } from "../../../server/modules/settings/index.js";
 import { createStudioApi } from "../../../server/bootstrap/http/studioApi.js";
+import type { BuilderServiceClient } from "../../../server/modules/builder/infrastructure/builderServiceClient.js";
 
 const mocks = vi.hoisted(() => ({ watchProblems: vi.fn() }));
 
@@ -83,6 +84,7 @@ describe("HTTP transport contract", () => {
       headers: { ...headers, "content-type": "application/json" },
       body: JSON.stringify({ path: "pages/home.tsx", content: "updated content" }),
     });
+
     expect(write.status).toBe(200);
 
     const sql = await app.request("/api/projects/project-1/db/sql", {
@@ -96,6 +98,34 @@ describe("HTTP transport contract", () => {
     const emails = await app.request("/api/projects/project-1/emails", { headers });
     expect(emails.status).toBe(200);
     expect(await emails.json()).toEqual({ emails: [{ id: "email-1" }] });
+  });
+
+  it("delegates builder chat to the configured worker and preserves its SSE stream", async () => {
+    const worker = {
+      status: vi.fn(async () => ({ building: false })),
+      turn: vi.fn(async () => new Response('data: {"type":"text","text":"worker"}\n\n', {
+        headers: { "content-type": "text/event-stream" },
+      })),
+    };
+    const api = new Hono().route("/api", createStudioApi(
+      { identity, projects, collaboration, settings, models },
+      worker as unknown as BuilderServiceClient,
+    ));
+
+    const response = await api.request("/api/projects/project-1/chat", {
+      method: "POST",
+      headers: { cookie: "forja_session=valid", "content-type": "application/json" },
+      body: JSON.stringify({ message: "Build this project" }),
+    });
+
+    expect(worker.status).toHaveBeenCalledWith("project-1");
+    expect(worker.turn).toHaveBeenCalledWith(expect.objectContaining({
+      projectId: "project-1",
+      userText: "Build this project",
+      mode: "build",
+    }));
+    expect(response.headers.get("content-type")).toContain("text/event-stream");
+    expect(await response.text()).toContain('"text":"worker"');
   });
 
   it("streams project events as SSE and closes the stream when the client disconnects", async () => {

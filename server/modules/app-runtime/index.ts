@@ -8,6 +8,7 @@ import * as catalog from "./domain/catalog.js";
 import * as urls from "./infrastructure/urls.js";
 import * as sandbox from "./infrastructure/sandbox.js";
 import * as server from "./infrastructure/appServer.js";
+export { callRuntimeEndpoint, type RuntimeEndpointCall } from "./infrastructure/runtimeClient.js";
 import * as types from "./infrastructure/typecheck.js";
 import { removeProjectData as removeData } from "./infrastructure/projectData.js";
 import { bindRuntimeObservation as bindObservation, scan } from "./infrastructure/observation.js";

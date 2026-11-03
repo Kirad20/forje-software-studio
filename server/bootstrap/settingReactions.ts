@@ -6,6 +6,7 @@ export interface SettingReactionPorts {
   resetTransport(): void;
   reloadLangfuse(): void;
   reschedulePoll(): void;
+  reloadServices?(): void;
 }
 
 export function createSettingReactions(
@@ -22,6 +23,7 @@ export function createSettingReactions(
         if (changed("smtpUrl")) reactions.resetTransport();
         if (changed("langfuse")) reactions.reloadLangfuse();
         if (changed("github.pollMs")) reactions.reschedulePoll();
+        if (keys.length) reactions.reloadServices?.();
       });
     },
     stop() {

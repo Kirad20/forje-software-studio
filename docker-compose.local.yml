@@ -8,6 +8,16 @@ services:
     environment:
       # Sin proxy delante: X-Forwarded-For lo manda el cliente y no es de fiar.
       - FORJA_TRUST_PROXY=0
+      - APP_RUNTIME_PUBLIC_PORT=4200
+  app-runtime:
+    ports:
+      - "${APP_RUNTIME_PORT:-4200}:4200"
+    environment:
+      - FORJA_TRUST_PROXY=0
+      - APP_RUNTIME_PUBLIC_PORT=4200
+  builder:
+    environment:
+      - APP_RUNTIME_PUBLIC_PORT=4200
   postgres:
     # Para conectarte desde fuera (psql, npm run dev con DATABASE_URL a localhost:5432).
     ports:
