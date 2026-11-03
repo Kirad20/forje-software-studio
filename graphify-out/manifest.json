@@ -1812,15 +1812,15 @@
     "semantic_hash": ""
   },
   "studio/src/features/projects/presentation/Dashboard.tsx": {
-    "mtime": 1793686614.7489467,
-    "seen": 1793686622.8304234,
-    "ast_hash": "315a72c193a78eff941a0d9473160634",
+    "mtime": 1793698930.042393,
+    "seen": 1793698979.799506,
+    "ast_hash": "206ae6c269182452fa73029abca95be4",
     "semantic_hash": ""
   },
   "studio/src/features/projects/presentation/ProjectView.tsx": {
-    "mtime": 1793687388.4277966,
-    "seen": 1793687462.6351597,
-    "ast_hash": "c9aef7ea42fb39654bd159d3450c6eaa",
+    "mtime": 1793718921.918531,
+    "seen": 1793718946.4178107,
+    "ast_hash": "61884123847f72ff425463f0519e0d81",
     "semantic_hash": ""
   },
   "studio/src/features/projects/presentation/Workspace.tsx": {
@@ -3288,9 +3288,9 @@
     "semantic_hash": ""
   },
   "test/studio.mjs": {
-    "mtime": 1793696748.5032732,
-    "seen": 1793696753.1337306,
-    "ast_hash": "80949c5b7ef10902fd0bed4640bf3218",
+    "mtime": 1793718922.4526136,
+    "seen": 1793718946.4262707,
+    "ast_hash": "1254e694b2a5b56b9c68e9a9bc36431f",
     "semantic_hash": ""
   },
   "test/unit/modules/settings/coreComposition.test.ts": {

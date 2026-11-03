@@ -199,9 +199,14 @@ export function Dashboard() {
 
   return (
     <div className="page">
-      <section style={{ padding: "8px 0 28px" }}>
+      <section className="dashboard-create">
+        <div className="dashboard-intro">
+          <span className="dashboard-eyebrow"><span aria-hidden>✦</span> FORJA STUDIO</span>
+          <h1>Tu próxima idea empieza aquí</h1>
+          <p>Descríbela en tus palabras. Forja la convierte en una app que puedes editar y publicar.</p>
+        </div>
         <div className="idea-bar">
-          <span style={{ color: "var(--accent)" }}>✦</span>
+          <span className="idea-mark" aria-hidden>✦</span>
           <input
             aria-label="Describe el proyecto que quieres crear"
             value={prompt}
