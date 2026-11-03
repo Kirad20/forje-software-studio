@@ -1,3 +1,6 @@
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
 /**
  * Skills that ship with Forja: focused how-tos an agent loads only when the job calls for
  * them (load_skill), instead of every prompt carrying every topic. Each one is written
@@ -11,9 +14,11 @@ export interface Skill {
   /** One line shown in every prompt: it decides whether the agent loads the skill. */
   description: string;
   body: string;
+  /** Extra reference files, loaded one at a time (load_skill with part). Only the skills copied from open-source projects have them. */
+  parts?: Record<string, string>;
 }
 
-export const BUILTIN_SKILLS: Skill[] = [
+const AUTHORED_SKILLS: Skill[] = [
   {
     name: "forms",
     description: "Forms with several fields, validation and a submit state (react-hook-form with the contract's zod schema)",
@@ -350,4 +355,76 @@ Style the table in a CSS Module with tokens; wrap it in an overflow-x: auto cont
     return orders;
   }`,
   },
+  {
+    name: "design-brief",
+    description: "Start here for any new screen or app: decide purpose, audience, tone and one signature idea before writing UI",
+    body: `Decide these in a few lines BEFORE writing code; they are what makes the result look intentional instead of generic.
+1. Purpose and audience: who opens this, what is the one thing they come to do, on what device (phone in a shop, laptop at a desk)?
+2. Tone: pick ONE and commit (editorial and calm, clean and clinical, warm and friendly, dense and technical, playful and bold). The tone chooses the type, the palette, the density and the motion; load "design-system" to turn it into tokens and "frontend-design" for the process of a design lead.
+3. One signature idea: a single memorable element (a big numeric readout, a distinctive color block, an unusual layout of the main list). Everything else stays quiet so that one thing is seen.
+4. Content first: write the real copy, the real labels and a few realistic sample rows before styling. A layout that only works with lorem ipsum does not work.
+5. Hierarchy: one primary action per screen, one h1, a clear second level. If two things shout, one of them is wrong.
+Then build with the kit: tokens in base.css, screens composed from @forja/ui, your own CSS Modules only for layout. Verify at 375 px and desktop, in light and dark, and run check_standards.
+Before you finish, load the skill "impeccable" (part "critique") and judge the result the way a reviewer would.`,
+  },
+  {
+    name: "design-system",
+    description: "Turn a tone into tokens: type scale, spacing, radius, shadows and four tested palettes (light and dark)",
+    body: `Everything visual comes from the tokens in base.css; change them there and the whole app (and @forja/ui) follows. Never hard-code colors in components.
+Type: system font stacks need no loading and look native. For character put a font file in static/ (woff2) and declare it with @font-face in base.css, one family for headings and one for text at most. Scale: --text-sm 0.875rem, --text-md 1rem, --text-lg 1.25rem, --text-xl 2rem; line-height 1.5 for text and 1.15 for large headings; keep text lines under 70 characters.
+Spacing: a 4px base (--space-1..5 = 4, 8, 16, 24, 40); use only those values, so rhythm is consistent. Radius: one value (6-8 px sharp, 10-12 friendly, 16+ playful) plus a pill for badges. Shadows: at most two (a subtle one for cards, a strong one for overlays); on dark themes prefer borders to shadows.
+Palette recipe: one accent (--primary) with a readable --primary-text, neutrals tinted toward the accent hue, --danger and --success used only for meaning. Contrast: body text 4.5:1 or more, the accent as text or icon on the background 3:1 or more, button text on the accent 4.5:1 or more, in BOTH themes.
+These four palettes already pass those ratios in light and dark. They are neutral starting points, not an answer: when the subject has colors of its own (its materials, its street, its landscape), take the accent from there and re-check the contrast. Avoid the look every generated page shares: cream background with a terracotta accent, or near-black with one acid-green accent, unless the brief asks for it.
+
+  Paper (calm, neutral; pair a serif for headings if the tone is editorial):
+  light  --bg:#f7f8f6 --surface:#ffffff --text:#1a1c1a --muted:#5d625c --border:#dfe2dc --primary:#0f5f5a --primary-text:#ffffff
+  dark   --bg:#0e1211 --surface:#151a19 --text:#eef2f0 --muted:#a3aea9 --border:#28312f --primary:#5eead4 --primary-text:#04201d
+
+  Product (clean, trustworthy):
+  light  --bg:#f8fafc --surface:#ffffff --text:#0f172a --muted:#526071 --border:#dbe3ec --primary:#1d4ed8 --primary-text:#ffffff
+  dark   --bg:#0b1120 --surface:#111a2e --text:#e6edf7 --muted:#9db0c9 --border:#223049 --primary:#7aa2ff --primary-text:#0b1120
+
+  Fresh (food, health, outdoors):
+  light  --bg:#f6faf6 --surface:#ffffff --text:#14231a --muted:#4f6657 --border:#d6e4d9 --primary:#166534 --primary-text:#ffffff
+  dark   --bg:#0c140f --surface:#131f17 --text:#e8f3ea --muted:#9bb5a3 --border:#23362a --primary:#4ade80 --primary-text:#06210f
+
+  Ink (technical, creative, dark-leaning):
+  light  --bg:#f4f5f6 --surface:#ffffff --text:#15171a --muted:#596068 --border:#dcdfe3 --primary:#0e7490 --primary-text:#ffffff
+  dark   --bg:#0d0f11 --surface:#15181b --text:#eceff2 --muted:#a0a8b0 --border:#2a2f35 --primary:#67e8f9 --primary-text:#04222a
+
+Put the light values in :root and the dark ones in @media (prefers-color-scheme: dark) { :root { … } }. Keep --danger #b91c1c (light) and #f87171 (dark), --success #15803d and #4ade80.`,
+  },
 ];
+
+/**
+ * Skills copied from open-source projects live as folders next to this file: skills/<name>/SKILL.md
+ * (front matter name and description), optional parts/<part>.md, and the LICENSE they came with.
+ * See skills/NOTICE.md for the sources, licenses and what Forja changed.
+ */
+const VENDORED = fileURLToPath(new URL("./skills/", import.meta.url));
+
+const unix = (text: string) => text.replace(/\r\n/g, "\n");
+
+function readVendored(): Skill[] {
+  if (!existsSync(VENDORED)) return [];
+  const out: Skill[] = [];
+  for (const dir of readdirSync(VENDORED, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name).sort()) {
+    const file = `${VENDORED}${dir}/SKILL.md`;
+    if (!existsSync(file)) continue;
+    const text = unix(readFileSync(file, "utf8"));
+    const m = /^---\n([\s\S]*?)\n---\n([\s\S]*)$/.exec(text);
+    const meta = (key: string) => new RegExp(`^${key}:\s*(.+)$`, "m").exec(m?.[1] ?? "")?.[1]?.trim();
+    const description = meta("description");
+    const body = (m ? m[2]! : text).trim();
+    if (!description || !body) continue;
+    const parts: Record<string, string> = {};
+    const partsDir = `${VENDORED}${dir}/parts/`;
+    if (existsSync(partsDir)) {
+      for (const f of readdirSync(partsDir).filter((f) => f.endsWith(".md")).sort()) parts[f.slice(0, -3)] = unix(readFileSync(partsDir + f, "utf8")).trim();
+    }
+    out.push({ name: meta("name") ?? dir, description, body, ...(Object.keys(parts).length ? { parts } : {}) });
+  }
+  return out;
+}
+
+export const BUILTIN_SKILLS: Skill[] = [...AUTHORED_SKILLS, ...readVendored()];

@@ -1,3 +1,5 @@
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { BUILDER_SYSTEM_PROMPT } from "../../server/builder/prompt.js";
 import { ROLE_PROMPTS, ROLE_TOOLS } from "../../server/builder/roles.js";
@@ -8,9 +10,11 @@ import { buildClient } from "../../server/runtime/bundler.js";
 import { KIT_CATALOG } from "../../server/runtime/catalog.js";
 import { typecheckProject } from "../../server/runtime/typecheck.js";
 
+const OPEN_SOURCE = ["frontend-design", "impeccable", "hallmark", "taste-skill", "ui-ux-pro-max", "web-design-guidelines"];
+
 describe("skills", () => {
   it("ships skills with a name, a one-line description and a body, with no duplicates", () => {
-    expect(BUILTIN_SKILLS.length).toBeGreaterThanOrEqual(8);
+    expect(BUILTIN_SKILLS.length).toBeGreaterThanOrEqual(20);
     expect(new Set(BUILTIN_SKILLS.map((s) => s.name)).size).toBe(BUILTIN_SKILLS.length);
     for (const s of BUILTIN_SKILLS) {
       expect(s.name, s.name).toMatch(/^[a-z0-9-]+$/);
@@ -46,6 +50,59 @@ describe("skills", () => {
     expect(index).toContain("load_skill");
   });
 
+  it("ships the design skills, wired into the planner, the ui role and the reviewer", () => {
+    for (const n of ["design-brief", "design-system", "frontend-design", "impeccable", "hallmark", "taste-skill", "web-design-guidelines", "ui-ux-pro-max"]) expect(findSkill({}, n), n).toBeDefined();
+    expect(ROLE_PROMPTS.ui).toMatch(/design-brief/);
+    expect(ROLE_PROMPTS.planner).toMatch(/design-brief/);
+    expect(ROLE_PROMPTS.qa).toMatch(/web-design-guidelines/);
+  });
+
+  it("ships the open-source design skills with their licenses, notice and parts", () => {
+    const root = path.resolve("server/builder/skills");
+    const notice = readFileSync(path.join(root, "NOTICE.md"), "utf8");
+    for (const name of OPEN_SOURCE) {
+      expect(existsSync(path.join(root, name, "LICENSE")), `${name} LICENSE`).toBe(true);
+      expect(notice, name).toContain("`" + name + "/`");
+      expect(findSkill({}, name)!.body, name).toContain("> Forja note:");
+    }
+    expect(Object.keys(findSkill({}, "impeccable")!.parts!)).toEqual(expect.arrayContaining(["craft-floor", "critique", "audit", "polish"]));
+    expect(Object.keys(findSkill({}, "hallmark")!.parts!)).toContain("gates");
+    expect(Object.keys(findSkill({}, "taste-skill")!.parts!)).toEqual(expect.arrayContaining(["copy", "tells", "critique"]));
+    expect(Object.keys(findSkill({}, "ui-ux-pro-max")!.parts!)).toContain("quick-reference");
+    expect(skillIndex()).toMatch(/- impeccable: .*\[parts: .*craft-floor/);
+  });
+
+  it("puts the Forja note on every copied part and keeps their scripts and launchers out", () => {
+    for (const name of OPEN_SOURCE) {
+      const skill = findSkill({}, name)!;
+      for (const [part, text] of Object.entries(skill.parts ?? {})) expect(text.startsWith("> Forja note:"), `${name}/${part}`).toBe(true);
+      for (const text of [skill.body, ...Object.values(skill.parts ?? {})]) expect(text, name).not.toMatch(/curl |wget |\| *(ba)?sh|Invoke-Expression/);
+    }
+    const files = readdirSync(path.resolve("server/builder/skills"), { recursive: true }).map(String);
+    expect(files.filter((f) => /\.(mjs|js|py|sh|cmd|ps1|exe|csv)$/.test(f))).toEqual([]);
+  });
+
+  it("only offers palettes that pass the contrast the skill itself asks for, in light and dark", () => {
+    const lum = (hex: string) => {
+      const c = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255).map((v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4));
+      return 0.2126 * c[0]! + 0.7152 * c[1]! + 0.0722 * c[2]!;
+    };
+    const ratio = (a: string, b: string) => {
+      const [hi, lo] = [lum(a), lum(b)].sort((x, y) => y - x);
+      return (hi! + 0.05) / (lo! + 0.05);
+    };
+    const rows = findSkill({}, "design-system")!.body.split("\n").filter((l) => /^\s+(light|dark)\s/.test(l));
+    expect(rows.length).toBe(8);
+    for (const row of rows) {
+      const t = Object.fromEntries([...row.matchAll(/--([a-z-]+):(#[0-9a-f]{6})/g)].map((m) => [m[1]!, m[2]!])) as Record<string, string>;
+      expect(ratio(t.text!, t.bg!), row).toBeGreaterThanOrEqual(4.5);
+      expect(ratio(t.text!, t.surface!), row).toBeGreaterThanOrEqual(4.5);
+      expect(ratio(t.muted!, t.surface!), row).toBeGreaterThanOrEqual(4.5);
+      expect(ratio(t["primary-text"]!, t.primary!), row).toBeGreaterThanOrEqual(4.5);
+      expect(ratio(t.primary!, t.bg!), row).toBeGreaterThanOrEqual(3);
+    }
+  });
+
   it("moved Jobs and Sign-in out of the manual into skills", () => {
     expect(BUILDER_SYSTEM_PROMPT).not.toMatch(/^# Jobs/m);
     expect(BUILDER_SYSTEM_PROMPT).not.toMatch(/^# Sign-in/m);
@@ -65,7 +122,7 @@ describe("skills", () => {
   it.skipIf(!process.env.FORJA_NETWORK_TESTS)("has code samples that compile against the kit's real packages", async () => {
     const files: Record<string, string> = { "package.json": JSON.stringify({ dependencies: Object.fromEntries(Object.entries(KIT_CATALOG).map(([n, e]) => [n, e.version])) }) };
     const imports: string[] = [];
-    for (const skill of BUILTIN_SKILLS) {
+    for (const skill of BUILTIN_SKILLS.filter((s) => !OPEN_SOURCE.includes(s.name))) {
       const blocks = skill.body.split(/\n\s*\n/).filter((b) => b.split("\n").every((l) => l.startsWith("  ") || !l.trim()) && /import /.test(b));
       blocks.forEach((b, i) => {
         const code = b.split("\n").map((l) => l.slice(2)).join("\n") + "\n";

@@ -506,16 +506,25 @@ export const builderTools: BuilderTool[] = [
     name: "load_skill",
     description:
       "Carga una skill: una guía corta y exacta para un trabajo concreto (formularios, gráficas, tablas, arrastrar y soltar, animaciones, pagos, correo, archivos, fechas y dinero, tiempo real, o las del proyecto). El índice está en tu prompt, en «Skills»: cárgala ANTES de escribir ese tipo de código, en vez de adivinar la API de una librería de memoria.",
-    input_schema: obj({ name: str("Nombre de la skill, tal como aparece en el índice") }, ["name"]),
-    async run(i: { name: string }, ctx) {
+    input_schema: obj(
+      {
+        name: str("Nombre de la skill, tal como aparece en el índice"),
+        part: str("Solo para las skills que listan partes en el índice ([parts: …]): la parte que quieres leer. Sin ella recibes la skill y la lista de sus partes."),
+      },
+      ["name"],
+    ),
+    async run(i: { name: string; part?: string }, ctx) {
       const files = await projects.readAllFiles(ctx.projectId);
       const org = await enabledOrgSkills((await projects.getProject(ctx.projectId))?.orgId);
       const skill = findSkill(files, i.name, org);
       if (!skill) throw new Error(`No hay ninguna skill llamada "${i.name}". Las que hay: ${allSkills(files, org).map((s) => s.name).join(", ")}.`);
-      return `# Skill: ${skill.name}
-${skill.description}
-
-${skill.body}`;
+      const part = i.part?.trim().toLowerCase();
+      if (part) {
+        const text = skill.parts?.[part];
+        if (text === undefined) throw new Error(`La skill ${skill.name} no tiene la parte "${part}". ${skill.parts ? `Sus partes: ${Object.keys(skill.parts).join(", ")}.` : "No tiene partes."}`);
+        return `# Skill: ${skill.name} / ${part}\n\n${text}`;
+      }
+      return `# Skill: ${skill.name}\n${skill.description}\n\n${skill.body}`;
     },
   },
   {

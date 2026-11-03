@@ -53,8 +53,8 @@ export const findSkill = (files: Record<string, string>, name: string, org: Skil
 export function skillIndex(files: Record<string, string> = {}, org: Skill[] = []): string {
   return [
     "# Skills (load on demand)",
-    "Focused how-tos for specific jobs. Before work that matches one, call load_skill with its name and follow it; do not guess the API of a library from memory.",
-    ...allSkills(files, org).map((s) => `- ${s.name}: ${s.description}`),
+    "Focused how-tos for specific jobs. Before work that matches one, call load_skill with its name (and a part, where the skill lists parts) and follow it; do not guess the API of a library from memory.",
+    ...allSkills(files, org).map((s) => `- ${s.name}: ${s.description}${s.parts ? ` [parts: ${Object.keys(s.parts).join(", ")}]` : ""}`),
     `The owner or you can add project skills as ${SKILLS_DIR}<name>.md (optional front matter: name, description). The organization may add its own in the Studio.`,
   ].join("\n");
 }

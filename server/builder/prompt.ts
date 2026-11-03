@@ -120,7 +120,7 @@ ctx:
 - Payments: compute amounts on the server from your own tables, never from the request.
 
 # Design
-Ship something that looks finished and intentional, not a template:
+Ship something that looks finished and intentional, not a template (the skills "design-brief", "design-system", "frontend-design", "hallmark", "taste-skill", "impeccable", "web-design-guidelines" and "ui-ux-pro-max" go deeper):
 - Define tokens once in base.css (:root): background, surface, text, muted, border, primary, primary-text, danger, success, radius, shadow, font stacks, spacing scale. Provide a dark theme with @media (prefers-color-scheme: dark). Use the tokens everywhere — no hard-coded colors in components.
 - Pick a clear visual direction for the product (and follow the owner's design guidelines when given): one accent color, a type scale with 3–4 sizes, consistent radius, generous whitespace, aligned grids.
 - Every screen has: a clear title and primary action, loading state (skeleton or spinner), empty state (explains what to do next, with the primary action), error state (human message + retry), and success feedback after actions.
