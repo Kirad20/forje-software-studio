@@ -20,6 +20,7 @@ import { publishProject } from "../runtime/publish.js";
 import { previewOrigin, previewUrl } from "../runtime/urls.js";
 import { findSymbol, projectMap, relatedFiles } from "./index.js";
 import { rewriteImports } from "./rename.js";
+import { allSkills, findSkill } from "./skills.js";
 import { standardsScan } from "./standards.js";
 
 export { previewUrl };
@@ -500,6 +501,21 @@ export const builderTools: BuilderTool[] = [
     },
     format: (d) => (d.findings.length ? `${d.findings.length} hallazgo(s):\n${d.findings.map((f) => `${f.file}${f.line ? `:${f.line}` : ""} — ${f.text}`).join("\n")}` : "Cumple los estándares."),
   }),
+  {
+    name: "load_skill",
+    description:
+      "Carga una skill: una guía corta y exacta para un trabajo concreto (formularios, gráficas, tablas, arrastrar y soltar, animaciones, pagos, correo, archivos, fechas y dinero, tiempo real, o las del proyecto). El índice está en tu prompt, en «Skills»: cárgala ANTES de escribir ese tipo de código, en vez de adivinar la API de una librería de memoria.",
+    input_schema: obj({ name: str("Nombre de la skill, tal como aparece en el índice") }, ["name"]),
+    async run(i: { name: string }, ctx) {
+      const files = await projects.readAllFiles(ctx.projectId);
+      const skill = findSkill(files, i.name);
+      if (!skill) throw new Error(`No hay ninguna skill llamada "${i.name}". Las que hay: ${allSkills(files).map((s) => s.name).join(", ")}.`);
+      return `# Skill: ${skill.name}
+${skill.description}
+
+${skill.body}`;
+    },
+  },
   {
     name: "remember",
     description:

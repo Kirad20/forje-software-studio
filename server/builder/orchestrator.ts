@@ -9,6 +9,7 @@ import { addMemory, memorySection, memorySettings, MEMORY_KINDS } from "../platf
 import { createCheckpoint, getProject, readAllFiles, writeFile, type Project } from "../platform/projects.js";
 import { formatProblem } from "../runtime/bundler.js";
 import { typecheckProject } from "../runtime/typecheck.js";
+import { skillIndex } from "./skills.js";
 import { checkContract, criteriaOf, CONTRACT_FILE, planOverview, ROLE_FOLDERS, validatePlan, type Plan, type PlanTask, type SpecialistRole } from "./plan.js";
 import { imageBlocks, runAgent, save, UPLOADS, type AgentEvent, type AgentResult } from "./agent.js";
 import { formatProblems, listProblems, recheckBuild, watchProblems } from "../platform/problems.js";
@@ -215,6 +216,8 @@ interface TurnState {
   context: string;
   /** The "# Memoria" block, loaded once per turn. */
   memory: string;
+  /** The skills index: built-in skills plus the project's own (static/__dev/skills/). */
+  skills: string;
   signal: AbortSignal;
   emit: (e: AgentEvent) => void;
   wrote: boolean;
@@ -232,6 +235,7 @@ function projectSection(s: TurnState) {
     p.systemPrompt ? `# Owner's project instructions\n${p.systemPrompt}` : "",
     p.designPrompt ? `# Owner's design guidelines\n${p.designPrompt}` : "",
     s.memory,
+    s.skills,
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -760,6 +764,7 @@ export async function runBuilderTurn(
     images: [],
     context: "",
     memory: "",
+    skills: skillIndex(),
     signal: abort.signal,
     emit,
     wrote: false,
@@ -783,7 +788,9 @@ export async function runBuilderTurn(
     await recheckBuild(projectId).catch(() => {});
     const open = listProblems(projectId);
     if (open.length) s.context += `\n\n## Problemas abiertos en la vista previa\n${formatProblems(open, 8)}`;
-    const fileCount = Object.keys(await readAllFiles(projectId)).length;
+    const projectFiles = await readAllFiles(projectId);
+    const fileCount = Object.keys(projectFiles).length;
+    s.skills = skillIndex(projectFiles);
     s.features = await analyzeRequest(scope, userText, { images: s.images.length, targeted: userText.includes("[Elemento seleccionado"), fileCount });
     const approved = implementPlan && mode === "build" ? await pendingPlan(projectId) : null;
     const fast = mode === "chat" || (mode === "build" && !approved && useFastPath(s.features));

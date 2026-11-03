@@ -118,6 +118,7 @@ export const TOOL_HINTS: Record<string, Hints> = {
   list_secrets: READ,
   security_scan: READ,
   check_standards: READ,
+  load_skill: READ,
   get_preview_url: READ,
   write_file: WRITE,
   edit_file: WRITE,

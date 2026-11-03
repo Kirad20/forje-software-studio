@@ -33,7 +33,7 @@ const signIn = (side: "Server" | "Pages") =>
 
 const TEAM = `# Working in a team
 You are one of several agents building this request in parallel. A planner split the work; you own only the files listed in your task, and writes outside them are refused. Other agents are writing the other parts at the same time — follow the shared contract (routes, request/response shapes, table columns) exactly so the pieces fit.
-Your task message already contains the project map and the most relevant files: do not call project_map or re-read those files unless you changed them.
+Your task message already contains the project map and the most relevant files: do not call project_map or re-read those files unless you changed them. Load the skills your task names (and any other that matches the job) with load_skill before writing that code.
 Do your task completely, verify it with the tools available to you, then end with a short report for the team (not the owner), in Spanish: what you built, files touched, how to call it, and anything another agent must know or fix. Do not ask the owner questions; make a sensible decision and note it.`;
 
 const DATA_ROLE = `# Your role: data
@@ -69,7 +69,7 @@ Rules for the plan:
 - 1 to 6 tasks. Prefer fewer, larger tasks; only split when parts are truly independent. A role with nothing to do gets no task.
 - Every file is owned by exactly one task ("files": exact paths or folder prefixes ending in "/", never both a folder and a file inside it in different tasks). helpers/contract.ts is the planner's: never list it. Row types belong to the data task (helpers/types.ts); the typed client helpers/api.ts belongs to the ui task.
 - depends_on: data tasks first; backend and ui usually depend only on data and run in parallel with each other because they share the contract.
-- goal: enough to work without asking — behaviour, edge cases and who may do what. The goal says what to build; the contract holds the exact shapes. Tell ui to build from @forja/ui and lucide-react, and tell backend and data to put every calculation or rule in a helper with a helpers/*.spec.ts.
+- goal: enough to work without asking — behaviour, edge cases and who may do what, plus the skills (see "Skills") the specialist should load first, e.g. "Carga las skills forms y data-tables". The goal says what to build; the contract holds the exact shapes. Tell ui to build from @forja/ui and lucide-react, and tell backend and data to put every calculation or rule in a helper with a helpers/*.spec.ts.
 - done_when: 1 to 8 observable results the reviewer checks one by one (e.g. "POST notes/create without a session answers 401", "/notes shows the empty state with a create button when there are no notes"). Never "works well".
 - A big request is built in phases: plan only the first phase, the core flow that is usable end to end, and list what you leave out in "later", one sentence each. Do not squeeze a whole product into six tasks.
 - summary: 2–4 sentences for the owner, in the owner's language, saying what will be built.`;
@@ -126,10 +126,11 @@ export { TALK, WORK };
 
 /** Tools each role may use; special tools (submit_plan, report_review) are added by the orchestrator. */
 export const ROLE_TOOLS: Record<"planner" | "data" | "backend" | "ui" | "qa" | "chat" | "security", string[]> = {
-  security: ["project_map", "read_files", "find_symbol", "related_files", "search_code", "describe_database", "security_scan"],
-  planner: ["read_files", "find_symbol", "related_files", "search_code", "describe_database", "fetch_url", "write_file", "edit_file", "remember", "forget"],
-  data: ["project_map", "read_files", "find_symbol", "search_code", "describe_database", "execute_sql", "query_database", "write_file", "edit_file", "check_build", "check_standards", "get_problems", "run_tests"],
+  security: ["load_skill", "project_map", "read_files", "find_symbol", "related_files", "search_code", "describe_database", "security_scan"],
+  planner: ["load_skill", "read_files", "find_symbol", "related_files", "search_code", "describe_database", "fetch_url", "write_file", "edit_file", "remember", "forget"],
+  data: ["load_skill", "project_map", "read_files", "find_symbol", "search_code", "describe_database", "execute_sql", "query_database", "write_file", "edit_file", "check_build", "check_standards", "get_problems", "run_tests"],
   backend: [
+    "load_skill",
     "project_map",
     "read_files",
     "find_symbol",
@@ -156,9 +157,9 @@ export const ROLE_TOOLS: Record<"planner" | "data" | "backend" | "ui" | "qa" | "
     "setup_auth",
     "fetch_url",
   ],
-  ui: ["project_map", "read_files", "find_symbol", "related_files", "search_code", "write_file", "edit_file", "delete_file", "rename_file", "add_dependency", "remove_dependency", "check_build", "check_standards", "get_problems", "get_logs", "call_endpoint", "browser_test"],
-  qa: ["project_map", "read_files", "find_symbol", "related_files", "search_code", "describe_database", "query_database", "check_build", "get_problems", "run_tests", "check_standards", "call_endpoint", "browser_test", "security_scan", "get_logs"],
-  chat: ["project_map", "read_files", "find_symbol", "related_files", "search_code", "describe_database", "query_database", "get_problems", "get_logs", "list_secrets", "security_scan", "fetch_url", "remember", "forget"],
+  ui: ["load_skill", "project_map", "read_files", "find_symbol", "related_files", "search_code", "write_file", "edit_file", "delete_file", "rename_file", "add_dependency", "remove_dependency", "check_build", "check_standards", "get_problems", "get_logs", "call_endpoint", "browser_test"],
+  qa: ["load_skill", "project_map", "read_files", "find_symbol", "related_files", "search_code", "describe_database", "query_database", "check_build", "get_problems", "run_tests", "check_standards", "call_endpoint", "browser_test", "security_scan", "get_logs"],
+  chat: ["load_skill", "project_map", "read_files", "find_symbol", "related_files", "search_code", "describe_database", "query_database", "get_problems", "get_logs", "list_secrets", "security_scan", "fetch_url", "remember", "forget"],
 };
 
 /** Tools of the full builder the fast agent does without: project_map covers the file list, and every turn checkpoints itself. */
