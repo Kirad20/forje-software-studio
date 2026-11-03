@@ -6,6 +6,7 @@ import { Hono } from "hono";
 import { WebSocketServer } from "ws";
 import { config, ROOT_DIR } from "../shared/config.js";
 import { createStudioApi } from "./http/studioApi.js";
+import { withDefaultHeaders } from "./http/responseHeaders.js";
 import { startJobRunner, stopJobRunner } from "../modules/app-services/jobs.js";
 import { closeAll } from "../modules/app-services/projectDb.js";
 import { attachSocket, stopRealtime } from "../modules/app-services/realtime.js";
@@ -95,7 +96,7 @@ app.use("*", async (c, next) => {
 // The studio itself: never framed, no sniffing. Apps returned above set their own headers.
 app.use("*", async (c, next) => {
   await next();
-  for (const [k, v] of Object.entries(STUDIO_HEADERS)) if (!c.res.headers.has(k)) c.res.headers.set(k, v);
+  return withDefaultHeaders(c.res, STUDIO_HEADERS);
 });
 
 app.route("/api", studioApi);
