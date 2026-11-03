@@ -198,9 +198,9 @@
     "semantic_hash": ""
   },
   "docker-compose.yml": {
-    "mtime": 1793728254.309745,
-    "seen": 1793728277.6064517,
-    "ast_hash": "cccb1fc6088956dc11a792ac8eadfba0",
+    "mtime": 1793730271.4843028,
+    "seen": 1793730302.355521,
+    "ast_hash": "79feec965053047aceca764a66732165",
     "semantic_hash": ""
   },
   "sdk/server/index.ts": {
@@ -246,9 +246,9 @@
     "semantic_hash": ""
   },
   "docs/despliegue-coolify.md": {
-    "mtime": 1793728231.3006053,
-    "seen": 1793728277.609319,
-    "ast_hash": "5bd08075a1fa12f67ef4a63083d82f0d",
+    "mtime": 1793730284.1814468,
+    "seen": 1793730302.7171464,
+    "ast_hash": "be926f67162b8cc6928552a5449bc923",
     "semantic_hash": ""
   },
   "docs/superpowers/plans/2026-11-01-panel-admin.md": {

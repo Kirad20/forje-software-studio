@@ -87,7 +87,8 @@ studio, porque su cookie exige `Secure`).
      descifrar. No la cambies nunca después del primer arranque.
    - `SERVICE_PASSWORD_BOOTSTRAP` → token para crear la primera cuenta de administrador.
    - `SERVICE_PASSWORD_POSTGRES` → contraseña del servicio `postgres` (la usa `DATABASE_URL`).
-   - `SERVICE_PASSWORD_APP_DATA` → token aleatorio para las APIs internas de datos/runtime.
+   - `SERVICE_PASSWORD_APP_DATA` → opcional, token dedicado para las APIs internas de datos/runtime.
+     Si no se define, Compose usa `SERVICE_PASSWORD_BUILDER` como respaldo.
    - `SERVICE_PASSWORD_BUILDER` → token aleatorio para el API interno del constructor.
 
    Rellena tú (Coolify las guarda cifradas; no las pegues en chats ni en el repo):
@@ -97,7 +98,9 @@ studio, porque su cookie exige `Secure`).
    | `FORJA_DOMAIN` | `forja.tudominio.com` (el host del studio, sin `https://` ni puerto) **obligatoria**: de ella salen las URLs de las apps y vistas previas |
    | `PUBLIC_URL` | opcional: déjala vacía. Forja usa `SERVICE_URL_FORJA_4100`, `COOLIFY_URL` o, si Coolify no las define, `https://FORJA_DOMAIN`. El log de arranque dice cuál quedó (`plataforma en …`) |
 
-   Para los dos tokens internos, usa valores largos y aleatorios; no los reutilices. Nada más:
+   Recomendado: define ambos tokens con valores largos y aleatorios distintos. Si Coolify solo
+   tiene `SERVICE_PASSWORD_BUILDER`, el despliegue funciona usando ese valor para ambas APIs.
+   Nada más:
    proveedores y modelos, registro de cuentas, SMTP, GitHub, Langfuse, evals… se
    configuran en el studio (**Administración**) y se guardan en Postgres, con los secretos cifrados
    con `SERVICE_HEX_64_SECRETSKEY`. Las variables antiguas (`ANTHROPIC_API_KEY`, `SMTP_URL`,
