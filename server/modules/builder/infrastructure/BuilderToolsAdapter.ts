@@ -25,7 +25,7 @@ import { rewriteImports } from "./rename.js";
 import { ownsFile } from "../domain/FinishGatePolicy.js";
 import { allSkills, findSkill, renderSkill } from "./skills.js";
 import { standardsScan } from "../domain/Standards.js";
-import { normalizeProjectProfile } from "../../projects/domain/ProjectSnapshot.js";
+import { normalizeProjectProfile } from "../../projects/index.js";
 
 export { previewUrl };
 

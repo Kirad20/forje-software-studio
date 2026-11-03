@@ -1,5 +1,3 @@
-import type { ProjectProfile } from "../../projects/domain/ProjectSnapshot.js";
-
 export interface EvaluationAccount {
   id: string;
   email: string;
@@ -28,7 +26,13 @@ export interface EvaluationProject {
   lastOpenedAt: string;
   systemPrompt: string;
   designPrompt: string;
-  profile: ProjectProfile | null;
+  profile: {
+    purpose?: string;
+    audience?: string;
+    appType?: string;
+    coreFeatures?: string[];
+    constraints?: string[];
+  } | null;
   seo: {
     siteName?: string;
     siteDescription?: string;

@@ -570,9 +570,9 @@
     "semantic_hash": ""
   },
   "server/modules/projects/index.ts": {
-    "mtime": 1793744629.2981987,
-    "seen": 1793744945.8106704,
-    "ast_hash": "d34149f3d1c88e09093d336792c88db3",
+    "mtime": 1793745843.1458306,
+    "seen": 1793745972.8682327,
+    "ast_hash": "72b101d3d93954370aa73a350b9388be",
     "semantic_hash": ""
   },
   "server/modules/projects/infrastructure/PostgresProjectFileRepository.ts": {
@@ -870,9 +870,9 @@
     "semantic_hash": ""
   },
   "server/modules/builder/infrastructure/BuilderToolsAdapter.ts": {
-    "mtime": 1793744841.367129,
-    "seen": 1793744945.8106704,
-    "ast_hash": "1412d7e1e9942f7266d4bebb023eb2be",
+    "mtime": 1793745843.7644682,
+    "seen": 1793745972.8144605,
+    "ast_hash": "83f871ed10b4ff1fda39e04d1d048369",
     "semantic_hash": ""
   },
   "server/modules/builder/infrastructure/BuilderTurnAdapter.ts": {
@@ -1386,9 +1386,9 @@
     "semantic_hash": ""
   },
   "server/bootstrap/mcp/server.ts": {
-    "mtime": 1793744842.8166058,
-    "seen": 1793744945.8106704,
-    "ast_hash": "e7fe44feab70d0e541a85a8d2ade4c36",
+    "mtime": 1793745844.9511461,
+    "seen": 1793745972.7804487,
+    "ast_hash": "c4e96e143fe4c4ff4852c15afc8128a2",
     "semantic_hash": ""
   },
   "server/bootstrap/server.ts": {
@@ -2994,9 +2994,9 @@
     "semantic_hash": ""
   },
   "server/modules/evaluations/ports/resources.ts": {
-    "mtime": 1793744764.018427,
-    "seen": 1793744945.8106704,
-    "ast_hash": "15e5d85e22d2a5b9cc03f91fe4c2e6c6",
+    "mtime": 1793745880.4327145,
+    "seen": 1793745972.837241,
+    "ast_hash": "8353b7b7c58f25fa5bd4e8343858c6c5",
     "semantic_hash": ""
   },
   "test/unit/modules/identity/moduleFactory.test.ts": {

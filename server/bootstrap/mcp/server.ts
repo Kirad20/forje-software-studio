@@ -4,8 +4,7 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprot
 import { builderTools, previewUrl, toolByName, type BuilderServiceClient } from "../../modules/builder/index.js";
 import type { IdentityModule, PublicAccount } from "../../modules/identity/index.js";
 import { memorySection } from "../../modules/memory/memory.js";
-import type { ProjectsModule, Project } from "../../modules/projects/index.js";
-import { normalizeProjectProfile } from "../../modules/projects/domain/ProjectSnapshot.js";
+import { normalizeProjectProfile, type ProjectsModule, type Project } from "../../modules/projects/index.js";
 import { countAction } from "../../modules/usage/usage.js";
 import type { CollaborationModule } from "../../modules/collaboration/index.js";
 import { guideList, readGuides } from "./guides.js";
