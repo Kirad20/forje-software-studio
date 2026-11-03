@@ -11,7 +11,7 @@ import type { BuilderTool, ToolContext } from "./tools.js";
 /** Events streamed to the studio. `taskId` says which agent lane they belong to. */
 export type AgentEvent =
   | { type: "route"; fastPath: boolean; features: unknown; mode?: string }
-  | { type: "plan"; summary: string; tasks: { id: string; role: string; goal: string; files: string[]; dependsOn: string[] }[] }
+  | { type: "plan"; summary: string; tasks: { id: string; role: string; goal: string; files: string[]; dependsOn: string[]; doneWhen?: string[] }[] }
   | { type: "task_start"; taskId: string; role: string; model: string; reason: string }
   | { type: "task_end"; taskId: string; ok: boolean; summary: string; usd: number; tokens: number }
   | { type: "review"; ok: boolean; summary: string; issues: { role: string; problem: string }[] }

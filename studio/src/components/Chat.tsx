@@ -48,6 +48,7 @@ interface TaskRow {
   summary: string | null;
   steps: { tool: string; summary: string; ok: boolean }[] | null;
   dependsOn: string[] | null;
+  doneWhen?: string[] | null;
   inputTokens: number | null;
   outputTokens: number | null;
   cacheReadTokens: number | null;
@@ -69,6 +70,7 @@ function teamOf(rows: TaskRow[]): TeamTurn {
       usd: Number(t.usd ?? 0),
       tokens: (t.inputTokens ?? 0) + (t.outputTokens ?? 0) + (t.cacheReadTokens ?? 0),
       dependsOn: t.dependsOn ?? [],
+      doneWhen: t.doneWhen ?? [],
     })),
   };
 }
@@ -746,7 +748,7 @@ export function Chat({
         if (e.type === "route") {
           if (!e.fastPath) lane("plan", "planner").goal = "Planificar el trabajo del equipo";
         } else if (e.type === "plan") {
-          for (const t of e.tasks as { id: string; role: string; goal: string; dependsOn: string[] }[]) Object.assign(lane(t.id, t.role), { goal: t.goal, dependsOn: t.dependsOn });
+          for (const t of e.tasks as { id: string; role: string; goal: string; dependsOn: string[]; doneWhen?: string[] }[]) Object.assign(lane(t.id, t.role), { goal: t.goal, dependsOn: t.dependsOn, doneWhen: t.doneWhen ?? [] });
         } else if (e.type === "task_start") Object.assign(lane(e.taskId, e.role), { status: "running", model: e.model });
         else if (e.type === "task_end") Object.assign(lane(e.taskId), { status: e.ok ? "done" : "failed", usd: e.usd, tokens: e.tokens, note: e.taskId === "fast" || e.taskId === "chat" ? undefined : e.summary });
         else if (e.type === "review" && team) team.review = { ok: e.ok, summary: e.summary, issues: e.issues };

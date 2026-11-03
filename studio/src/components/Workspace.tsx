@@ -7,6 +7,7 @@ import { Avatar, copyText, Modal, Switch } from "./ui";
 import { GithubSection } from "./GitHub";
 import { ProjectModels } from "./Models";
 import { MemorySection } from "./Memory";
+import { OrgSkillsSection } from "./OrgSkills";
 
 // --- Preview canvas -----------------------------------------------------------------------
 
@@ -751,6 +752,8 @@ export function ProjectSettings({ project, onChange }: { project: Project; onCha
         </section>
 
         <MemorySection projectId={project.id} />
+
+        {project.orgId && <OrgSkillsSection orgId={project.orgId} />}
 
         <section className="card section">
           <h3>☺ Colaboradores</h3>

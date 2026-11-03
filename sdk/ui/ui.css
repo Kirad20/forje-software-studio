@@ -1,0 +1,130 @@
+/*
+ * @forja/ui styles. Everything reads the app's design tokens; the defaults below only fill
+ * tokens an app has not defined (:where keeps their specificity at zero, so base.css wins).
+ */
+:where(:root) {
+  --bg: #fafaf9;
+  --surface: #ffffff;
+  --text: #1c1917;
+  --muted: #6b645f;
+  --border: #e0ddda;
+  --primary: #c2410c;
+  --primary-text: #ffffff;
+  --danger: #b91c1c;
+  --success: #15803d;
+  --radius: 10px;
+  --shadow: 0 8px 24px rgb(0 0 0 / 0.12);
+  --ring: color-mix(in srgb, var(--primary) 55%, transparent);
+}
+
+@media (prefers-color-scheme: dark) {
+  :where(:root) {
+    --bg: #0c0a09;
+    --surface: #1c1917;
+    --text: #fafaf9;
+    --muted: #a8a29e;
+    --border: #2f2b28;
+    --primary: #fb923c;
+    --primary-text: #1c1917;
+    --danger: #f87171;
+    --success: #4ade80;
+    --shadow: 0 8px 24px rgb(0 0 0 / 0.5);
+  }
+}
+
+/* Buttons */
+.fj-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 0 16px;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.15s, border-color 0.15s, opacity 0.15s;
+}
+.fj-btn-sm { min-height: 32px; padding: 0 12px; font-size: 0.875rem; }
+.fj-btn-lg { min-height: 48px; padding: 0 24px; font-size: 1.0625rem; }
+.fj-btn-primary { background: var(--primary); color: var(--primary-text); }
+.fj-btn-primary:hover:not(:disabled) { background: color-mix(in srgb, var(--primary) 88%, var(--text)); }
+.fj-btn-secondary { background: var(--surface); color: var(--text); border-color: var(--border); }
+.fj-btn-secondary:hover:not(:disabled) { background: color-mix(in srgb, var(--surface) 92%, var(--text)); }
+.fj-btn-ghost { background: transparent; color: var(--text); }
+.fj-btn-ghost:hover:not(:disabled) { background: color-mix(in srgb, var(--text) 8%, transparent); }
+.fj-btn-danger { background: var(--danger); color: var(--surface); }
+.fj-btn-danger:hover:not(:disabled) { background: color-mix(in srgb, var(--danger) 88%, var(--text)); }
+.fj-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+.fj-btn:focus-visible,
+.fj-control:focus-visible,
+.fj-tab:focus-visible,
+.fj-dialog-close:focus-visible,
+.fj-check input:focus-visible { outline: 3px solid var(--ring); outline-offset: 2px; }
+
+/* Forms */
+.fj-field { display: grid; gap: 6px; }
+.fj-label { font-size: 0.875rem; font-weight: 600; }
+.fj-control {
+  width: 100%;
+  min-height: 40px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}
+textarea.fj-control { resize: vertical; }
+.fj-control::placeholder { color: var(--muted); }
+.fj-control[aria-invalid="true"] { border-color: var(--danger); }
+.fj-field-hint { margin: 0; font-size: 0.8125rem; color: var(--muted); }
+.fj-field-error { margin: 0; font-size: 0.8125rem; color: var(--danger); }
+.fj-check { display: inline-flex; align-items: center; gap: 10px; min-height: 40px; cursor: pointer; }
+.fj-check input { width: 18px; height: 18px; accent-color: var(--primary); }
+
+/* Containers */
+.fj-card { background: var(--surface); border: 1px solid var(--border); border-radius: calc(var(--radius) + 2px); padding: 20px; }
+.fj-badge { display: inline-block; padding: 2px 10px; border-radius: 99px; font-size: 0.75rem; font-weight: 600; background: color-mix(in srgb, var(--text) 10%, transparent); color: var(--text); }
+.fj-badge-primary { background: color-mix(in srgb, var(--primary) 16%, transparent); color: var(--primary); }
+.fj-badge-success { background: color-mix(in srgb, var(--success) 16%, transparent); color: var(--success); }
+.fj-badge-danger { background: color-mix(in srgb, var(--danger) 16%, transparent); color: var(--danger); }
+
+/* Feedback */
+.fj-spinner { display: inline-block; border: 2px solid color-mix(in srgb, currentColor 25%, transparent); border-top-color: currentColor; border-radius: 50%; animation: fj-spin 0.7s linear infinite; }
+@keyframes fj-spin { to { transform: rotate(360deg); } }
+.fj-skeleton { display: block; border-radius: 6px; background: color-mix(in srgb, var(--text) 10%, transparent); animation: fj-pulse 1.4s ease-in-out infinite; }
+@keyframes fj-pulse { 50% { opacity: 0.45; } }
+.fj-state { display: grid; justify-items: center; gap: 8px; padding: 48px 20px; text-align: center; }
+.fj-state-icon { color: var(--muted); }
+.fj-state-title { margin: 0; font-size: 1.125rem; }
+.fj-state-text { margin: 0 0 8px; max-width: 42ch; color: var(--muted); line-height: 1.5; }
+
+/* Dialog, tabs, tooltip */
+.fj-overlay { position: fixed; inset: 0; background: rgb(0 0 0 / 0.5); animation: fj-fade 0.15s ease-out; z-index: 50; }
+.fj-dialog {
+  position: fixed; top: 50%; left: 50%; z-index: 51;
+  width: min(480px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow: auto;
+  transform: translate(-50%, -50%);
+  padding: 24px; border: 1px solid var(--border); border-radius: calc(var(--radius) + 4px);
+  background: var(--surface); color: var(--text); box-shadow: var(--shadow);
+  animation: fj-fade 0.15s ease-out;
+}
+.fj-dialog-title { margin: 0 32px 8px 0; font-size: 1.125rem; }
+.fj-dialog-text { margin: 0 0 16px; color: var(--muted); line-height: 1.5; }
+.fj-dialog-footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
+.fj-dialog-close { position: absolute; top: 12px; right: 12px; width: 32px; height: 32px; border: 0; border-radius: 8px; background: transparent; color: var(--muted); font-size: 1.5rem; line-height: 1; cursor: pointer; }
+.fj-dialog-close:hover { background: color-mix(in srgb, var(--text) 8%, transparent); }
+@keyframes fj-fade { from { opacity: 0; } }
+.fj-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); overflow-x: auto; }
+.fj-tab { min-height: 40px; padding: 0 14px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--muted); font: inherit; font-weight: 600; cursor: pointer; white-space: nowrap; }
+.fj-tab[data-state="active"] { color: var(--text); border-bottom-color: var(--primary); }
+.fj-tab-panel { padding-top: 16px; }
+.fj-tooltip { z-index: 60; padding: 6px 10px; border-radius: 8px; background: var(--text); color: var(--bg); font-size: 0.8125rem; }
+
+@media (prefers-reduced-motion: reduce) {
+  .fj-overlay, .fj-dialog, .fj-skeleton { animation: none; }
+  .fj-btn { transition: none; }
+}

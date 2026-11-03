@@ -12,7 +12,7 @@ describe("MCP guides", () => {
   });
 
   it("covers the whole manual without losing text", () => {
-    const sections = GUIDES.filter((g) => g.id !== "forja-overview");
+    const sections = GUIDES.filter((g) => g.id !== "forja-overview" && !g.title.startsWith("Skill: "));
     for (const g of sections) expect(BUILDER_SYSTEM_PROMPT).toContain(g.body.split("\n").slice(1).join("\n").trim().slice(0, 200));
     expect(new Set(GUIDES.map((g) => g.id)).size).toBe(GUIDES.length);
   });
