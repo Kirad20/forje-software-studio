@@ -53,4 +53,13 @@ describe("MCP tool hints", () => {
     expect(SERVER_INSTRUCTIONS).toContain('get_guides("forja-overview")');
     expect(SERVER_INSTRUCTIONS).toContain("<project-context>");
   });
+
+  it("sets metadata before building only for new projects and avoids inventing details", () => {
+    expect(SERVER_INSTRUCTIONS).toContain("antes de construir o escribir archivos llama create_project");
+    expect(SERVER_INSTRUCTIONS).toContain("basados solo en lo que el dueño ya dijo");
+    expect(SERVER_INSTRUCTIONS).toContain("un perfil estructurado con propósito, audiencia, tipo de app");
+    expect(builderTools.some((tool) => tool.name === "set_project_profile")).toBe(true);
+    expect(SERVER_INSTRUCTIONS).toContain("haz una sola pregunta breve");
+    expect(SERVER_INSTRUCTIONS).toContain("sin cambiar sus metadatos");
+  });
 });

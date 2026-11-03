@@ -66,10 +66,11 @@ afterAll(async () => {
 describe("Projects Postgres adapter regression", () => {
   it("persists the complete read model and patch allowlist, ownership IDs, folders, open time and share revocation", async () => {
     const project = await app.createProject("owner", "App", "Description");
-    expect(project).toMatchObject({ ownerId: "owner", name: "App", description: "Description", orgId: projectOrganizations.personalOrgId("owner"), favorite: false, archived: false, shareEpoch: 0, seo: {} });
+    expect(project).toMatchObject({ ownerId: "owner", name: "App", description: "Description", orgId: projectOrganizations.personalOrgId("owner"), favorite: false, archived: false, shareEpoch: 0, seo: {}, profile: null });
     const folder = await app.createFolder("owner", "  Folder  ");
-    await store.updateProject(project.id, { name: "Renamed", description: undefined, favorite: true, folderId: folder, aiEnabled: false, seo: { robots: false }, slug: "forbidden" } as never);
-    expect(await store.getProject(project.id)).toMatchObject({ name: "Renamed", description: "Description", favorite: true, aiEnabled: false, folderId: folder, seo: { robots: false }, slug: null });
+    const profile = { purpose: "Reservar citas", audience: "Pacientes", appType: "Agenda", coreFeatures: ["Ver horarios"] };
+    await store.updateProject(project.id, { name: "Renamed", description: undefined, favorite: true, folderId: folder, aiEnabled: false, seo: { robots: false }, profile, slug: "forbidden" } as never);
+    expect(await store.getProject(project.id)).toMatchObject({ name: "Renamed", description: "Description", favorite: true, aiEnabled: false, folderId: folder, seo: { robots: false }, profile, slug: null });
     expect(await store.listAccountOwnedProjectIds("owner")).toContain(project.id);
     expect(await store.listAccountOwnedProjectIds("other")).toEqual([]);
     expect((await store.listProjects("owner")).map((p) => p.id)).toContain(project.id);

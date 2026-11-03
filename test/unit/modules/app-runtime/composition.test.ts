@@ -89,7 +89,7 @@ describe("production runtime composition", () => {
         id: "p", ownerId: "owner", orgId: null, name: "My app", description: "", slug: null,
         visibility: "private", aiEnabled: false, emailDomain: null, emailDomainVerified: false,
         publishedVersionId: null, publishedAt: null, favorite: false, archived: false, folderId: null,
-        lastOpenedAt: "", systemPrompt: "", designPrompt: "", seo: {}, shareEpoch: 1, createdAt: "", updatedAt: "",
+        lastOpenedAt: "", systemPrompt: "", designPrompt: "", seo: {}, profile: null, shareEpoch: 1, createdAt: "", updatedAt: "",
       },
     };
     const response = await serveApp(new Request("http://pv-p.localhost/_forja/live"), target, "/_forja/live");

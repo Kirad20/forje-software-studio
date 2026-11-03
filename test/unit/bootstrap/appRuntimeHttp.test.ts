@@ -23,6 +23,7 @@ const project: Project = {
   systemPrompt: "",
   designPrompt: "",
   seo: {},
+  profile: null,
   shareEpoch: 1,
   createdAt: "",
   updatedAt: "",

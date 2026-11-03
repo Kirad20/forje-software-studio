@@ -212,8 +212,12 @@ interface TurnState {
 
 function projectSection(s: TurnState) {
   const p = s.project;
+  const profile = p.profile ?? {};
   return [
     `# This project\nName: ${p.name}\nDescription: ${p.description || "(none)"}\nOwner email: ${s.account.email}`,
+    p.profile == null
+      ? "# Project profile (new project)\nBefore writing code, save the project profile with set_project_profile. Use only facts provided or clearly established by the owner's request; do not invent. Ask one focused question only if needed to identify the app."
+      : Object.keys(profile).length ? `# Project profile\n${JSON.stringify(profile)}` : "",
     p.systemPrompt ? `# Owner's project instructions\n${p.systemPrompt}` : "",
     p.designPrompt ? `# Owner's design guidelines\n${p.designPrompt}` : "",
     s.memory,

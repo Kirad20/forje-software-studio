@@ -25,6 +25,7 @@ import { rewriteImports } from "./rename.js";
 import { ownsFile } from "../domain/FinishGatePolicy.js";
 import { allSkills, findSkill, renderSkill } from "./skills.js";
 import { standardsScan } from "../domain/Standards.js";
+import { normalizeProjectProfile } from "../../projects/domain/ProjectSnapshot.js";
 
 export { previewUrl };
 
@@ -131,6 +132,32 @@ const numbered = (content: string) =>
     .join("\n");
 
 export const builderTools: BuilderTool[] = [
+  {
+    name: "set_project_profile",
+    description:
+      "Guarda o actualiza el perfil estructurado del proyecto (propósito, audiencia, tipo de app, funciones principales y restricciones). En proyectos nuevos, úsala antes de construir cuando el perfil sea null. En proyectos existentes, úsala solo si el dueño pide explícitamente cambiar el perfil. Completa únicamente datos expresados o claramente establecidos por el dueño; no inventes. Los campos omitidos conservan su valor.",
+    input_schema: obj({
+      purpose: str("Qué necesidad resuelve, solo si se desprende de lo que dijo el dueño"),
+      audience: str("A quién va dirigida, solo si se desprende de lo que dijo el dueño"),
+      appType: str("Tipo de app (por ejemplo, catálogo, agenda o panel), solo si es conocido"),
+      coreFeatures: arr(str("Función principal solicitada")),
+      constraints: arr(str("Restricción o requisito explícito")),
+    }),
+    async run(i: {
+      purpose?: string;
+      audience?: string;
+      appType?: string;
+      coreFeatures?: string[];
+      constraints?: string[];
+    }, ctx) {
+      const projects = builderCoreModules().projects;
+      const project = await projects.getProject(ctx.projectId);
+      if (!project) throw new Error("Proyecto no encontrado.");
+      const profile = normalizeProjectProfile({ ...(project.profile ?? {}), ...i });
+      await projects.updateProject(ctx.projectId, { profile });
+      return `Perfil del proyecto guardado: ${JSON.stringify(profile)}`;
+    },
+  },
   typed({
     name: "list_files",
     description: "Lista los archivos del proyecto con su tamaño, además de las páginas, endpoints y tareas detectadas. Para orientarte en un proyecto con código, project_map da más con menos tokens.",
