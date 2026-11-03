@@ -358,6 +358,29 @@ Style the table in a CSS Module with tokens; wrap it in an overflow-x: auto cont
   }`,
   },
   {
+    name: "seo",
+    description: "Search and sharing basics for public pages: title, description, headings, landmarks, images, structured data",
+    body: `For every public page (landing, product, article, event, FAQ); private pages (dashboards, settings) only need a title.
+- useHead from @forja/client on each page: a specific title under 60 characters and a description under 160, plus a canonical URL when the same content has several addresses. Different pages, different titles.
+- Exactly one h1 per page, and the headings below it in order. Semantic landmarks: header, nav, main, section, footer.
+- Images: descriptive alt on every meaningful image (empty alt for decoration), width and height set, loading="lazy" below the fold.
+- Structured data: a <script type="application/ld+json"> block when the page shows a product, article, event, FAQ, local business or recipe. Use the schema.org type that matches and only facts the page really states; never invent ratings, reviews or prices.
+- Links between pages use Link from @forja/client; give links descriptive text ("Ver el menú", not "Haz clic aquí").
+- The project's SEO settings (site name, description, robots, sitemap, theme color) are set in the project settings; do not duplicate them in code.
+
+  import { useHead } from "@forja/client";
+
+  export default function Menu() {
+    useHead({ title: "Menú del día | Café Aurora", description: "Platos de temporada, desayunos y café de especialidad en el centro de Querétaro." });
+    return (
+      <main>
+        <h1>Menú del día</h1>
+        <script type="application/ld+json">{JSON.stringify({ "@context": "https://schema.org", "@type": "CafeOrCoffeeShop", name: "Café Aurora", servesCuisine: "Mexicana" })}</script>
+      </main>
+    );
+  }`,
+  },
+  {
     name: "design-brief",
     description: "Start here for any new screen or app: decide purpose, audience, tone and one signature idea before writing UI",
     body: `Decide these in a few lines BEFORE writing code; they are what makes the result look intentional instead of generic.

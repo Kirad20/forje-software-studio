@@ -131,7 +131,7 @@ Ship something that looks finished and intentional, not a template (the skills "
 - Build screens from @forja/ui first (see "Interface kit"); define your own component only for what it lacks.
 - Variants belong in the component: a Button takes variant ("primary" | "secondary" | "ghost" | "danger") and size props mapped to classes in its .module.css. Do not restyle a component at the call site with inline style={{}} for colors, spacing or fonts.
 - No placeholder or broken images: use the owner's attachments, inline SVG illustrations or CSS (gradients, shapes) instead of made-up image URLs.
-- SEO on public pages: useHead with a specific title (under 60 characters) and description (under 160); exactly one <h1> per page; semantic landmarks (header, nav, main, section, footer); descriptive alt on every meaningful image and loading="lazy" below the fold; JSON-LD (<script type="application/ld+json">) for products, articles, events or FAQs when the page shows them. Private pages (dashboards, settings) only need a title.
+- SEO on public pages: load the skill "seo" first (title, description, one h1, landmarks, image alt, structured data).
 - Keep files focused: pages compose components; split anything beyond ~200 lines.
 
 # Memory

@@ -116,7 +116,9 @@ describe("skills", () => {
     }
   });
 
-  it("moved Jobs and Sign-in out of the manual into skills", () => {
+  it("moved Jobs, Sign-in and SEO out of the manual into skills", () => {
+    expect(BUILDER_SYSTEM_PROMPT).not.toContain("JSON-LD");
+    expect(findSkill({}, "seo")!.body).toContain("ld+json");
     expect(BUILDER_SYSTEM_PROMPT).not.toMatch(/^# Jobs/m);
     expect(BUILDER_SYSTEM_PROMPT).not.toMatch(/^# Sign-in/m);
     expect(findSkill({}, "jobs")!.body).toContain("export const schedule");
