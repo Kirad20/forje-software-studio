@@ -96,7 +96,7 @@ app.use("*", async (c, next) => {
 // The studio itself: never framed, no sniffing. Apps returned above set their own headers.
 app.use("*", async (c, next) => {
   await next();
-  return withDefaultHeaders(c.res, STUDIO_HEADERS);
+  c.res = withDefaultHeaders(c.res, STUDIO_HEADERS);
 });
 
 app.route("/api", studioApi);

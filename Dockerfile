@@ -26,8 +26,8 @@ COPY server ./server
 COPY sdk ./sdk
 COPY --from=build /app/dist ./dist
 RUN if [ "$BROWSER" = "1" ]; then npx playwright-core install --with-deps chromium-headless-shell && rm -rf /var/lib/apt/lists/*; fi \
- && mkdir -p /app/data /app/node_modules/.forja-deps \
- && chown -R node:node /app/data /app/node_modules/.forja-deps
+ && mkdir -p /app/data /app/node_modules/.forja-deps /app/node_modules/.cache \
+ && chown -R node:node /app/data /app/node_modules/.forja-deps /app/node_modules/.cache
 ENV FORJA_BROWSER=${BROWSER}
 USER node
 VOLUME /app/data
