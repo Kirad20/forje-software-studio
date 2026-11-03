@@ -6,6 +6,9 @@ import { config } from "../config.js";
  */
 const windows = new Map<string, { count: number; resetAt: number }>();
 
+/** Max unique keys tracked at once to prevent unbounded memory growth / DoS. */
+export const MAX_RATE_LIMIT_KEYS = 50_000;
+
 export class RateLimitError extends Error {
   status = 429;
   constructor(public retryAfterSec: number) {
@@ -13,18 +16,38 @@ export class RateLimitError extends Error {
   }
 }
 
+/**
+ * Sweeps expired windows from memory. Exposed for testing and run periodically or when at capacity.
+ */
+export function pruneRateLimitWindows(now = Date.now()) {
+  for (const [k, w] of windows) if (w.resetAt <= now) windows.delete(k);
+}
+
 export function rateLimit(key: string, limit: number, windowMs: number) {
   const now = Date.now();
   let w = windows.get(key);
-  if (!w || w.resetAt <= now) windows.set(key, (w = { count: 0, resetAt: now + windowMs }));
+  if (!w || w.resetAt <= now) {
+    // Defense in depth: if attacker floods unique keys to exhaust memory, prune expired entries.
+    if (windows.size >= MAX_RATE_LIMIT_KEYS) {
+      pruneRateLimitWindows(now);
+      // If still at capacity, evict the oldest entry to bound memory usage.
+      if (windows.size >= MAX_RATE_LIMIT_KEYS) {
+        windows.delete(windows.keys().next().value!);
+      }
+    }
+    windows.set(key, (w = { count: 0, resetAt: now + windowMs }));
+  }
   w.count++;
   if (w.count > limit) throw new RateLimitError(Math.ceil((w.resetAt - now) / 1000));
 }
 
-setInterval(() => {
-  const now = Date.now();
-  for (const [k, w] of windows) if (w.resetAt <= now) windows.delete(k);
-}, 60_000).unref();
+/** Returns the internal windows map size. Exposed for unit testing. */
+export const _rateLimitWindowsSize = () => windows.size;
+
+/** Clears all rate limit windows. Exposed for unit testing. */
+export const _clearRateLimitWindows = () => windows.clear();
+
+setInterval(() => pruneRateLimitWindows(), 60_000).unref();
 
 /** Origins allowed to make state-changing calls to the studio API. */
 export function studioOrigins(): string[] {
