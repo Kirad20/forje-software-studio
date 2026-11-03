@@ -1,24 +1,24 @@
-import { newId } from "../../../lib/crypto.js";
-import { allowedModels, costUsd, type ModelInfo } from "../../../llm/catalog.js";
-import { analyzeRequest, callModel, recordOutcome, taskClassOf, type Billing, type Features, type Role } from "../../../llm/router.js";
-import { emptyUsage, addUsage, textOf, type Block, type LlmMessage, type Usage } from "../../../llm/types.js";
-import { describeSchema } from "../../../baas/projectDb.js";
-import { getAccount, type Account } from "../../../platform/accounts.js";
-import { one, q } from "../../../platform/db.js";
-import { addMemory, memorySection, memorySettings, MEMORY_KINDS } from "../../../platform/memory.js";
-import { createCheckpoint, getProject, readAllFiles, writeFile, type Project } from "../../../platform/projects.js";
-import { formatProblem } from "../../../runtime/bundler.js";
-import { typecheckProject } from "../../../runtime/typecheck.js";
-import { enabledOrgSkills } from "../../../platform/orgSkills.js";
-import { skillIndex } from "../../../builder/skills.js";
+import { newId } from "../../../shared/crypto.js";
+import { allowedModels, costUsd, type ModelInfo } from "../../model-management/catalog.js";
+import { analyzeRequest, callModel, recordOutcome, penalizeTurn as penalizeModels, taskClassOf, type Billing, type Features, type Role } from "../../model-management/router.js";
+import { emptyUsage, addUsage, textOf, type Block, type LlmMessage, type Usage } from "../../model-management/types.js";
+import { describeSchema } from "../../app-services/projectDb.js";
+import type { Account } from "../../identity/contracts.js";
+import { getAccount, createCheckpoint, getProject, readAllFiles, writeFile, enabledOrgSkills } from "./CoreModulesAdapter.js";
+import { one, q } from "../../../shared/database/index.js";
+import { addMemory, memorySection, memorySettings, MEMORY_KINDS } from "../../memory/memory.js";
+import type { Project } from "../../projects/index.js";
+import { formatProblem } from "../../app-runtime/index.js";
+import { typecheckProject } from "../../app-runtime/index.js";
+import { skillIndex } from "./skills.js";
 import { criteriaOf, CONTRACT_FILE, planOverview } from "../domain/Plan.js";
 import { runAgent } from "./AgentExecutionAdapter.js";
 import { imageBlocks, save, UPLOADS } from "./SqlChatHistoryAdapter.js";
 import type { AgentEvent, AgentExecutionResult } from "../domain/AgentExecution.js";
-import { formatProblems, listProblems, recheckBuild, watchProblems } from "../../../platform/problems.js";
-import { holdSync, releaseSync } from "../../../platform/github.js";
-import { projectMap, selectContext } from "../../../builder/index.js";
-import { FAST_EXCLUDED_TOOLS, FIRST_BUILD, MAX_STEPS, PLANNER_FILES, ROLE_PROMPTS, ROLE_TOOLS } from "../../../builder/roles.js";
+import { formatProblems, listProblems, recheckBuild, watchProblems } from "../../project-observability/problems.js";
+import { holdSync, releaseSync } from "../../integrations/github.js";
+import { projectMap, selectContext } from "./projectIndex.js";
+import { FAST_EXCLUDED_TOOLS, FIRST_BUILD, MAX_STEPS, PLANNER_FILES, ROLE_PROMPTS, ROLE_TOOLS } from "./roles.js";
 import { builderTools, toolByName, type BuilderTool, type ToolContext } from "./BuilderToolsAdapter.js";
 import { createFinishGate } from "./FinishGateAdapter.js";
 import { rewardOf, ROLE_FOLDERS, type Plan, type PlanTask, type SpecialistRole, type Review } from "../domain/OrchestrationPolicy.js";
@@ -26,6 +26,7 @@ import { ScheduleTasksUseCase } from "../application/ScheduleTasksUseCase.js";
 import { SqlAgentTaskRepository } from "./SqlAgentTaskRepository.js";
 import { RunTaskLaneUseCase } from "../application/RunTaskLaneUseCase.js";
 import { BuilderWorkflowUseCase } from "../application/BuilderWorkflowUseCase.js";
+import { BuilderRunRegistry } from "../application/BuilderRunRegistry.js";
 import { ReviewAndFixUseCase } from "../application/ReviewAndFixUseCase.js";
 import { FastBuildUseCase } from "../application/FastBuildUseCase.js";
 import { TeamBuildUseCase } from "../application/TeamBuildUseCase.js";
@@ -41,9 +42,24 @@ type AgentResult = AgentExecutionResult<ModelInfo>;
  *    dependency graph, each with its own model, tools and files → QA → fix rounds.
  * Every model choice goes through the router, and every outcome feeds its bandit.
  */
-const active = new Map<string, AbortController>();
-export const isBuilding = (projectId: string) => active.has(projectId);
-export const stopBuilding = (projectId: string) => active.get(projectId)?.abort();
+const active = new BuilderRunRegistry();
+const maintenance = new Set<Promise<void>>();
+export const isBuilding = (projectId: string) => active.isRunning(projectId);
+export const stopBuilding = (projectId: string) => active.cancel(projectId);
+
+function background(task: Promise<void>, operation: string) {
+  const pending = task.catch((error) => console.warn(`[forja] ${operation}:`, error));
+  maintenance.add(pending);
+  void pending.then(() => maintenance.delete(pending));
+}
+
+export async function stopBuilder() {
+  try {
+    await active.stop();
+  } finally {
+    while (maintenance.size) await Promise.all(maintenance);
+  }
+}
 
 
 const RECENT_TURNS = 4;
@@ -637,7 +653,7 @@ async function runTeam(s: TurnState, opts: { given?: Plan; planOnly?: boolean } 
   }).execute(opts);
 }
 
-export async function runBuilderTurn(
+export function runBuilderTurn(
   account: Account,
   projectId: string,
   userText: string,
@@ -648,12 +664,25 @@ export async function runBuilderTurn(
   /** `synthetic`: an eval turn (server/evals). It teaches the router nothing and does not touch GitHub or the chat summary. */
   opts: { synthetic?: boolean } = {},
 ) {
-  if (active.has(projectId)) throw new Error("El constructor ya está trabajando en este proyecto.");
   const abort = new AbortController();
-  active.set(projectId, abort);
+  return active.run(projectId, () => abort.abort(), () => executeBuilderTurn(account, projectId, userText, emit, attachments, mode, implementPlan, opts, abort));
+}
+
+async function executeBuilderTurn(
+  account: Account,
+  projectId: string,
+  userText: string,
+  emit: (e: AgentEvent) => void,
+  attachments: string[],
+  mode: ChatMode,
+  implementPlan: boolean,
+  opts: { synthetic?: boolean },
+  abort: AbortController,
+) {
+  const project = await getProject(projectId);
+  if (!project) throw new Error("Proyecto no encontrado.");
   if (!opts.synthetic) holdSync(projectId);
   const turnId = newId();
-  const project = (await getProject(projectId))!;
   const payer = project.ownerId;
   const scope = { accountId: payer, projectId };
   const billing: Billing = { payerId: payer, projectId, source: "builder" };
@@ -723,16 +752,16 @@ export async function runBuilderTurn(
       emit({ type: "error", message: cancelled ? "Detenido. Escribe qué quieres cambiar o «continúa»." : error.message });
       if (cancelled) await penalizeTurn(projectId, turnId, 0.5).catch(() => {});
     },
-    cleanup: async () => { active.delete(projectId); },
+    cleanup: async () => {},
     wrote: () => s.wrote,
     checkpoint: async () => {
       await createCheckpoint(projectId, userText.slice(0, 80), "builder").catch(() => {});
     },
     releaseSync: () => {
-      void releaseSync(projectId, commitMessage(userText)).catch(() => {});
+      background(releaseSync(projectId, commitMessage(userText)), "sincronización del constructor");
     },
     updateSummary: () => {
-      void updateSummary(projectId, billing, scope).catch(() => {});
+      background(updateSummary(projectId, billing, scope), "resumen del constructor");
     },
   }).execute({ mode, implementPlan, synthetic: opts.synthetic });
 }
@@ -742,12 +771,5 @@ export async function runBuilderTurn(
  * to before it within ten minutes. `weight` softens it, since the reason is not certain.
  */
 export async function penalizeTurn(projectId: string, turnId: string | null, weight: number) {
-  const rows = await q<{ task_class: string; model_id: string }>(
-    turnId
-      ? `select distinct task_class, model_id from router_decisions where project_id = $1 and turn_id = $2`
-      : `select distinct task_class, model_id from router_decisions where project_id = $1 and created_at > now() - interval '10 minutes'`,
-    turnId ? [projectId, turnId] : [projectId],
-  );
-  const tiers = new Map((await q<{ id: string; tier: number }>(`select id, tier from model_catalog`)).map((r) => [r.id, r.tier]));
-  for (const r of rows) await recordOutcome(r.task_class, { id: r.model_id, tier: tiers.get(r.model_id) ?? 3 }, 0, 0, weight);
+  await penalizeModels(projectId, turnId, weight);
 }

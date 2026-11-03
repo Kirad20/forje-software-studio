@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { standardsScan } from "../../server/builder/standards.js";
+import { standardsScan } from "../../server/modules/builder/contracts.js";
 
 const CONTRACT = `import { z } from "zod";
 export const contract = { "GET notes/list": { input: z.object({}), output: z.object({}) } } as const;

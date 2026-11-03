@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { jobStatus, runOrDefer, type CallResult } from "../../server/mcp/jobs.js";
+import { jobStatus, runOrDefer, type CallResult } from "../../server/bootstrap/mcp/jobs.js";
 
 const ok = (text: string): CallResult => ({ content: [{ type: "text", text }], isError: false });
 const later = (ms: number, r: CallResult) => () => new Promise<CallResult>((res) => setTimeout(() => res(r), ms));

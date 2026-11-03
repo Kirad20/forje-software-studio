@@ -19,7 +19,7 @@ function script(body) {
   const step = body.messages.filter((m) => m.role === "assistant").length;
   const lastTool = [...body.messages].reverse().find((m) => m.role === "tool")?.content ?? "";
 
-  // Admin panel connection test (server/admin/probe.ts): plain text, then a forced tool call.
+  // Admin panel connection test (server/modules/model-management/infrastructure/probe.ts): plain text, then a forced tool call.
   if (sys.startsWith("Prueba de conexión de Forja")) return { role: "probe", res: body.tools?.length ? reply(null, [call("echo", { text: "OK" })]) : reply("OK") };
   if (sys.startsWith("Classify an app-builder request")) return { role: "router", res: reply('{"intent":"feature","complexity":2,"domains":["ui"]}') };
   if (sys.startsWith("Eres un revisor de diseño de producto"))

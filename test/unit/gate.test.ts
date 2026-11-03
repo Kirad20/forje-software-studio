@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { newBuildProblems, newRuntimeProblems } from "../../server/builder/gate.js";
-import type { ToolContext } from "../../server/builder/tools.js";
-import type { Problem } from "../../server/platform/problems.js";
+import { newBuildProblems, newRuntimeProblems } from "../../server/modules/builder/index.js";
+import type { ToolContext } from "../../server/modules/builder/index.js";
+import type { Problem } from "../../server/modules/project-observability/problems.js";
 
 const ctx = (owned?: string[]) => ({ account: { id: "a" }, projectId: "p", author: "builder", owned }) as unknown as ToolContext;
 

@@ -7,19 +7,20 @@
   },
   "scripts": {
     "dev": "concurrently -n server,studio -c blue,magenta \"npm:dev:server\" \"npm:dev:studio\"",
-    "dev:server": "tsx watch --env-file-if-exists=.env server/index.ts",
+    "dev:server": "tsx watch --env-file-if-exists=.env server/bootstrap/server.ts",
     "dev:studio": "vite --config studio/vite.config.ts",
     "build": "vite build --config studio/vite.config.ts",
-    "start": "tsx --env-file-if-exists=.env server/index.ts",
-    "db:migrate": "tsx --env-file-if-exists=.env server/db/cli.ts migrate",
-    "db:seed": "tsx --env-file-if-exists=.env server/db/cli.ts seed",
-    "db:seed:dev": "tsx --env-file-if-exists=.env server/db/cli.ts seed:dev",
-    "db:reset": "tsx --env-file-if-exists=.env server/db/cli.ts reset",
+    "start": "tsx --env-file-if-exists=.env server/bootstrap/server.ts",
+    "db:migrate": "tsx --env-file-if-exists=.env server/bootstrap/database/cli.ts migrate",
+    "db:seed": "tsx --env-file-if-exists=.env server/bootstrap/database/cli.ts seed",
+    "db:seed:dev": "tsx --env-file-if-exists=.env server/bootstrap/database/cli.ts seed:dev",
+    "db:reset": "tsx --env-file-if-exists=.env server/bootstrap/database/cli.ts reset",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run test/unit",
     "test:architecture": "vitest run test/unit/architecture.test.ts",
     "test:e2e": "node test/e2e.mjs",
     "test:agents": "node test/agents.mjs",
+    "test:studio": "node test/studio.mjs",
     "test:github": "node test/github.mjs"
   },
   "dependencies": {
@@ -49,6 +50,7 @@
     "zod": "^4.6.7"
   },
   "devDependencies": {
+    "@babel/parser": "^7.28.0",
     "@types/nodemailer": "^8.0.2",
     "@types/ws": "^8.18.2",
     "@vitejs/plugin-react": "^6.1.2",

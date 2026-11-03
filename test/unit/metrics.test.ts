@@ -9,8 +9,8 @@ const dir = mkdtempSync(path.join(os.tmpdir(), "forja-metrics-"));
 process.env.DATA_DIR = dir;
 const pgdb = await freshDatabase();
 process.env.DATABASE_URL = pgdb.url;
-const { q, closePlatformDb } = await import("../../server/platform/db.js");
-const m = await import("../../server/builder/metrics.js");
+const { q, closePlatformDb } = await import("../../server/shared/database/index.js");
+const m = await import("../../server/modules/builder/index.js");
 
 const usage = (input: number) => ({ input, output: 10, cacheRead: 0, cacheWrite: 0 });
 const settle = () => m.metricsIdle();

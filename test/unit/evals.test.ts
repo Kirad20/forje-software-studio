@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { EVAL_CASES } from "../../server/evals/cases.js";
-import { defaultJudge, parseJudgement } from "../../server/evals/judge.js";
-import type { ModelInfo } from "../../server/llm/catalog.js";
-import { checkOf } from "../../server/evals/runner.js";
-import { aggregate, designSignals, hygieneScore, passed, renderReport, scoreCase, summarize, type CaseResult, type PreviewCheck, type RunView } from "../../server/evals/score.js";
-import type { PageInspection } from "../../server/runtime/browser.js";
+import { EVAL_CASES } from "../../server/modules/evaluations/cases.js";
+import { defaultJudge, parseJudgement } from "../../server/modules/evaluations/judge.js";
+import type { ModelInfo } from "../../server/modules/model-management/catalog.js";
+import { checkOf } from "../../server/modules/evaluations/runner.js";
+import { aggregate, designSignals, hygieneScore, passed, renderReport, scoreCase, summarize, type CaseResult, type PreviewCheck, type RunView } from "../../server/modules/evaluations/score.js";
+import type { PageInspection } from "../../server/modules/app-runtime/index.js";
 
 const okCheck = (over: Partial<PreviewCheck> = {}): PreviewCheck => ({ path: "/", signedIn: false, viewport: "desktop", ok: true, status: 200, consoleErrors: [], failedRequests: [], textChars: 400, ...over });
 const signals = { hardcodedColors: 0, inlineStyles: 0, internalAnchors: 0, tokens: 12, darkTheme: true, pages: 1, pagesWithoutH1: 0, pagesWithoutHead: 0 };

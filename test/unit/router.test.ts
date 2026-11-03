@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { meanOf, prior, sampleBeta } from "../../server/llm/bandit.js";
-import { analyzeHeuristic, taskClassOf, useFastPath } from "../../server/llm/router.js";
-import { costUsd, type ModelInfo } from "../../server/llm/catalog.js";
+import { meanOf, prior, sampleBeta } from "../../server/modules/model-management/bandit.js";
+import { analyzeHeuristic, taskClassOf, useFastPath } from "../../server/modules/model-management/router.js";
+import { costUsd, type ModelInfo } from "../../server/modules/model-management/catalog.js";
 
 const ctx = { images: 0, targeted: false, fileCount: 20 };
 

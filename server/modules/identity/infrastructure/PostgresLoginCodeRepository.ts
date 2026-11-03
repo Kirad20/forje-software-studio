@@ -1,5 +1,5 @@
-import { sha256 } from "../../../lib/crypto.js";
-import { one, q } from "../../../platform/db.js";
+import { sha256 } from "../../../shared/crypto.js";
+import { one, q } from "../../../shared/database/index.js";
 import type { ILoginCodeRepository } from "../ports/repositories.js";
 
 export class PostgresLoginCodeRepository implements ILoginCodeRepository {

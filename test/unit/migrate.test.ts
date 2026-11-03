@@ -1,6 +1,6 @@
 import pg from "pg";
 import { afterAll, describe, expect, it } from "vitest";
-import { migrate } from "../../server/db/migrate.js";
+import { migrate } from "../../server/shared/database/migrate.js";
 import { freshDatabase } from "../helpers/pg.mjs";
 
 const db = await freshDatabase();

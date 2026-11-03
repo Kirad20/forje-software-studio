@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { rewriteImports } from "../../server/builder/rename.js";
+import { rewriteImports } from "../../server/modules/builder/infrastructure/rename.js";
 
 const files = {
   "components/Button.tsx": `import styles from "./Button.module.css";\nimport { cents } from "../helpers/money";\nexport function Button() { return null; }`,

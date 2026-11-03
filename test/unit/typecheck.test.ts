@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseDiagnostics, typecheckProject, verifyBuild } from "../../server/runtime/typecheck.js";
+import { parseDiagnostics, typecheckProject, verifyBuild } from "../../server/modules/app-runtime/index.js";
 
 describe("parseDiagnostics", () => {
   const known = new Set(["pages/a.tsx", "endpoints/x_GET.ts"]);

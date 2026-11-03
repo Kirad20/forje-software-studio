@@ -1,78 +1,72 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { createCollaborationModule } from "../../../../server/modules/collaboration/index.js";
 
-const api = vi.hoisted(() => ({
-  listOrgs: vi.fn(),
-  listOrgMembers: vi.fn(),
-  orgRoleOf: vi.fn(),
-  createPersonalOrg: vi.fn(),
-  ensurePersonalOrg: vi.fn(),
-  listMembers: vi.fn(),
-  sharedProjectIds: vi.fn(),
-  claimInvites: vi.fn(),
-  personalOrgId: vi.fn().mockReturnValue("personal_a"),
-}));
-vi.mock("../../../../server/modules/collaboration/index.js", () => ({
-  ...api,
-  ORG_ROLES: ["owner", "admin", "member"],
-  Organization: { personalId: api.personalOrgId },
-  organizationRepository: { getOrgRole: vi.fn() },
-  memberRepository: { getSharedProjectIds: vi.fn(), claimInvites: vi.fn() },
-}));
-vi.mock("../../../../server/platform/db.js", () => ({ q: vi.fn() }));
+function fixture() {
+  const transactionPersonalOrganizations = {
+    create: vi.fn().mockResolvedValue(undefined),
+    ensure: vi.fn().mockResolvedValue(undefined),
+    delete: vi.fn().mockResolvedValue(undefined),
+  };
+  const organizations = {
+    listOrgs: vi.fn().mockResolvedValue([{ id: "org" }]),
+    listOrgMembers: vi.fn().mockResolvedValue([{ accountId: "a" }]),
+    getOrgRole: vi.fn().mockResolvedValue(null),
+    organizationNames: vi.fn().mockResolvedValue({}),
+  };
+  const members = {
+    listMembers: vi.fn().mockResolvedValue({ members: [], invites: [{ email: "a@b.co" }] }),
+    getSharedProjectIds: vi.fn().mockResolvedValue(["p"]),
+    hasProjectInvite: vi.fn().mockResolvedValue(false),
+  };
+  const module = createCollaborationModule({
+    members: {} as never,
+    accounts: {} as never,
+    mailer: {} as never,
+    organizations: {} as never,
+    organizationQueries: organizations,
+    organizationNames: organizations,
+    memberQueries: members,
+    personalOrganizations: {} as never,
+    personalOrganizationsForTransaction: () => transactionPersonalOrganizations,
+    id: () => "id",
+    skills: {
+      list: vi.fn().mockResolvedValue([]),
+      enabled: vi.fn().mockResolvedValue([]),
+      save: vi.fn().mockResolvedValue([]),
+      delete: vi.fn().mockResolvedValue([]),
+    } as never,
+  });
+  return { module, organizations, members, transactionPersonalOrganizations };
+}
 
-import * as orgs from "../../../../server/platform/orgs.js";
-import * as members from "../../../../server/platform/members.js";
-
-describe("Collaboration compatibility facades delegate to the public application contract", () => {
-  beforeEach(() => vi.clearAllMocks());
-
-  it("lists organizations without persistence in the facade", async () => {
-    api.listOrgs.mockResolvedValue([{ id: "org" }]);
-    expect(await orgs.listOrgs("a")).toEqual([{ id: "org" }]);
-    expect(api.listOrgs).toHaveBeenCalledWith("a");
+describe("Collaboration module factory", () => {
+  it("routes organization and project membership queries through injected query ports", async () => {
+    const { module, organizations, members } = fixture();
+    expect(await module.listOrgs("a")).toEqual([{ id: "org" }]);
+    expect(await module.listOrgMembers("org")).toEqual([{ accountId: "a" }]);
+    expect(await module.orgRoleOf(undefined, "a")).toBeNull();
+    expect(await module.listMembers("p")).toEqual({ members: [], invites: [{ email: "a@b.co" }] });
+    expect(await module.sharedProjectIds("a")).toEqual(["p"]);
+    expect(organizations.getOrgRole).not.toHaveBeenCalled();
+    expect(members.getSharedProjectIds).toHaveBeenCalledWith("a");
   });
 
-  it("lists organization members through the application", async () => {
-    api.listOrgMembers.mockResolvedValue([{ accountId: "a" }]);
-    expect(await orgs.listOrgMembers("org")).toEqual([{ accountId: "a" }]);
-    expect(api.listOrgMembers).toHaveBeenCalledWith("org");
-  });
-
-  it("delegates missing-tenant role handling to the application", async () => {
-    api.orgRoleOf.mockResolvedValue(null);
-    expect(await orgs.orgRoleOf(undefined, "a")).toBeNull();
-    expect(api.orgRoleOf).toHaveBeenCalledWith(undefined, "a");
-  });
-
-  it("passes the exact account transaction to personal organization creation", async () => {
+  it("enlists account and project tenant creation in the provided transaction", async () => {
+    const { module, transactionPersonalOrganizations } = fixture();
     const transaction = { query: vi.fn() };
-    await orgs.createPersonalOrg(transaction, "a", "Alice");
-    expect(api.createPersonalOrg).toHaveBeenCalledWith(transaction, "a", "Alice");
+    await module.createPersonalOrg(transaction, "a", "Alice");
+    await module.ensurePersonalOrg(transaction, "a");
+    expect(transactionPersonalOrganizations.create).toHaveBeenCalledWith("personal_a", "a", "Alice");
+    expect(transactionPersonalOrganizations.ensure).toHaveBeenCalledWith("personal_a", "a");
     expect(transaction.query).not.toHaveBeenCalled();
   });
 
-  it("passes the exact project transaction to personal organization repair", async () => {
-    const transaction = { query: vi.fn() };
-    await orgs.ensurePersonalOrg(transaction, "a");
-    expect(api.ensurePersonalOrg).toHaveBeenCalledWith(transaction, "a");
-    expect(transaction.query).not.toHaveBeenCalled();
-  });
-
-  it("lists both memberships and invites through the application", async () => {
-    api.listMembers.mockResolvedValue({ members: [], invites: [{ email: "a@b.co" }] });
-    expect(await members.listMembers("p")).toEqual({ members: [], invites: [{ email: "a@b.co" }] });
-    expect(api.listMembers).toHaveBeenCalledWith("p");
-  });
-
-  it("queries shared project access through the application, not a repository", async () => {
-    api.sharedProjectIds.mockResolvedValue(["p"]);
-    expect(await members.sharedProjectIds("a")).toEqual(["p"]);
-    expect(api.sharedProjectIds).toHaveBeenCalledWith("a");
-  });
-
-  it("claims invites through the application and preserves the legacy void return", async () => {
-    api.claimInvites.mockResolvedValue(2);
-    expect(await members.claimInvites("a", "A@B.CO")).toBeUndefined();
-    expect(api.claimInvites).toHaveBeenCalledWith("a", "A@B.CO");
+  it("uses the supplied lifecycle and personal organization contract", async () => {
+    const { module } = fixture();
+    await module.start();
+    await module.start();
+    await module.stop();
+    await module.stop();
+    expect(module.personalOrgId("a")).toBe("personal_a");
   });
 });

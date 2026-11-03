@@ -1,85 +1,119 @@
-import { config } from "../../config.js";
-import { newId, newToken, numericCode, sha256 } from "../../lib/crypto.js";
-import { PostgresAccountRepository } from "./infrastructure/PostgresAccountRepository.js";
-import { PostgresSessionRepository } from "./infrastructure/PostgresSessionRepository.js";
-import { PostgresLoginCodeRepository } from "./infrastructure/PostgresLoginCodeRepository.js";
-import { PostgresAccountLifecycleRepository } from "./infrastructure/PostgresAccountLifecycleRepository.js";
-import { PostgresPasswordResetRepository } from "./infrastructure/PostgresPasswordResetRepository.js";
-import { PostgresApiTokenRepository } from "./infrastructure/PostgresApiTokenRepository.js";
-import { BcryptArgonPasswordHasher } from "./infrastructure/BcryptArgonPasswordHasher.js";
-import { PlatformMailerService } from "./infrastructure/PlatformMailerService.js";
-import { RequestLoginCodeUseCase } from "./application/RequestLoginCodeUseCase.js";
-import { VerifyLoginCodeUseCase } from "./application/VerifyLoginCodeUseCase.js";
-import { LoginWithPasswordUseCase } from "./application/LoginWithPasswordUseCase.js";
-import { UpdateAccountNameUseCase } from "./application/UpdateAccountNameUseCase.js";
-import { IdentityAccountsService } from "./application/IdentityAccountsService.js";
 import { BootstrapService } from "./application/BootstrapService.js";
-import { NodeBootstrapCrypto } from "./infrastructure/NodeBootstrapCrypto.js";
+import { IdentityAccountsService } from "./application/IdentityAccountsService.js";
+import { LoginWithPasswordUseCase } from "./application/LoginWithPasswordUseCase.js";
+import { RequestLoginCodeUseCase } from "./application/RequestLoginCodeUseCase.js";
+import { UpdateAccountNameUseCase } from "./application/UpdateAccountNameUseCase.js";
+import { VerifyLoginCodeUseCase } from "./application/VerifyLoginCodeUseCase.js";
+import { Password } from "./domain/Password.js";
+import type { BootstrapCrypto } from "./ports/bootstrap.js";
+import type { IdentityAccountsDependencies } from "./ports/accountLifecycle.js";
+import type { IAccountRepository, ILoginCodeRepository } from "./ports/repositories.js";
 
-export * from "./domain/Account.js";
 export * from "./domain/Email.js";
 export * from "./domain/Password.js";
 export * from "./ports/repositories.js";
 export * from "./ports/accountLifecycle.js";
-export { IdentityAccountsService } from "./application/IdentityAccountsService.js";
-export { BootstrapService, SetupError } from "./application/BootstrapService.js";
 export * from "./ports/bootstrap.js";
+export * from "./contracts.js";
+export { Account as AccountEntity } from "./domain/Account.js";
+export { PostgresAccountRepository } from "./infrastructure/PostgresAccountRepository.js";
+export { PostgresSessionRepository } from "./infrastructure/PostgresSessionRepository.js";
+export { PostgresLoginCodeRepository } from "./infrastructure/PostgresLoginCodeRepository.js";
+export { PostgresAccountLifecycleRepository } from "./infrastructure/PostgresAccountLifecycleRepository.js";
+export { PostgresPasswordResetRepository } from "./infrastructure/PostgresPasswordResetRepository.js";
+export { PostgresApiTokenRepository } from "./infrastructure/PostgresApiTokenRepository.js";
+export { BcryptArgonPasswordHasher } from "./infrastructure/BcryptArgonPasswordHasher.js";
+export { PlatformMailerService } from "./infrastructure/PlatformMailerService.js";
+export { NodeBootstrapCrypto } from "./infrastructure/NodeBootstrapCrypto.js";
+export { BootstrapService, SetupError } from "./application/BootstrapService.js";
+export { IdentityAccountsService } from "./application/IdentityAccountsService.js";
 
-export const accountRepository = new PostgresAccountRepository();
-export const sessionRepository = new PostgresSessionRepository();
-export const loginCodeRepository = new PostgresLoginCodeRepository();
-export const passwordHasher = new BcryptArgonPasswordHasher();
-export const mailerService = new PlatformMailerService();
+export interface IdentityModuleDependencies {
+  accounts: IdentityAccountsDependencies;
+  accountRepository: IAccountRepository;
+  loginCodes: ILoginCodeRepository;
+  bootstrapCrypto: BootstrapCrypto;
+  bootstrapPolicy: { bootstrapToken: string; publicUrl: string };
+  claimInvites(accountId: string, email: string): Promise<void>;
+  log?(message: string): void;
+}
 
-const lifecycleRepository = new PostgresAccountLifecycleRepository(async (tx, id, name) => {
-  const { createPersonalOrg } = await import("../collaboration/index.js");
-  await createPersonalOrg(tx, id, name);
-});
+export function createIdentityModule(dependencies: IdentityModuleDependencies) {
+  const { accounts } = dependencies;
+  const service = new IdentityAccountsService(accounts);
+  const claimInvites = dependencies.claimInvites;
+  const requestLoginCodeUseCase = new RequestLoginCodeUseCase(
+    dependencies.loginCodes,
+    accounts.mailer,
+    () => accounts.random.code(6),
+  );
+  const loginWithPasswordUseCase = new LoginWithPasswordUseCase(
+    dependencies.accountRepository,
+    accounts.sessions,
+    accounts.hasher,
+    claimInvites,
+    (id, hash) => accounts.accounts.setPassword(id, hash),
+  );
+  const verifyLoginCodeUseCase = new VerifyLoginCodeUseCase(
+    dependencies.loginCodes,
+    dependencies.accountRepository,
+    accounts.sessions,
+    accounts.random.hash,
+    claimInvites,
+    (email) => service.canSignUp(email),
+    (email) => service.createAccount(email, null, null),
+  );
+  const updateAccountNameUseCase = new UpdateAccountNameUseCase(dependencies.accountRepository);
+  const bootstrap = new BootstrapService(
+    service,
+    dependencies.bootstrapCrypto,
+    dependencies.bootstrapPolicy,
+    dependencies.log,
+  );
 
-export const identityAccountsService = new IdentityAccountsService({
-  accounts: lifecycleRepository,
-  sessions: sessionRepository,
-  resets: new PostgresPasswordResetRepository(),
-  tokens: new PostgresApiTokenRepository(async (ids) => {
-    const { organizationNames } = await import("../collaboration/index.js");
-    return organizationNames(ids);
-  }),
-  hasher: passwordHasher,
-  random: { id: newId, token: newToken, code: numericCode, hash: sha256 },
-  mailer: mailerService,
-  collaboration: {
-    async hasInvite(email) {
-      const { hasProjectInvite } = await import("../collaboration/index.js");
-      return hasProjectInvite(email);
+  return {
+    service,
+    bootstrap,
+    requestLoginCode: (email: string) => requestLoginCodeUseCase.execute(email),
+    verifyLoginCode: (email: string, code: string) => verifyLoginCodeUseCase.execute(email, code),
+    canSignUp: (email: string) => service.canSignUp(email),
+    hasAccounts: () => service.hasAccounts(),
+    createAccount: (email: string, name: string | null, password: string | null, role: "admin" | "user" = "user") =>
+      service.createAccount(email, name, password, role),
+    createSession: (accountId: string) => service.createSession(accountId),
+    assertStrongPassword: (password: string, email: string) => Password.assertStrong(password, email),
+    loginWithPassword: (email: string, password: string) => loginWithPasswordUseCase.execute(email, password),
+    setPassword: (accountId: string, password: string) => service.setPassword(accountId, password),
+    changePassword: (accountId: string, current: string | undefined, next: string, email: string) =>
+      service.changePassword(accountId, current, next, email),
+    requestPasswordReset: (email: string) => service.requestPasswordReset(email),
+    resetPassword: (email: string, code: string, password: string) => service.resetPassword(email, code, password),
+    accountFromSession: (token: string | undefined) => service.accountFromSession(token),
+    endSession: (token: string) => service.endSession(token),
+    accountFromApiToken: (token: string | undefined) => service.accountFromApiToken(token),
+    createApiToken: (accountId: string, name: string, orgId: string | null = null) =>
+      service.createApiToken(accountId, name, orgId),
+    listApiTokens: (accountId: string) => service.listApiTokens(accountId),
+    deleteApiToken: (accountId: string, id: string) => service.deleteApiToken(accountId, id),
+    updateAccountName: (id: string, name: string) => updateAccountNameUseCase.execute(id, name),
+    signOutOtherSessions: (accountId: string, currentToken: string) => service.signOutOtherSessions(accountId, currentToken),
+    countSessions: (accountId: string) => service.countSessions(accountId),
+    deleteAccount: (id: string) => service.deleteAccount(id),
+    getAccount: (id: string) => service.getAccount(id),
+    listAccounts: (excludeId?: string) => service.listAccounts(excludeId),
+    getAccountSecurity: (id: string) => service.getAccountSecurity(id),
+    updateAccountAccess: (id: string, patch: import("./ports/accountLifecycle.js").AccountAccessUpdate) =>
+      service.updateAccountAccess(id, patch),
+    initBootstrap: () => bootstrap.init(),
+    needsSetup: () => bootstrap.needsSetup(),
+    completeSetup: (input: { token: string; email: string; password: string; name?: string }) => bootstrap.complete(input),
+    async start() {
+      await bootstrap.init();
     },
-    async deletePersonalOrg(id) {
-      const { deletePersonalOrg } = await import("../collaboration/index.js");
-      await deletePersonalOrg(id);
+    stop() {
+      bootstrap.stop();
     },
-  },
-  projects: {
-    async ownedProjectIds(id) {
-      const { listAccountOwnedProjectIds } = await import("../projects/index.js");
-      return listAccountOwnedProjectIds(id);
-    },
-  },
-  policy: config,
-});
+  };
+}
 
-const claimInvites = async (accountId: string, email: string) => {
-  const collaboration = await import("../collaboration/index.js");
-  await collaboration.claimInvites(accountId, email);
-};
-
-export const requestLoginCodeUseCase = new RequestLoginCodeUseCase(loginCodeRepository, mailerService, () => numericCode(6));
-export const loginWithPasswordUseCase = new LoginWithPasswordUseCase(
-  accountRepository, sessionRepository, passwordHasher, claimInvites,
-  (id, hash) => accountRepository.rehashPassword(id, hash),
-);
-export const verifyLoginCodeUseCase = new VerifyLoginCodeUseCase(
-  loginCodeRepository, accountRepository, sessionRepository, sha256, claimInvites,
-  (email) => identityAccountsService.canSignUp(email),
-  (email) => identityAccountsService.createAccount(email, null, null),
-);
-export const updateAccountNameUseCase = new UpdateAccountNameUseCase(accountRepository);
-export const bootstrapService = new BootstrapService(identityAccountsService, new NodeBootstrapCrypto(), config);
+export type IdentityModule = ReturnType<typeof createIdentityModule>;

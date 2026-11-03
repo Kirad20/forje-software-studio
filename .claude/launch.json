@@ -4,7 +4,7 @@
     {
       "name": "forja",
       "runtimeExecutable": "node",
-      "runtimeArgs": ["--env-file-if-exists=.env", "--env-file-if-exists=.env.preview", "--import", "tsx", "server/index.ts"],
+      "runtimeArgs": ["--env-file-if-exists=.env", "--env-file-if-exists=.env.preview", "--import", "tsx", "server/bootstrap/server.ts"],
       "cwd": ".",
       "port": 4200,
       "autoPort": false

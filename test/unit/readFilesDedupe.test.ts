@@ -1,11 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
-import type { ToolContext } from "../../server/builder/tools.js";
+import type { ToolContext } from "../../server/modules/builder/index.js";
 
 const files: Record<string, string> = { "pages/a.tsx": "one\ntwo\nthree" };
 
-vi.mock("../../server/platform/projects.js", async (orig) => ({ ...(await orig<object>()), readFile: async (_p: string, path: string) => files[path] }));
+vi.mock("../../server/modules/builder/infrastructure/CoreModulesAdapter.js", async (orig) => ({
+  ...(await orig<object>()),
+  builderCoreModules: () => ({ projects: { readFile: async (_p: string, path: string) => files[path] } }),
+}));
 
-const { toolByName } = await import("../../server/builder/tools.js");
+const { toolByName } = await import("../../server/modules/builder/index.js");
 
 const read = (ctx: ToolContext, ...paths: string[]) => toolByName.get("read_files")!.run({ paths }, ctx) as Promise<string>;
 const ctxOf = (reads?: Map<string, string>) => ({ account: { id: "a" }, projectId: "p", author: "builder", reads }) as unknown as ToolContext;

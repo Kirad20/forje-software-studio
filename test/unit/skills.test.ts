@@ -1,14 +1,14 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { BUILDER_SYSTEM_PROMPT } from "../../server/builder/prompt.js";
-import { ROLE_PROMPTS, ROLE_TOOLS } from "../../server/builder/roles.js";
-import { BUILTIN_SKILLS } from "../../server/builder/skillLibrary.js";
-import { SKILLS_DIR, allSkills, findSkill, parseSkill, projectSkills, renderSkill, skillIndex } from "../../server/builder/skills.js";
-import { builderTools } from "../../server/builder/tools.js";
-import { buildClient } from "../../server/runtime/bundler.js";
-import { KIT_CATALOG } from "../../server/runtime/catalog.js";
-import { typecheckProject } from "../../server/runtime/typecheck.js";
+import { BUILDER_SYSTEM_PROMPT } from "../../server/modules/builder/prompt.js";
+import { ROLE_PROMPTS, ROLE_TOOLS } from "../../server/modules/builder/infrastructure/roles.js";
+import { BUILTIN_SKILLS } from "../../server/modules/builder/infrastructure/skillLibrary.js";
+import { SKILLS_DIR, allSkills, findSkill, parseSkill, projectSkills, renderSkill, skillIndex } from "../../server/modules/builder/infrastructure/skills.js";
+import { builderTools } from "../../server/modules/builder/index.js";
+import { buildClient } from "../../server/modules/app-runtime/index.js";
+import { KIT_CATALOG } from "../../server/modules/app-runtime/index.js";
+import { typecheckProject } from "../../server/modules/app-runtime/index.js";
 
 const OPEN_SOURCE = ["frontend-design", "impeccable", "hallmark", "taste-skill", "ui-ux-pro-max", "web-design-guidelines"];
 
@@ -60,7 +60,7 @@ describe("skills", () => {
   });
 
   it("ships the open-source skills as published, with license, notice and parts", () => {
-    const root = path.resolve("server/builder/skills");
+    const root = path.resolve("server/modules/builder/infrastructure/skills");
     const notice = readFileSync(path.join(root, "NOTICE.md"), "utf8");
     for (const name of OPEN_SOURCE) {
       expect(existsSync(path.join(root, name, "LICENSE")) || existsSync(path.join(root, name, "LICENSE.txt")), `${name} license`).toBe(true);

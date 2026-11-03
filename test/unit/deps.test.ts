@@ -1,8 +1,8 @@
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { buildClient, checkProject, compileServerModule } from "../../server/runtime/bundler.js";
-import { depsDir, packageName, readDeps, writeDeps } from "../../server/runtime/deps.js";
+import { buildClient, checkProject, compileServerModule } from "../../server/modules/app-runtime/index.js";
+import { depsDir, packageName, readDeps, writeDeps } from "../../server/modules/app-runtime/index.js";
 
 describe("project packages: manifest", () => {
   it("parses package names from import specifiers", () => {

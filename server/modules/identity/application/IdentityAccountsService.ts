@@ -1,6 +1,6 @@
 import type { PlatformRole, Account } from "../domain/Account.js";
 import { Password } from "../domain/Password.js";
-import type { IdentityAccountsDependencies, PublicAccount } from "../ports/accountLifecycle.js";
+import type { AccountAccessUpdate, AccountAdminView, AccountSecurity, IdentityAccountsDependencies, PublicAccount } from "../ports/accountLifecycle.js";
 
 export class IdentityAccountsService {
   constructor(private readonly deps: IdentityAccountsDependencies) {}
@@ -116,6 +116,18 @@ export class IdentityAccountsService {
 
   getAccount(id: string): Promise<PublicAccount | undefined> {
     return this.deps.accounts.getAccount(id);
+  }
+
+  listAccounts(excludeId?: string): Promise<AccountAdminView[]> {
+    return this.deps.accounts.listAccounts(excludeId);
+  }
+
+  getAccountSecurity(id: string): Promise<AccountSecurity | undefined> {
+    return this.deps.accounts.getSecurity(id);
+  }
+
+  updateAccountAccess(id: string, patch: AccountAccessUpdate): Promise<boolean> {
+    return this.deps.accounts.updateAccess(id, patch);
   }
 
   private publicAccount(account: Account): PublicAccount {

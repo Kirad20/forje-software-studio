@@ -1,4 +1,4 @@
-import { q } from "../../../platform/db.js";
+import { q } from "../../../shared/database/index.js";
 import type { IPersonalOrganizationRepository, QueryHandle } from "../ports/personalOrganizations.js";
 
 export class PostgresPersonalOrganizationRepository implements IPersonalOrganizationRepository {

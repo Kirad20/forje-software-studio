@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { EndpointContext, JobContext } from "../../server/baas/context.js";
+import type { EndpointContext, JobContext } from "../../server/modules/app-services/context.js";
 import type { Ctx, JobCtx } from "../../sdk/server/index.js";
 
 // Compile-time contract (npm run typecheck): what the server really passes must satisfy the

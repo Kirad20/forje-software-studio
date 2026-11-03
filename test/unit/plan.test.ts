@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { checkContract, contractRoutes, covers, validatePlan, type Plan } from "../../server/builder/plan.js";
+import { checkContract, contractRoutes, covers, validatePlan, type Plan } from "../../server/modules/builder/contracts.js";
 
 const CONTRACT = `import { z } from "zod";
 export const Note = z.object({ id: z.number(), title: z.string() });

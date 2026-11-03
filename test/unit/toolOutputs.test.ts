@@ -8,9 +8,10 @@ const dir = mkdtempSync(path.join(os.tmpdir(), "forja-tools-"));
 process.env.DATA_DIR = dir;
 const pgdb = await freshDatabase();
 process.env.DATABASE_URL = pgdb.url;
-const { runFixture } = await import("./toolOutputs.fixture.js");
-const { closePlatformDb } = await import("../../server/platform/db.js");
+const { runFixture, closeFixture } = await import("./toolOutputs.fixture.js");
+const { closePlatformDb } = await import("../../server/shared/database/index.js");
 afterAll(async () => {
+  await closeFixture();
   rmSync(dir, { recursive: true, force: true });
   await closePlatformDb();
   await pgdb.drop();
@@ -53,7 +54,7 @@ function conforms(value: unknown, schema: Record<string, any>, at = "$"): string
 }
 
 describe("typed tools", async () => {
-  const { out, tools, ctx } = await runFixture();
+  const { out, tools, ctx, modules } = await runFixture();
 
   it("keeps every text output byte for byte", () => {
     expect(out).toEqual(BEFORE);
@@ -95,7 +96,8 @@ describe("typed tools", async () => {
   it("serves outputSchema and structuredContent over MCP, accepted by the SDK client", async () => {
     const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
     const { StreamableHTTPClientTransport } = await import("@modelcontextprotocol/sdk/client/streamableHttp.js");
-    const { handleMcp } = await import("../../server/mcp/server.js");
+    const { createMcpHandler } = await import("../../server/bootstrap/mcp/server.js");
+    const handleMcp = createMcpHandler(modules);
     const transport = new StreamableHTTPClientTransport(new URL("http://forja.test/mcp"), {
       fetch: (url, init) => handleMcp(new Request(url, init), ctx.account),
     });

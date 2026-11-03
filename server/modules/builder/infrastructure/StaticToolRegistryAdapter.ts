@@ -1,4 +1,4 @@
-import { ROLE_TOOLS } from "../../../builder/roles.js";
+import { ROLE_TOOLS } from "./roles.js";
 import { AgentRole } from "../domain/AgentRole.js";
 import type { IToolRegistry } from "../ports/repositories.js";
 

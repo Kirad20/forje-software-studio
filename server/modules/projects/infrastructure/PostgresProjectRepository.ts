@@ -1,4 +1,4 @@
-import { one, q } from "../../../platform/db.js";
+import { one, q } from "../../../shared/database/index.js";
 import { Project, type Visibility } from "../domain/Project.js";
 import type { IProjectRepository } from "../ports/repositories.js";
 

@@ -1,14 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 
-const send = vi.hoisted(() => vi.fn());
-vi.mock("../../../../server/baas/email.js", () => ({ sendPlatformEmail: send }));
-vi.mock("../../../../server/config.js", () => ({ config: { publicUrl: "https://studio.example" } }));
 import { PlatformCollaborationMailerService } from "../../../../server/modules/collaboration/infrastructure/PlatformCollaborationMailerService.js";
 
 describe("Collaboration invitation email adapter", () => {
   it("preserves the public URL, subject, HTML and delivery result", async () => {
-    send.mockResolvedValue(false);
-    expect(await new PlatformCollaborationMailerService().sendInvitation({
+    const send = vi.fn().mockResolvedValue(false);
+    expect(await new PlatformCollaborationMailerService(send, "https://studio.example").sendInvitation({
       to: "invitee@example.com",
       inviterEmail: "owner@example.com",
       projectId: "p",

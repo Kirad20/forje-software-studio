@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -18,9 +18,14 @@ describe("identity hexagonal boundaries", () => {
     }
   });
 
-  it("keeps accounts a delegating compatibility facade", () => {
-    const source = readFileSync(join(process.cwd(), "server", "platform", "accounts.ts"), "utf8");
-    expect(source).not.toMatch(/(?:select |insert into |update accounts |delete from |\.transaction\(|config\.|lib\/crypto)/i);
+  it("exposes identity policies through an injected module factory and public account contract", () => {
+    const entry = readFileSync(join(root, "index.ts"), "utf8");
+    const contracts = readFileSync(join(root, "contracts.ts"), "utf8");
+    expect(entry).toContain("createIdentityModule");
+    expect(entry).not.toMatch(/new Postgres|shared\/config|import\(["'][^"']*collaboration/);
+    expect(contracts).toContain("export type Account = PublicAccount");
+    expect(existsSync(join(root, "accounts.ts"))).toBe(false);
+    expect(existsSync(join(root, "bootstrap.ts"))).toBe(false);
   });
 
   it("never calls back into the accounts facade from identity", () => {

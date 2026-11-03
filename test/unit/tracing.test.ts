@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { createLangfuse } from "../../server/builder/tracing.js";
+import { createLangfuse } from "../../server/modules/builder/index.js";
 
 const usage = { input: 1000, output: 50, cacheRead: 200, cacheWrite: 10 };
 
@@ -56,7 +56,7 @@ describe("Langfuse export", () => {
   it("is off without keys", async () => {
     vi.stubEnv("LANGFUSE_PUBLIC_KEY", "");
     vi.resetModules();
-    const { langfuse } = await import("../../server/builder/tracing.js");
+    const { langfuse } = await import("../../server/modules/builder/index.js");
     expect(langfuse).toBeNull();
     vi.unstubAllEnvs();
   });

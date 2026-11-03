@@ -3,6 +3,7 @@
 //   npm run test:e2e
 import http from "node:http";
 import { spawn } from "node:child_process";
+import { once } from "node:events";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -15,18 +16,20 @@ const PORT = 4300 + Math.floor(Math.random() * 500);
 const DATA = mkdtempSync(path.join(tmpdir(), "forja-e2e-"));
 const pgdb = await freshDatabase();
 let serverLog = "";
-const server = spawn(process.execPath, ["--import", "tsx", "server/index.ts"], {
+const server = spawn(process.execPath, ["--import", "tsx", "server/bootstrap/server.ts"], {
   cwd: ROOT,
   env: { ...process.env, PORT: String(PORT), PUBLIC_URL: `http://localhost:${PORT}`, DATA_DIR: DATA, DATABASE_URL: pgdb.url, FORJA_SEED_FILE: "", SECRETS_KEY: "ab".repeat(32), FORJA_BOOTSTRAP_TOKEN: "e2e-bootstrap-token-0123456789" },
 });
 server.stdout.on("data", (d) => (serverLog += d));
 server.stderr.on("data", (d) => (serverLog += d));
-const finish = () => {
-  server.kill();
-  setTimeout(() => {
-    rmSync(DATA, { recursive: true, force: true });
-    pgdb.drop().catch(() => {});
-  }, 500);
+const finish = async () => {
+  if (server.exitCode === null && server.signalCode === null) {
+    const exited = once(server, "exit");
+    server.kill();
+    await exited;
+  }
+  await pgdb.drop();
+  rmSync(DATA, { recursive: true, force: true });
 };
 const jar = {}; // host -> cookie string
 
@@ -63,6 +66,7 @@ const ok = (cond, msg, extra) => {
   if (!cond) { console.error("FAIL:", msg, extra ?? ""); process.exitCode = 1; } else console.log("ok  ", msg);
 };
 
+try {
 for (let i = 0; i < 60; i++) {
   try { if ((await req("GET", "/healthz")).status === 200) break; } catch {}
   await new Promise((r) => setTimeout(r, 500));
@@ -293,7 +297,7 @@ await req("PUT", `/api/projects/${project.id}/file`, {
 import cp from "node:child_process";
 export default async () => {
   const out: Record<string, string> = {};
-  try { fs.readFileSync("server/config.ts"); out.read = "LEAK"; } catch (e: any) { out.read = e.code; }
+  try { fs.readFileSync("server/shared/config.ts"); out.read = "LEAK"; } catch (e: any) { out.read = e.code; }
   try { fs.writeFileSync("pwned.txt", "x"); out.write = "LEAK"; } catch (e: any) { out.write = e.code; }
   try { cp.execSync("echo hi"); out.spawn = "LEAK"; } catch (e: any) { out.spawn = e.code; }
   out.secret = process.env.SECRETS_KEY ? "LEAK" : "none";
@@ -340,7 +344,7 @@ const creation = changes.at(-1);
 ok(creation.kind === "checkpoint" && creation.label === "Proyecto creado", "first entry is the creation checkpoint", JSON.stringify(creation));
 await req("POST", `/api/projects/${project.id}/changes/${creation.id}/restore`, { body: {} });
 const filesAfter = await req("GET", `/api/projects/${project.id}/files`);
-// The starter (server/templates/starter.ts): tokens, the home page with its styles, and the layout that mounts <Toaster />.
+// The starter: tokens, the home page with its styles, and the layout that mounts <Toaster />.
 const STARTER = ["base.css", "pages/_index.module.css", "pages/_index.tsx", "pages/_layout.tsx"];
 ok(JSON.stringify(filesAfter.json.files.map((f) => f.path).sort()) === JSON.stringify(STARTER), "restore to the starter files", filesAfter.text);
 ok((await req("GET", `/api/projects/${project.id}/db/rows?table=todos`)).json.total === 1, "restore leaves data alone");
@@ -574,4 +578,6 @@ ok((await req("GET", `/?share=${fresh}`, { host: pv })).status === 302, "new lin
 
 console.log(process.exitCode ? "\nSOME CHECKS FAILED" : "\nALL CHECKS PASSED");
 if (process.exitCode) console.log("\n--- server log ---\n" + serverLog.slice(-4000));
-finish();
+} finally {
+  await finish();
+}

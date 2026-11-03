@@ -1,8 +1,8 @@
-import { callModel, maxTokensFor, type Billing, type PickInput, type Role } from "../../../llm/router.js";
-import { textOf } from "../../../llm/types.js";
-import type { ModelInfo, ModelScope } from "../../../llm/catalog.js";
-import { countAction } from "../../../platform/usage.js";
-import { newRunId, recordStep, recordToolCall } from "../../../builder/metrics.js";
+import { callModel, maxTokensFor, type Billing, type PickInput, type Role } from "../../model-management/router.js";
+import { textOf } from "../../model-management/types.js";
+import type { ModelInfo, ModelScope } from "../../model-management/catalog.js";
+import { countAction } from "../../usage/usage.js";
+import { newRunId, recordStep, recordToolCall } from "./metrics.js";
 import type { ToolContext } from "./BuilderToolsAdapter.js";
 import type { AgentExecutionResult, AgentExecutionSpec } from "../domain/AgentExecution.js";
 import { RunAgentUseCase } from "../application/RunAgentUseCase.js";

@@ -4,8 +4,34 @@ import { freshDatabase } from "../../../helpers/pg.mjs";
 const database = await freshDatabase();
 process.env.DATABASE_URL = database.url;
 process.env.SECRETS_KEY = "ab".repeat(32);
-const { platformDb, q, one, closePlatformDb } = await import("../../../../server/platform/db.js");
-const collaboration = await import("../../../../server/modules/collaboration/index.js");
+const { platformDb, q, one, closePlatformDb } = await import("../../../../server/shared/database/index.js");
+const { newId } = await import("../../../../server/shared/crypto.js");
+const { createCollaborationModule } = await import("../../../../server/modules/collaboration/index.js");
+const { PostgresMemberRepository } = await import("../../../../server/modules/collaboration/infrastructure/PostgresMemberRepository.js");
+const { PostgresCollaborationAccountRepository } = await import("../../../../server/modules/collaboration/infrastructure/PostgresCollaborationAccountRepository.js");
+const { PlatformCollaborationMailerService } = await import("../../../../server/modules/collaboration/infrastructure/PlatformCollaborationMailerService.js");
+const { PostgresOrganizationRepository } = await import("../../../../server/modules/collaboration/infrastructure/PostgresOrganizationRepository.js");
+const { PostgresPersonalOrganizationRepository } = await import("../../../../server/modules/collaboration/infrastructure/PostgresPersonalOrganizationRepository.js");
+const { PostgresOrganizationSkillsRepository } = await import("../../../../server/modules/collaboration/infrastructure/PostgresOrganizationSkillsRepository.js");
+const { OrganizationSkillsService } = await import("../../../../server/modules/collaboration/application/OrganizationSkillsService.js");
+const memberRepository = new PostgresMemberRepository();
+const collaborationAccountRepository = new PostgresCollaborationAccountRepository();
+const organizationRepository = new PostgresOrganizationRepository();
+const sendInvitation = vi.fn().mockResolvedValue(true);
+const collaborationMailerService = new PlatformCollaborationMailerService(sendInvitation, "https://studio.example");
+const collaboration = createCollaborationModule({
+  members: memberRepository,
+  accounts: collaborationAccountRepository,
+  mailer: collaborationMailerService,
+  organizations: organizationRepository,
+  organizationQueries: organizationRepository,
+  organizationNames: organizationRepository,
+  memberQueries: memberRepository,
+  personalOrganizations: new PostgresPersonalOrganizationRepository(),
+  personalOrganizationsForTransaction: (tx) => new PostgresPersonalOrganizationRepository(tx),
+  id: newId,
+  skills: new OrganizationSkillsService(new PostgresOrganizationSkillsRepository(), { findSecret: () => null }),
+});
 
 afterAll(async () => {
   await closePlatformDb();
@@ -101,9 +127,9 @@ describe("Collaboration Postgres adapters on the unchanged platform schema", () 
   it("preserves slug conflict resolution, owner assignment and record lookups", async () => {
     const team = await collaboration.createOrg("member", " Alpha ");
     expect(team).toMatchObject({ name: "Alpha", slug: "alpha-2", personal: false, role: "owner" });
-    expect(await collaboration.organizationRepository.findById(team.id)).toEqual({ id: team.id, name: "Alpha", personal: false });
-    expect(await collaboration.organizationRepository.findBySlug("alpha-2")).toEqual({ id: team.id, name: "Alpha", personal: false });
-    expect(await collaboration.organizationRepository.findBySlug("absent")).toBeNull();
+    expect(await organizationRepository.findById(team.id)).toEqual({ id: team.id, name: "Alpha", personal: false });
+    expect(await organizationRepository.findBySlug("alpha-2")).toEqual({ id: team.id, name: "Alpha", personal: false });
+    expect(await organizationRepository.findBySlug("absent")).toBeNull();
     expect(await collaboration.orgRoleOf(team.id, "member")).toBe("owner");
   });
 
@@ -126,7 +152,7 @@ describe("Collaboration Postgres adapters on the unchanged platform schema", () 
     await expect(collaboration.addOrgMember("team", "owner", "member@example.com", "invalid" as never)).rejects.toThrow(
       "Rol no válido",
     );
-    expect(await collaboration.collaborationAccountRepository.findByEmail("unknown@example.com")).toBeNull();
+    expect(await collaborationAccountRepository.findByEmail("unknown@example.com")).toBeNull();
   });
 
   it("prevents the last owner leaving or being demoted, and allows self-removal for members", async () => {
@@ -164,7 +190,7 @@ describe("Collaboration Postgres adapters on the unchanged platform schema", () 
     await collaboration.addOrgMember("team", "owner", "member@example.com", "member");
     expect(await collaboration.accessOf("member", project)).toBe("editor");
     expect(await collaboration.accessOf("member", { id: "foreign_p", ownerId: "stranger", orgId: "foreign" })).toBeNull();
-    await collaboration.memberRepository.addMember("foreign_p", "member");
+    await memberRepository.addMember("foreign_p", "member");
     expect(await collaboration.accessOf("member", { id: "foreign_p", ownerId: "stranger", orgId: "foreign" })).toBe("editor");
     expect(await collaboration.accessOf("stranger", project)).toBeNull();
     expect(await collaboration.accessOf("stranger", undefined)).toBeNull();
@@ -172,17 +198,17 @@ describe("Collaboration Postgres adapters on the unchanged platform schema", () 
 
   it("deduplicates shared project IDs and excludes organization-owned projects for the owner", async () => {
     await collaboration.addOrgMember("team", "owner", "member@example.com", "member");
-    await collaboration.memberRepository.addMember("p", "member");
-    await collaboration.memberRepository.addMember("foreign_p", "member");
+    await memberRepository.addMember("p", "member");
+    await memberRepository.addMember("foreign_p", "member");
     expect((await collaboration.sharedProjectIds("member")).sort()).toEqual(["foreign_p", "p"]);
     expect(await collaboration.sharedProjectIds("owner")).toEqual([]);
   });
 
   it("retains editor defaults and idempotence for direct memberships and pending invites", async () => {
-    await collaboration.memberRepository.addMember("p", "member", "ignored-legacy-role");
-    await collaboration.memberRepository.addMember("p", "member");
-    await collaboration.memberRepository.createInvite("p", "new@example.com", "owner@example.com", "ignored-legacy-role");
-    await collaboration.memberRepository.createInvite("p", "new@example.com", "different@example.com");
+    await memberRepository.addMember("p", "member", "ignored-legacy-role");
+    await memberRepository.addMember("p", "member");
+    await memberRepository.createInvite("p", "new@example.com", "owner@example.com", "ignored-legacy-role");
+    await memberRepository.createInvite("p", "new@example.com", "different@example.com");
     const listing = await collaboration.listMembers("p");
     expect(listing.members).toHaveLength(1);
     expect(listing.members[0]).toMatchObject({ accountId: "member", email: "member@example.com", role: "editor" });
@@ -193,7 +219,7 @@ describe("Collaboration Postgres adapters on the unchanged platform schema", () 
   });
 
   it("composes invitations with real account/membership adapters and the injected mail port", async () => {
-    const send = vi.spyOn(collaboration.collaborationMailerService, "sendInvitation").mockResolvedValue(true);
+    const send = vi.spyOn(collaborationMailerService, "sendInvitation").mockResolvedValue(true);
     const project = { id: "p", name: "Project", ownerId: "owner" };
     expect(await collaboration.inviteMember(project, "owner@example.com", " MEMBER@EXAMPLE.COM ")).toEqual({ joined: true });
     expect(await collaboration.inviteMember(project, "owner@example.com", " New@Example.com ")).toEqual({ joined: false });
@@ -212,9 +238,9 @@ describe("Collaboration Postgres adapters on the unchanged platform schema", () 
   });
 
   it("claims pending invites across projects, preserving duplicate memberships and legacy editor semantics", async () => {
-    await collaboration.memberRepository.addMember("p", "member");
-    await collaboration.memberRepository.createInvite("p", "member@example.com", "owner@example.com");
-    await collaboration.memberRepository.createInvite("foreign_p", "member@example.com", "stranger@example.com");
+    await memberRepository.addMember("p", "member");
+    await memberRepository.createInvite("p", "member@example.com", "owner@example.com");
+    await memberRepository.createInvite("foreign_p", "member@example.com", "stranger@example.com");
     await q(`update project_invites set role = 'custom-legacy-role'`);
     expect(await collaboration.hasProjectInvite("MEMBER@EXAMPLE.COM")).toBe(true);
     expect(await collaboration.claimInvites("member", "MEMBER@EXAMPLE.COM")).toBe(2);
@@ -224,10 +250,10 @@ describe("Collaboration Postgres adapters on the unchanged platform schema", () 
   });
 
   it("removes memberships by email or account and deletes pending invites only for the target project", async () => {
-    await collaboration.memberRepository.addMember("p", "member");
-    await collaboration.memberRepository.addMember("foreign_p", "member");
-    await collaboration.memberRepository.createInvite("p", "member@example.com", "owner@example.com");
-    await collaboration.memberRepository.createInvite("foreign_p", "member@example.com", "stranger@example.com");
+    await memberRepository.addMember("p", "member");
+    await memberRepository.addMember("foreign_p", "member");
+    await memberRepository.createInvite("p", "member@example.com", "owner@example.com");
+    await memberRepository.createInvite("foreign_p", "member@example.com", "stranger@example.com");
     await collaboration.removeMember("p", "MEMBER@EXAMPLE.COM");
     expect(await collaboration.listMembers("p")).toEqual({ members: [], invites: [] });
     expect((await collaboration.listMembers("foreign_p")).members).toHaveLength(1);

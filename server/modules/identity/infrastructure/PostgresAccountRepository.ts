@@ -1,4 +1,4 @@
-import { one, q } from "../../../platform/db.js";
+import { one, q } from "../../../shared/database/index.js";
 import { Account, type PlatformRole } from "../domain/Account.js";
 import { Email } from "../domain/Email.js";
 import type { IAccountRepository } from "../ports/repositories.js";

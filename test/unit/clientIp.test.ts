@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { clientIp } from "../../server/lib/security.js";
+import { clientIp } from "../../server/shared/security.js";
 
 describe("clientIp", () => {
   it("ignores X-Forwarded-For when no proxy is trusted", () => {

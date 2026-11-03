@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { buildClient, checkProject } from "../../server/runtime/bundler.js";
-import { KIT_BUILTIN, KIT_CATALOG } from "../../server/runtime/catalog.js";
-import { BUILTIN_PACKAGES, resolvePackage } from "../../server/runtime/deps.js";
-import { typecheckProject } from "../../server/runtime/typecheck.js";
+import { buildClient, checkProject } from "../../server/modules/app-runtime/index.js";
+import { KIT_BUILTIN, KIT_CATALOG } from "../../server/modules/app-runtime/index.js";
+import { BUILTIN_PACKAGES, resolvePackage } from "../../server/modules/app-runtime/index.js";
+import { typecheckProject } from "../../server/modules/app-runtime/index.js";
 
 const CONTRACT = `import { z } from "zod";
 export const Note = z.object({ id: z.number(), title: z.string() });

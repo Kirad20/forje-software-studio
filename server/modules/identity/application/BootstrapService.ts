@@ -6,6 +6,7 @@ export class SetupError extends Error {}
 /** The token is held in-process and consumed only after the first administrator is persisted. */
 export class BootstrapService {
   private tokenHash: string | null = null;
+  private initialized = false;
 
   constructor(
     private readonly accounts: BootstrapAccounts,
@@ -15,20 +16,32 @@ export class BootstrapService {
   ) {}
 
   async init(): Promise<void> {
-    if (await this.accounts.hasAccounts()) {
-      this.tokenHash = null;
-      return;
+    if (this.initialized) return;
+    this.initialized = true;
+    try {
+      if (await this.accounts.hasAccounts()) {
+        this.tokenHash = null;
+        return;
+      }
+      let token = this.policy.bootstrapToken;
+      if (token) {
+        if (token.length < 16) throw new Error("FORJA_BOOTSTRAP_TOKEN debe tener al menos 16 caracteres.");
+        this.log("[forja] Instalación nueva: crea la primera cuenta de administrador con el token de FORJA_BOOTSTRAP_TOKEN.");
+      } else {
+        token = this.crypto.generate();
+        this.log(`[forja] Instalación nueva: no hay usuarios. Crea el administrador en ${this.policy.publicUrl} con este token de un solo uso:`);
+        this.log(`[forja]   ${token}`);
+      }
+      this.tokenHash = this.crypto.hash(token);
+    } catch (error) {
+      this.initialized = false;
+      throw error;
     }
-    let token = this.policy.bootstrapToken;
-    if (token) {
-      if (token.length < 16) throw new Error("FORJA_BOOTSTRAP_TOKEN debe tener al menos 16 caracteres.");
-      this.log("[forja] Instalación nueva: crea la primera cuenta de administrador con el token de FORJA_BOOTSTRAP_TOKEN.");
-    } else {
-      token = this.crypto.generate();
-      this.log(`[forja] Instalación nueva: no hay usuarios. Crea el administrador en ${this.policy.publicUrl} con este token de un solo uso:`);
-      this.log(`[forja]   ${token}`);
-    }
-    this.tokenHash = this.crypto.hash(token);
+  }
+
+  stop(): void {
+    this.tokenHash = null;
+    this.initialized = false;
   }
 
   async needsSetup(): Promise<boolean> {

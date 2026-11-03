@@ -1,23 +1,30 @@
 import { mkdtempSync, rmSync } from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import { freshDatabase } from "../helpers/pg.mjs";
+import { createTestCoreModules } from "../helpers/coreModules.js";
 
 // Real Postgres queries: the first ones are slow while other test files start their own databases.
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 });
 
-const dir = mkdtempSync(path.join(os.tmpdir(), "forja-orgskills-"));
+const dir = mkdtempSync(path.join(process.cwd(), "test", ".tmp-orgskills-"));
 process.env.DATA_DIR = dir;
 const pgdb = await freshDatabase();
 process.env.DATABASE_URL = pgdb.url;
-const { q, closePlatformDb } = await import("../../server/platform/db.js");
-const orgSkills = await import("../../server/platform/orgSkills.js");
-const projects = await import("../../server/platform/projects.js");
-const { allSkills, skillIndex, SKILLS_DIR } = await import("../../server/builder/skills.js");
-const { builderTools } = await import("../../server/builder/tools.js");
+const { q, closePlatformDb } = await import("../../server/shared/database/index.js");
+const modules = await createTestCoreModules();
+const orgSkills = modules.collaboration;
+const projects = modules.projects;
+const { allSkills, skillIndex, SKILLS_DIR } = await import("../../server/modules/builder/infrastructure/skills.js");
+const { bindBuilderCoreModules, builderTools } = await import("../../server/modules/builder/index.js");
+const unbindBuilder = bindBuilderCoreModules({
+  identity: modules.identity,
+  collaboration: modules.collaboration,
+  projects: modules.projects,
+});
 
 afterAll(async () => {
+  unbindBuilder();
   rmSync(dir, { recursive: true, force: true });
   await closePlatformDb();
   await pgdb.drop();
