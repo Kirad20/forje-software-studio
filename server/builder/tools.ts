@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { endSession as endTestSession, ensureOwnerAdmin, sessionCookie, setTemporaryPassword, testSession } from "../baas/auth.js";
 import { fetchPublicText } from "../lib/safeFetch.js";
 import { serveApp } from "../runtime/appServer.js";
@@ -42,6 +43,8 @@ export interface ToolContext {
   actor?: string;
   /** Files written in this task (for the QA hand-off). */
   written?: Set<string>;
+  /** What this run already read (read_files spec → content hash), to skip re-sending unchanged files. */
+  reads?: Map<string, string>;
 }
 
 /** Refuses writes outside the files the planner gave this agent. */
@@ -194,18 +197,20 @@ export const builderTools: BuilderTool[] = [
             exists: B,
             content: { type: "string", description: "Texto sin números de línea; solo el rango si se pidió uno" },
             range: out({ from: I, to: I, total: I }),
+            unchanged: { type: "boolean", description: "Ya lo leíste en esta tarea y no cambió: no se reenvía" },
           },
-          ["content", "range"],
+          ["content", "range", "unchanged"],
         ),
       ),
     }),
     async data(i: { paths: string[] }, ctx) {
-      const files: { path: string; exists: boolean; content?: string; range?: { from: number; to: number; total: number } }[] = [];
+      const files: { path: string; exists: boolean; content?: string; range?: { from: number; to: number; total: number }; unchanged?: boolean }[] = [];
       for (const raw of i.paths.slice(0, 20)) {
         const m = /^(.*?):(\d+)-(\d+)$/.exec(raw);
         const p = m ? m[1]! : raw;
         const c = await projects.readFile(ctx.projectId, p);
         if (c === undefined) files.push({ path: p, exists: false });
+        else if (ctx.reads && ctx.reads.get(raw) === createHash("sha1").update(c).digest("hex")) files.push({ path: p, exists: true, unchanged: true });
         else if (!m) files.push({ path: p, exists: true, content: c });
         else {
           const lines = c.split("\n");
@@ -213,6 +218,7 @@ export const builderTools: BuilderTool[] = [
           const to = Math.min(lines.length, Number(m[3]));
           files.push({ path: p, exists: true, content: lines.slice(from - 1, to).join("\n"), range: { from, to, total: lines.length } });
         }
+        if (c !== undefined) ctx.reads?.set(raw, createHash("sha1").update(c).digest("hex"));
       }
       return { files };
     },
@@ -221,6 +227,7 @@ export const builderTools: BuilderTool[] = [
         d.files
           .map((f) => {
             if (!f.exists) return `### ${f.path}\n(no existe)`;
+            if (f.unchanged) return `### ${f.path}\n(sin cambios desde que lo leíste antes en esta tarea; sigue en tu contexto)`;
             if (!f.range) return `### ${f.path}\n${numbered(f.content!)}`;
             const { from, to, total } = f.range;
             const body = from > to ? "" : f.content!.split("\n").map((l, k) => `${String(from + k).padStart(4)}\t${l}`).join("\n");

@@ -1,9 +1,10 @@
-import { callModel, type Billing, type PickInput, type Role } from "../llm/router.js";
+import { callModel, maxTokensFor, type Billing, type PickInput, type Role } from "../llm/router.js";
 import type { ModelInfo, ModelScope } from "../llm/catalog.js";
-import { addUsage, emptyUsage, type Block, type LlmMessage, type LlmTool, type Usage } from "../llm/types.js";
+import { addUsage, emptyUsage, textOf, type Block, type LlmMessage, type LlmTool, type Usage } from "../llm/types.js";
 import { q } from "../platform/db.js";
 import { readFile } from "../platform/projects.js";
 import { countAction } from "../platform/usage.js";
+import { applySummary, estimateTokens, pruneToolResults, renderTranscript, splitForSummary, textTokens, thresholds } from "./compact.js";
 import { newRunId, recordStep, recordToolCall } from "./metrics.js";
 import type { BuilderTool, ToolContext } from "./tools.js";
 
@@ -127,6 +128,56 @@ export async function runAgent(spec: AgentSpec): Promise<AgentResult> {
   const result: AgentResult = { text: "", model: null, usage: emptyUsage(), usd: 0, credits: 0, steps: [], buildOk: null, testsOk: null, toolErrors: 0, hitStepLimit: false, written: [], gate: null, gateFixes: 0 };
   const emit = (e: AgentEvent) => spec.emit(spec.taskId && "type" in e && ["text", "tool_start", "tool_end"].includes(e.type) ? ({ ...e, taskId: spec.taskId } as AgentEvent) : e);
 
+  const opening = spec.messages.length;
+  const fixedTokens = textTokens(spec.system) + textTokens(JSON.stringify(tools));
+  // Lets read_files answer "unchanged" for a file this run already read.
+  spec.ctx.reads ??= new Map();
+
+  /**
+   * Keeps the history inside the model's window: first stubs old tool results (free), and only
+   * if that is not enough folds the oldest steps into a summary. Runs once a threshold is
+   * crossed, not every step, so the prompt cache is rewritten once per compaction.
+   */
+  const fitContext = async () => {
+    const window = result.model?.context;
+    if (!window) return;
+    const limit = thresholds(window);
+    const size = () => fixedTokens + estimateTokens(history);
+    if (size() <= limit.prune) return;
+    const pruned = pruneToolResults(history, opening);
+    if (pruned.pruned) {
+      history.splice(0, history.length, ...pruned.messages);
+      spec.ctx.reads?.clear();
+    }
+    if (size() <= limit.summarize) return;
+    const cut = splitForSummary(history, opening);
+    if (cut === null) return;
+    try {
+      const res = await callModel(
+        spec.scope,
+        "summarizer",
+        { complexity: 1, domains: [], needsVision: false },
+        {
+          system:
+            "Resumes el trabajo hecho hasta ahora por un agente que construye una app, para que pueda seguir sin releer todo. Escribe en español, máximo 400 palabras, solo hechos: el objetivo, qué archivos leyó y qué aprendió de ellos (rutas, nombres, firmas), qué archivos escribió o cambió, decisiones tomadas, errores o avisos sin resolver y qué falta por hacer.",
+          messages: [{ role: "user", content: renderTranscript(history.slice(opening, cut)) }],
+          maxTokens: 1200,
+          signal: spec.signal,
+        },
+        { billing: spec.billing },
+      );
+      const summary = textOf(res.response.content).trim();
+      if (!summary) return;
+      result.usage = addUsage(result.usage, res.response.usage);
+      result.usd += res.usd;
+      result.credits += res.credits;
+      history.splice(0, history.length, ...applySummary(history, opening, cut, summary));
+      spec.ctx.reads?.clear();
+    } catch {
+      // Compacting is an optimisation: if it fails the agent carries on with the pruned history.
+    }
+  };
+
   const runId = newRunId();
   let maxSteps = spec.maxSteps;
   let reminded = false;
@@ -151,12 +202,13 @@ export async function runAgent(spec: AgentSpec): Promise<AgentResult> {
   };
   for (let step = 0; step < maxSteps; step++) {
     if (spec.signal.aborted) throw new Error("Detenido.");
+    await fitContext();
     const callStarted = performance.now();
     const call = await callModel(
       spec.scope,
       spec.role,
       spec.routing,
-      { system: spec.system, messages: history, tools: tools.length ? tools : undefined, maxTokens: 16000, signal: spec.signal },
+      { system: spec.system, messages: history, tools: tools.length ? tools : undefined, maxTokens: maxTokensFor(spec.role), signal: spec.signal },
       { billing: spec.billing, pinned: result.model ?? undefined, log: { turnId: spec.turnId, taskId: spec.taskId } },
     );
     if (!result.model || result.model.id !== call.model.id) {
