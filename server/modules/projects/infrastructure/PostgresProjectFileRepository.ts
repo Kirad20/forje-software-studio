@@ -1,4 +1,4 @@
-import { platformDb, type PlatformDb } from "../../../platform/db.js";
+import { platformDb, type PlatformDb } from "../../../shared/database/index.js";
 import type { IProjectFileRepository, LogChangeInput } from "../ports/repositories.js";
 import type { ProjectEventPort } from "../ports/projects.js";
 

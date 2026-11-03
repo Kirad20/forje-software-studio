@@ -21,6 +21,26 @@ export interface AccountCreation {
   personalOrgName: string;
 }
 
+export interface AccountAdminView {
+  id: string;
+  email: string;
+  name: string | null;
+  platformRole: PlatformRole;
+  disabled: boolean;
+  credits: number;
+  createdAt: Date | string;
+}
+
+export interface AccountSecurity {
+  hasPassword: boolean;
+  changedAt: Date | string | null;
+}
+
+export interface AccountAccessUpdate {
+  disabled?: boolean;
+  platformRole?: PlatformRole;
+}
+
 export interface AccountLifecycleRepository {
   existsByEmail(email: string): Promise<boolean>;
   hasAnyAccounts(): Promise<boolean>;
@@ -30,6 +50,9 @@ export interface AccountLifecycleRepository {
   setPassword(id: string, hash: string): Promise<void>;
   findResetAccount(email: string): Promise<{ id: string; email: string; disabled: boolean } | null>;
   getAccount(id: string): Promise<PublicAccount | undefined>;
+  listAccounts(excludeId?: string): Promise<AccountAdminView[]>;
+  getSecurity(id: string): Promise<AccountSecurity | undefined>;
+  updateAccess(id: string, patch: AccountAccessUpdate): Promise<boolean>;
   delete(id: string): Promise<void>;
 }
 

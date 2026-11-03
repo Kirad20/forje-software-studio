@@ -1,4 +1,4 @@
-import type { PlatformDb } from "../../../platform/db.js";
+import type { PlatformDb } from "../../../shared/database/index.js";
 import type { Project } from "../domain/Project.js";
 import type { BeforeImage } from "../domain/ChangeTimeline.js";
 import type { FileMap, ProjectSnapshot, ProjectPatch, ChangeEntry } from "../domain/ProjectSnapshot.js";

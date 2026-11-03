@@ -1,5 +1,7 @@
-import { one, platformDb, q, type Tx } from "../../../platform/db.js";
-import type { AccountCreation, AccountLifecycleRepository, PublicAccount } from "../ports/accountLifecycle.js";
+import { one, platformDb, q, type Tx } from "../../../shared/database/index.js";
+import type { AccountAccessUpdate, AccountAdminView, AccountCreation, AccountLifecycleRepository, AccountSecurity, PublicAccount } from "../ports/accountLifecycle.js";
+
+const EVALUATION_ACCOUNT_EMAIL = "evals@forja.internal";
 
 export class PostgresAccountLifecycleRepository implements AccountLifecycleRepository {
   constructor(private readonly createPersonalOrg: (tx: Tx, id: string, name: string) => Promise<unknown>) {}
@@ -43,6 +45,37 @@ export class PostgresAccountLifecycleRepository implements AccountLifecycleRepos
 
   getAccount(id: string): Promise<PublicAccount | undefined> {
     return one<PublicAccount>(`select a.id, a.email, a.name, a.credits, a.platform_role as "platformRole" from accounts a where a.id = $1`, [id]);
+  }
+
+  listAccounts(excludeId?: string): Promise<AccountAdminView[]> {
+    return q<AccountAdminView>(
+      `select id, email, name, platform_role as "platformRole", disabled, credits, created_at as "createdAt"
+       from accounts where ($1::text is null or id <> $1) and email <> $2 order by created_at`,
+      [excludeId ?? null, EVALUATION_ACCOUNT_EMAIL],
+    );
+  }
+
+  async getSecurity(id: string): Promise<AccountSecurity | undefined> {
+    return one<AccountSecurity>(
+      `select password_hash is not null as "hasPassword", password_changed_at as "changedAt" from accounts where id = $1`,
+      [id],
+    );
+  }
+
+  async updateAccess(id: string, patch: AccountAccessUpdate): Promise<boolean> {
+    const values: unknown[] = [id];
+    const changes: string[] = [];
+    if (patch.disabled !== undefined) {
+      values.push(patch.disabled);
+      changes.push(`disabled = $${values.length}`);
+    }
+    if (patch.platformRole !== undefined) {
+      values.push(patch.platformRole);
+      changes.push(`platform_role = $${values.length}`);
+    }
+    if (!changes.length) return !!(await one(`select 1 from accounts where id = $1`, [id]));
+    const rows = await q<{ id: string }>(`update accounts set ${changes.join(", ")} where id = $1 returning id`, values);
+    return rows.length > 0;
   }
 
   async delete(id: string): Promise<void> {

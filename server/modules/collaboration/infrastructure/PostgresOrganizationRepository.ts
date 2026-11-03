@@ -1,4 +1,4 @@
-import { one, q } from "../../../platform/db.js";
+import { one, q } from "../../../shared/database/index.js";
 import type { OrgRole } from "../domain/OrgPolicy.js";
 import type { IOrganizationRepository, OrganizationRecord } from "../ports/repositories.js";
 import type { IOrganizationQueries, IOrganizationNameDirectory, Org, OrgMemberView } from "../ports/queries.js";

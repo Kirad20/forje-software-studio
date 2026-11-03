@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildIndex, findSymbol, projectMap, relatedFiles, selectContext } from "../../server/builder/index.js";
+import { buildIndex, findSymbol, projectMap, relatedFiles, selectContext } from "../../server/modules/builder/infrastructure/projectIndex.js";
 
 const files = {
   "base.css": ":root { --primary: #000; }",

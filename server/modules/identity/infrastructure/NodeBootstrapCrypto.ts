@@ -1,5 +1,5 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
-import { sha256 } from "../../../lib/crypto.js";
+import { sha256 } from "../../../shared/crypto.js";
 import type { BootstrapCrypto } from "../ports/bootstrap.js";
 
 export class NodeBootstrapCrypto implements BootstrapCrypto {

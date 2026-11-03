@@ -1,2 +1,7 @@
 # Skills copied unmodified from open-source projects: not part of the Forja code graph
-server/builder/skills/
+server/modules/builder/infrastructure/skills/
+
+# Local files outside the application migration
+Python/
+prompts.txt
+soclo-cal.py

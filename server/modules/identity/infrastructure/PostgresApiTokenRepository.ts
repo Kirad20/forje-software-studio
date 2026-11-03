@@ -1,4 +1,4 @@
-import { one, q } from "../../../platform/db.js";
+import { one, q } from "../../../shared/database/index.js";
 import type { ApiTokenInfo, ApiTokenRepository, PublicAccount } from "../ports/accountLifecycle.js";
 
 export class PostgresApiTokenRepository implements ApiTokenRepository {

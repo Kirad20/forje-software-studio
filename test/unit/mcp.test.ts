@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { BUILDER_SYSTEM_PROMPT } from "../../server/builder/prompt.js";
-import { builderTools } from "../../server/builder/tools.js";
-import { GUIDES, SECTION_IDS, guideList, readGuides } from "../../server/mcp/guides.js";
-import { SERVER_INSTRUCTIONS, TOOL_HINTS } from "../../server/mcp/server.js";
+import { BUILDER_SYSTEM_PROMPT } from "../../server/modules/builder/prompt.js";
+import { builderTools } from "../../server/modules/builder/index.js";
+import { GUIDES, SECTION_IDS, guideList, readGuides } from "../../server/bootstrap/mcp/guides.js";
+import { SERVER_INSTRUCTIONS, TOOL_HINTS } from "../../server/bootstrap/mcp/server.js";
 
 describe("MCP guides", () => {
   it("gives every heading of the builder manual a stable id", () => {

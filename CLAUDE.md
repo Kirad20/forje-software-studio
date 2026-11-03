@@ -12,5 +12,5 @@ El grafo de conocimiento vive en `graphify-out/` y debe mantenerse siempre al d�
 - **No leas archivos generados grandes** (`graphify-out/graph.json`, `graph.html`, `cache/`, `package-lock.json`: varios MB). Están bloqueados en `.claude/settings.json`; consúltalos con `graphify query`, `graphify explain` o `GRAPH_REPORT.md`.
 - **Orienta con el grafo antes de buscar**: `graphify query "<pregunta>"` en lugar de un grep amplio o de leer carpetas enteras.
 - **Búsquedas que cruzan muchos archivos** → agente `Explore` (devuelve la conclusión, no los volcados). Para lo puntual, `Grep` y `Read` con `offset`/`limit`.
-- **Lee solo el rango que necesitas** de los archivos grandes (`server/builder/orchestrator.ts`, `server/builder/tools.ts`, `README.md`).
+- **Lee solo el rango que necesitas** de los archivos grandes (`server/modules/builder/infrastructure/BuilderTurnAdapter.ts`, `server/modules/builder/infrastructure/BuilderToolsAdapter.ts`, `README.md`).
 - **Sesiones largas**: separa tareas no relacionadas en sesiones distintas y compacta (`/compact`) al terminar una fase, antes de empezar otra.

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { allowedRequest } from "../../server/runtime/browser.js";
+import { allowedRequest } from "../../server/modules/app-runtime/index.js";
 
 describe("browser_test network filter", () => {
   const origin = "http://pv-abc.localhost:4000";

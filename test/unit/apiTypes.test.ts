@@ -3,8 +3,8 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { builderTools } from "../../server/builder/tools.js";
-import { apiTypes, methodName, schemaToTs } from "../../server/mcp/apiTypes.js";
+import { builderTools } from "../../server/modules/builder/index.js";
+import { apiTypes, methodName, schemaToTs } from "../../server/bootstrap/mcp/apiTypes.js";
 
 describe("Forja API types", () => {
   it("names methods in camelCase", () => {

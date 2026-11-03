@@ -1,4 +1,7 @@
 node_modules/
+.vitest/
+test/.tmp/
+test/.tmp-*/
 dist/
 data/
 .env
@@ -8,7 +11,9 @@ graphify-out/.graphify_python
 graphify-out/.graphify_root
 graphify-out/.graphify_build_state.json
 graphify-out/.graphify_labels.pending.json
+graphify-out/.rebuild.lock
+graphify-out/**/.gfy-replace-bak-*.tmp
 seed.local.json
 
 # Skills copied unmodified from open-source projects keep their own data/ folders
-!server/builder/skills/**/data/
+!server/modules/builder/infrastructure/skills/**/data/

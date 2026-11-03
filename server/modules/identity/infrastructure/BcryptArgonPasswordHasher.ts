@@ -1,4 +1,4 @@
-import { burnPasswordCheck, hashPassword, passwordNeedsRehash, verifyPassword } from "../../../lib/crypto.js";
+import { burnPasswordCheck, hashPassword, passwordNeedsRehash, verifyPassword } from "../../../shared/crypto.js";
 import type { IPasswordHasher } from "../ports/repositories.js";
 
 export class BcryptArgonPasswordHasher implements IPasswordHasher {

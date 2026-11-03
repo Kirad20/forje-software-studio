@@ -18,7 +18,7 @@ const pgdb = await freshDatabase();
 const SEED = path.join(DATA, "seed.json");
 writeFileSync(SEED, JSON.stringify({ settings: { "github.apiUrl": `http://127.0.0.1:${gh.port}`, "github.webhookSecret": "whsec", "github.pollMs": 3600000 } }));
 let serverLog = "";
-const app = spawn(process.execPath, ["--import", "tsx", "server/index.ts"], {
+const app = spawn(process.execPath, ["--import", "tsx", "server/bootstrap/server.ts"], {
   cwd: ROOT,
   env: {
     ...process.env,

@@ -154,10 +154,14 @@ table.grid td { max-width: 320px; overflow: hidden; text-overflow: ellipsis; whi
 .page { max-width: 1080px; margin: 0 auto; padding: 40px 28px; }
 
 @media (max-width: 760px) {
-  .shell { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
-  .sidebar { flex-direction: row; align-items: center; padding: 8px 12px; border-right: 0; border-bottom: 1px solid var(--border); }
+  .shell { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto 1fr; }
+  /* The top bar wraps instead of overflowing when fonts render wider; the account menu stays reachable. */
+  .sidebar { flex-direction: row; flex-wrap: wrap; align-items: center; padding: 8px 12px; border-right: 0; border-bottom: 1px solid var(--border); }
+  .sidebar > * { min-width: 0; }
   .brand { padding: 0 8px 0 0; }
-  .sidebar .spacer, .sidebar .account-mini { display: none; }
+  .sidebar .spacer { display: none; }
+  .sidebar .account-mini { margin-left: auto; max-width: 100%; }
+  .sidebar .account-mini .popover.up { top: 100%; bottom: auto; left: auto; right: 0; margin: 6px 0 0; max-width: calc(100vw - 24px); }
   .page { padding: 24px 16px; }
 }
 

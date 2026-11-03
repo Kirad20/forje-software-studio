@@ -7,8 +7,15 @@ export class PlatformSettingsService {
 
   constructor(private readonly deps: SettingsDependencies) {}
 
-  onChanged(fn: (keys: string[]) => void): void {
+  onChanged(fn: (keys: string[]) => void): () => void {
     this.listeners.push(fn);
+    let active = true;
+    return () => {
+      if (!active) return;
+      active = false;
+      const index = this.listeners.indexOf(fn);
+      if (index >= 0) this.listeners.splice(index, 1);
+    };
   }
 
   async load(): Promise<void> {

@@ -5,13 +5,13 @@ import { PostgresAccountLifecycleRepository } from "../../../../server/modules/i
 import { PostgresSessionRepository } from "../../../../server/modules/identity/infrastructure/PostgresSessionRepository.js";
 import { PostgresPasswordResetRepository } from "../../../../server/modules/identity/infrastructure/PostgresPasswordResetRepository.js";
 import { PostgresApiTokenRepository } from "../../../../server/modules/identity/infrastructure/PostgresApiTokenRepository.js";
-import { sha256 } from "../../../../server/lib/crypto.js";
+import { sha256 } from "../../../../server/shared/crypto.js";
 
 const state = vi.hoisted(() => ({
   db: null as unknown as pg.Client,
   isolated: null as unknown as Awaited<ReturnType<typeof freshDatabase>>,
 }));
-vi.mock("../../../../server/platform/db.js", () => ({
+vi.mock("../../../../server/shared/database/index.js", () => ({
   platformDb: async () => ({
     query: (sql: string, params: unknown[] = []) => state.db.query(sql, params),
     async transaction<T>(fn: (tx: { query: (sql: string, params?: unknown[]) => Promise<unknown> }) => Promise<T>) {
@@ -46,7 +46,7 @@ describe("identity SQL adapter compatibility", () => {
     await state.db.connect();
     await state.db.query(`
       create table accounts(id text primary key, email text unique, name text, credits int, password_hash text,
-        password_changed_at timestamptz, platform_role text, disabled boolean default false);
+        password_changed_at timestamptz, platform_role text, disabled boolean default false, created_at timestamptz default now());
       create table organizations(id text primary key, name text);
       create table account_sessions(token_hash text primary key, account_id text references accounts on delete cascade, expires_at timestamptz);
       create table password_resets(account_id text primary key references accounts on delete cascade, code_hash text, attempts int, expires_at timestamptz);
@@ -76,6 +76,24 @@ describe("identity SQL adapter compatibility", () => {
     await expect(accounts.create(input("second-admin", "admin"))).rejects.toThrow("No se puede");
     await accounts.create(input("user", "user"));
     expect(await accounts.passwordHash("user")).toBeNull();
+    expect(await accounts.getSecurity("admin")).toMatchObject({ hasPassword: true, changedAt: expect.any(Date) });
+    expect(await accounts.getSecurity("user")).toEqual({ hasPassword: false, changedAt: null });
+    expect(await accounts.listAccounts("admin")).toHaveLength(1);
+    expect(await accounts.updateAccess("user", { disabled: true, platformRole: "admin" })).toBe(true);
+    expect(await accounts.listAccounts("admin")).toMatchObject([{ id: "user", disabled: true, platformRole: "admin" }]);
+    expect(await accounts.updateAccess("missing", { disabled: true })).toBe(false);
+    expect(await accounts.updateAccess("user", { disabled: false, platformRole: "user" })).toBe(true);
+  });
+
+  it("hides the reserved evaluation account from the admin account listing", async () => {
+    await state.db.query(
+      `insert into accounts (id, email, name, credits, platform_role, disabled)
+       values ('eval-system', 'evals@forja.internal', 'Forja Evals', 0, 'user', true)`,
+    );
+
+    const listed = await accounts.listAccounts();
+
+    expect(listed.some((account) => account.email === "evals@forja.internal")).toBe(false);
   });
 
   it("rolls account creation back when personal organization creation fails", async () => {

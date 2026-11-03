@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { quickScan } from "../../server/runtime/securityScan.js";
+import { quickScan } from "../../server/modules/app-runtime/index.js";
 
 const rules = (files: Record<string, string>) => quickScan(files).map((f) => `${f.rule}:${f.severity}:${f.file}`);
 

@@ -1,5 +1,5 @@
-import { browserAvailable, config } from "../../../config.js";
-import { decrypt, encrypt } from "../../../lib/crypto.js";
+import { browserAvailable, config } from "../../../shared/config.js";
+import { decrypt, encrypt } from "../../../shared/crypto.js";
 import { getPath, schemaOf, setPath, settingDef, SETTINGS } from "./SettingRegistry.js";
 import { PlatformSettingsService } from "../application/PlatformSettingsService.js";
 import { PostgresSettingsRepository } from "./PostgresSettingsRepository.js";

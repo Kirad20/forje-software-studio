@@ -1,26 +1,29 @@
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdtempSync, rmSync } from "node:fs";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { freshDatabase } from "../helpers/pg.mjs";
+import { createTestCoreModules } from "../helpers/coreModules.js";
 
 // A throwaway data dir and a known bootstrap token, set before anything imports the config.
-process.env.DATA_DIR = mkdtempSync(path.join(tmpdir(), "forja-auth-"));
+const dataDir = mkdtempSync(path.join(process.cwd(), "test", ".tmp-auth-"));
+process.env.DATA_DIR = dataDir;
 process.env.FORJA_BOOTSTRAP_TOKEN = "bootstrap-token-for-tests";
 process.env.SECRETS_KEY = "ab".repeat(32);
 const pgdb = await freshDatabase();
 process.env.DATABASE_URL = pgdb.url;
 
-const crypto = await import("../../server/lib/crypto.js");
-const accounts = await import("../../server/platform/accounts.js");
-const bootstrap = await import("../../server/platform/bootstrap.js");
-const orgs = await import("../../server/platform/orgs.js");
-const members = await import("../../server/platform/members.js");
-const projects = await import("../../server/platform/projects.js");
-const { platformDb, q, one, closePlatformDb } = await import("../../server/platform/db.js");
+const crypto = await import("../../server/shared/crypto.js");
+const modules = await createTestCoreModules();
+const accounts = modules.identity;
+const bootstrap = modules.identity;
+const orgs = modules.collaboration;
+const members = modules.collaboration;
+const projects = modules.projects;
+const { platformDb, q, one, closePlatformDb } = await import("../../server/shared/database/index.js");
 afterAll(async () => {
   await closePlatformDb();
   await pgdb.drop();
+  rmSync(dataDir, { recursive: true, force: true });
 });
 
 describe("password hashing", () => {
@@ -138,7 +141,7 @@ describe("password login, reset and sessions", () => {
     const id = await accounts.createAccount("baja@example.com", null, "contraseña de prueba");
     const token = (await accounts.loginWithPassword("baja@example.com", "contraseña de prueba"))!;
     expect(await accounts.accountFromSession(token)).not.toBeNull();
-    await q(`update accounts set disabled = true where id = $1`, [id]);
+    await accounts.updateAccountAccess(id, { disabled: true });
     expect(await accounts.accountFromSession(token)).toBeNull();
     expect(await accounts.loginWithPassword("baja@example.com", "contraseña de prueba")).toBeNull();
   });

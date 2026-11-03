@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { diffLines, hunks } from "../../studio/src/diff.js";
+import { diffLines, hunks } from "../../studio/src/features/files/domain/diff.js";
 
 const ops = (before: string, after: string) => diffLines(before, after).map((l) => `${l.op}${l.text}`);
 

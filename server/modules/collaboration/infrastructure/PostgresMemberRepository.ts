@@ -1,4 +1,4 @@
-import { one, q } from "../../../platform/db.js";
+import { one, q } from "../../../shared/database/index.js";
 import type { IMemberRepository } from "../ports/repositories.js";
 import type { IMemberQueries, MemberView, InviteView } from "../ports/queries.js";
 

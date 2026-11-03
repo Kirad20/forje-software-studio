@@ -31,7 +31,7 @@ writeFileSync(
   }),
 );
 let serverLog = "";
-const app = spawn(process.execPath, ["--import", "tsx", "server/index.ts"], {
+const app = spawn(process.execPath, ["--import", "tsx", "server/bootstrap/server.ts"], {
   cwd: ROOT,
   env: {
     ...process.env,

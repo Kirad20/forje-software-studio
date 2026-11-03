@@ -1,12 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { Block, LlmMessage } from "../../server/llm/types.js";
+import type { Block, LlmMessage } from "../../server/modules/model-management/types.js";
 
 const calls: { role: string; messages: LlmMessage[] }[] = [];
 let mainSteps = 0;
 const usage = { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 };
 const model = { id: "m", model: "m", context: 20_000, vision: false };
 
-vi.mock("../../server/llm/router.js", () => ({
+vi.mock("../../server/modules/model-management/router.js", () => ({
   maxTokensFor: () => 4000,
   callModel: async (_scope: unknown, role: string, _f: unknown, req: { messages: LlmMessage[] }) => {
     calls.push({ role, messages: structuredClone(req.messages) });
@@ -17,12 +17,12 @@ vi.mock("../../server/llm/router.js", () => ({
     return { model, failed: [], usd: 0, credits: 0, response: { content, usage, stopReason: "end", servedBy: "m" } };
   },
 }));
-vi.mock("../../server/platform/db.js", () => ({ q: async () => [] }));
-vi.mock("../../server/platform/projects.js", () => ({ readFile: async () => undefined }));
-vi.mock("../../server/platform/usage.js", () => ({ countAction: async () => {} }));
-vi.mock("../../server/builder/metrics.js", () => ({ newRunId: () => "r", recordStep: () => {}, recordToolCall: () => {} }));
+vi.mock("../../server/shared/database/index.js", () => ({ q: async () => [], one: async () => undefined }));
+vi.mock("../../server/modules/builder/infrastructure/CoreModulesAdapter.js", () => ({ readFile: async () => undefined }));
+vi.mock("../../server/modules/usage/usage.js", () => ({ countAction: async () => {} }));
+vi.mock("../../server/modules/builder/infrastructure/metrics.js", () => ({ newRunId: () => "r", recordStep: () => {}, recordToolCall: () => {} }));
 
-const { runAgent } = await import("../../server/builder/agent.js");
+const { runAgent } = await import("../../server/modules/builder/index.js");
 
 const results = (m: LlmMessage) => (typeof m.content === "string" ? [] : m.content.filter((b): b is Extract<Block, { type: "tool_result" }> => b.type === "tool_result"));
 const uses = (m: LlmMessage) => (typeof m.content === "string" ? [] : m.content.filter((b): b is Extract<Block, { type: "tool_use" }> => b.type === "tool_use"));

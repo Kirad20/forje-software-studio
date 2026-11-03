@@ -33,4 +33,4 @@ USER node
 VOLUME /app/data
 EXPOSE 4100
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s CMD node -e "fetch('http://127.0.0.1:'+process.env.PORT+'/healthz').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"
-CMD ["node", "--import", "tsx", "server/index.ts"]
+CMD ["node", "--import", "tsx", "server/bootstrap/server.ts"]

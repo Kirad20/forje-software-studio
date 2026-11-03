@@ -1,7 +1,7 @@
-import { formatProblem } from "../../../runtime/bundler.js";
-import { verifyBuild } from "../../../runtime/typecheck.js";
-import { formatProblems, listProblems, watchProblems } from "../../../platform/problems.js";
-import { readAllFiles } from "../../../platform/projects.js";
+import { formatProblem } from "../../app-runtime/index.js";
+import { verifyBuild } from "../../app-runtime/index.js";
+import { formatProblems, listProblems, watchProblems } from "../../project-observability/problems.js";
+import { readAllFiles } from "./CoreModulesAdapter.js";
 import { CreateFinishGateUseCase } from "../application/CreateFinishGateUseCase.js";
 import type { Ownership } from "../domain/FinishGatePolicy.js";
 import { formatStandard, standardsScan } from "../domain/Standards.js";

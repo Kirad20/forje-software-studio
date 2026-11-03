@@ -1,10 +1,11 @@
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { freshDatabase } from "../../../helpers/pg.mjs";
-import { migrate } from "../../../../server/db/migrate.js";
-import type { PlatformDb, Tx } from "../../../../server/platform/db.js";
+import { migrate } from "../../../../server/shared/database/migrate.js";
+import type { PlatformDb, Tx } from "../../../../server/shared/database/index.js";
 import { PostgresProjectsStore } from "../../../../server/modules/projects/infrastructure/PostgresProjectsStore.js";
-import { projectOrganizations } from "../../../../server/modules/projects/infrastructure/services.js";
+import { PostgresPersonalOrganizationRepository } from "../../../../server/modules/collaboration/infrastructure/PostgresPersonalOrganizationRepository.js";
+import { Organization } from "../../../../server/modules/collaboration/domain/Organization.js";
 import { ProjectsApplication } from "../../../../server/modules/projects/application/ProjectsApplication.js";
 import { WriteFileUseCase } from "../../../../server/modules/projects/application/WriteFileUseCase.js";
 import { RenameFileUseCase } from "../../../../server/modules/projects/application/RenameFileUseCase.js";
@@ -41,6 +42,11 @@ const services = {
   warmup: vi.fn().mockResolvedValue(undefined),
   clone: vi.fn().mockResolvedValue(undefined),
   emit: vi.fn(),
+};
+const projectOrganizations = {
+  personalOrgId: Organization.personalId,
+  ensurePersonalOrg: async (tx: Tx, accountId: string) =>
+    new PostgresPersonalOrganizationRepository(tx).ensure(Organization.personalId(accountId), accountId),
 };
 const store = new PostgresProjectsStore(async () => database, projectOrganizations, services);
 const app = new ProjectsApplication(store, services);

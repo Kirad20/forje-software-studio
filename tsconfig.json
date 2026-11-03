@@ -17,5 +17,5 @@
     }
   },
   "include": ["server", "sdk", "studio/src", "test"],
-  "exclude": ["server/builder/skills"]
+  "exclude": ["server/modules/builder/infrastructure/skills"]
 }

@@ -1,5 +1,5 @@
-import { q } from "../../../platform/db.js";
-import { readFile } from "../../../platform/projects.js";
+import { q } from "../../../shared/database/index.js";
+import { readFile } from "./CoreModulesAdapter.js";
 import type { Block, Message } from "../domain/AgentExecution.js";
 
 export async function save(projectId: string, msg: Message, turnId: string) {

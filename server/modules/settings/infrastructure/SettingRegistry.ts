@@ -1,10 +1,10 @@
 import { z } from "zod";
-import { CONFIG_DEFAULTS } from "../../../config.js";
+import { CONFIG_DEFAULTS } from "../../../shared/config.js";
 
 /**
  * Every platform setting an admin can change from the studio. The key is also the setting's
  * path in `config` ("github.clientId" → config.github.clientId), and its default is whatever
- * server/config.ts declares there. Adding a setting = a field in config.ts + a line here.
+ * server/shared/config.ts declares there. Adding a setting = a field in config.ts + a line here.
  */
 import type { SettingDef, SettingGroup } from "../domain/PlatformSetting.js";
 export type { SettingDef, SettingGroup, PlatformSettingType as SettingType } from "../domain/PlatformSetting.js";

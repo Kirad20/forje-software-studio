@@ -1,4 +1,4 @@
-import { platformDb, q } from "../../../platform/db.js";
+import { platformDb, q } from "../../../shared/database/index.js";
 import type { AuditAction, SettingsDependencies, SettingWrite, StoredSetting } from "../ports/platform.js";
 
 type SettingsRepository = SettingsDependencies["repository"];

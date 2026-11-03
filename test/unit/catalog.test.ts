@@ -10,13 +10,20 @@ process.env.SECRETS_KEY = "ab".repeat(32);
 const pgdb = await freshDatabase();
 process.env.DATABASE_URL = pgdb.url;
 
-const { config } = await import("../../server/config.js");
-const { platformDb, q, closePlatformDb } = await import("../../server/platform/db.js");
-const { seedDefaults } = await import("../../server/db/seeds/defaults.js");
-const { seedLocal } = await import("../../server/db/seeds/local.js");
-const providers = await import("../../server/llm/providers.js");
-const catalog = await import("../../server/llm/catalog.js");
+const { config } = await import("../../server/shared/config.js");
+const { platformDb, q, closePlatformDb } = await import("../../server/shared/database/index.js");
+const { seedDefaults } = await import("../../server/shared/database/seeds/defaults.js");
+const { createLocalSeed } = await import("../../server/bootstrap/database/localSeed.js");
+const { createMonolith } = await import("../../server/bootstrap/composition.js");
+const monolith = createMonolith();
+const seedLocal = createLocalSeed(monolith.settings);
+await monolith.startBindings();
+await monolith.models.start();
+const providers = await import("../../server/modules/model-management/providers.js");
+const catalog = await import("../../server/modules/model-management/catalog.js");
 afterAll(async () => {
+  await monolith.models.stop();
+  await monolith.stopBindings();
   rmSync(dir, { recursive: true, force: true });
   await closePlatformDb();
   await pgdb.drop();

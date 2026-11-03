@@ -1,4 +1,4 @@
-import { one } from "../../../platform/db.js";
+import { one } from "../../../shared/database/index.js";
 import type { CollaborationAccount, ICollaborationAccountRepository } from "../ports/repositories.js";
 
 export class PostgresCollaborationAccountRepository implements ICollaborationAccountRepository {

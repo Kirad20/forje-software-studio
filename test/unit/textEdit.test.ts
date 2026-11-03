@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { replaceVisibleText } from "../../server/builder/textEdit.js";
+import { replaceVisibleText } from "../../server/modules/builder/contracts.js";
 
 const page = `export default function Home() {
   return (

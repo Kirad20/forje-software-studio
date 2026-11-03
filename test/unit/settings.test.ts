@@ -1,19 +1,21 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { freshDatabase } from "../helpers/pg.mjs";
+import { createTestCoreModules } from "../helpers/coreModules.js";
 
-const dir = mkdtempSync(path.join(os.tmpdir(), "forja-settings-"));
+const dir = mkdtempSync(path.join(process.cwd(), "test", ".tmp-settings-"));
 process.env.DATA_DIR = dir;
 process.env.SECRETS_KEY = "ab".repeat(32);
 const pgdb = await freshDatabase();
 process.env.DATABASE_URL = pgdb.url;
 
-const { config, DEFAULT_MODELS_ALLOW } = await import("../../server/config.js");
-const { q, closePlatformDb } = await import("../../server/platform/db.js");
-const store = await import("../../server/settings/store.js");
-const { seedLocal } = await import("../../server/db/seeds/local.js");
+const { config, DEFAULT_MODELS_ALLOW } = await import("../../server/shared/config.js");
+const { q, closePlatformDb } = await import("../../server/shared/database/index.js");
+const settings = (await createTestCoreModules()).settings;
+const store = settings;
+const { createLocalSeed } = await import("../../server/bootstrap/database/localSeed.js");
+const seedLocal = createLocalSeed(settings);
 afterAll(async () => {
   rmSync(dir, { recursive: true, force: true });
   await closePlatformDb();
@@ -31,7 +33,7 @@ describe("platform settings", () => {
 
   it("write onto the live config, notify listeners, and reset to the default", async () => {
     const seen: string[][] = [];
-    store.onSettingsChanged((k) => seen.push(k));
+    const unsubscribe = store.onSettingsChanged((k) => seen.push(k));
     expect(await store.updateSettings({ signup: "closed", "github.pollMs": 120000 }, null)).toEqual(["signup", "github.pollMs"]);
     expect(config.signup).toBe("closed");
     expect(config.github.pollMs).toBe(120000);
@@ -39,6 +41,7 @@ describe("platform settings", () => {
     await store.resetSetting("signup", null);
     expect(config.signup).toBe("open");
     expect((await q(`select action from settings_audit where key = 'signup' order by id`)).map((r) => r.action)).toEqual(["set", "reset"]);
+    unsubscribe();
   });
 
   it("reject the whole patch when one value is invalid", async () => {
@@ -109,11 +112,10 @@ describe("platform settings", () => {
   });
 
   it("public module use cases read current values and validate lists without coercion", async () => {
-    const module = await import("../../server/modules/settings/index.js");
-    await module.updatePlatformSettingsUseCase.execute({ signup: "closed", "models.allow": ["custom:*"] });
-    expect(await module.settingsStore.get("signup")).toBe("closed");
-    expect(await module.getPlatformSettingsUseCase.execute()).toMatchObject({ signup: "closed", "models.allow": ["custom:*"] });
-    await expect(module.updatePlatformSettingsUseCase.execute({ signup: "open", "models.allow": "not-a-list" })).rejects.toThrow();
+    await settings.updatePlatformSettings({ signup: "closed", "models.allow": ["custom:*"] });
+    expect(await settings.store.get("signup")).toBe("closed");
+    expect(await settings.getPlatformSettings()).toMatchObject({ signup: "closed", "models.allow": ["custom:*"] });
+    await expect(settings.updatePlatformSettings({ signup: "open", "models.allow": "not-a-list" })).rejects.toThrow();
     expect(config.signup).toBe("closed");
     await store.resetSetting("signup", null);
     await store.resetSetting("models.allow", null);

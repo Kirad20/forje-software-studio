@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { ProjectsApplication } from "../../../../server/modules/projects/application/ProjectsApplication.js";
 import { CreateProjectUseCase } from "../../../../server/modules/projects/application/CreateProjectUseCase.js";
-import { readFileSync } from "node:fs";
 
 function fixture() {
   const source = { id: "source", name: "App", description: "desc", systemPrompt: "system", designPrompt: "design", seo: { robots: false }, folderId: "folder" };
@@ -113,9 +112,5 @@ describe("Projects hexagonal migration", () => {
     expect(store.createFolder).toHaveBeenCalledWith("owner", "uuid", "Carpeta");
     await app.createFolder("owner", " x".repeat(100));
     expect(store.createFolder.mock.calls[1]![2]).toHaveLength(60);
-  });
-  it("keeps the compatibility facade free of SQL and orchestration", () => {
-    const text = readFileSync("server/platform/projects.ts", "utf8");
-    expect(text).not.toMatch(/platformDb|\bq\(|\bone\(|node:crypto|insert into|update projects|delete from/);
   });
 });

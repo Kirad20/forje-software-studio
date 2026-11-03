@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { applySummary, estimateTokens, pruneToolResults, renderTranscript, splitForSummary, thresholds } from "../../server/builder/compact.js";
-import type { Block, LlmMessage } from "../../server/llm/types.js";
+import { applySummary, estimateTokens, pruneToolResults, renderTranscript, splitForSummary, thresholds } from "../../server/modules/builder/contracts.js";
+import type { Block, LlmMessage } from "../../server/modules/model-management/types.js";
 
 const big = "x".repeat(5000);
 

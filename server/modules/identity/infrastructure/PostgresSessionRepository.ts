@@ -1,5 +1,5 @@
-import { newToken, sha256 } from "../../../lib/crypto.js";
-import { one, q } from "../../../platform/db.js";
+import { newToken, sha256 } from "../../../shared/crypto.js";
+import { one, q } from "../../../shared/database/index.js";
 import { Account, type PlatformRole } from "../domain/Account.js";
 import { Email } from "../domain/Email.js";
 import type { ISessionRepository } from "../ports/repositories.js";

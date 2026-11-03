@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { resolvePublicUrl } from "../../server/config.js";
-import { requestOrigin } from "../../server/lib/security.js";
+import { resolvePublicUrl } from "../../server/shared/config.js";
+import { requestOrigin } from "../../server/shared/security.js";
 
 describe("resolvePublicUrl", () => {
   it("prefers PUBLIC_URL and trims the trailing slash", () => {

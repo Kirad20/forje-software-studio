@@ -1,29 +1,28 @@
 import { createHash } from "node:crypto";
-import { endSession as endTestSession, ensureOwnerAdmin, sessionCookie, setTemporaryPassword, testSession } from "../../../baas/auth.js";
-import { fetchPublicText } from "../../../lib/safeFetch.js";
-import { serveApp } from "../../../runtime/appServer.js";
-import { runJob } from "../../../baas/jobs.js";
-import { describeSchema, execSql } from "../../../baas/projectDb.js";
-import { listSecrets, requestSecret } from "../../../baas/secrets.js";
-import type { Account } from "../../../platform/accounts.js";
-import { readLogs } from "../../../platform/events.js";
-import * as projects from "../../../platform/projects.js";
-import { formatProblems, listProblems, recheckBuild, watchProblems } from "../../../platform/problems.js";
-import { ensureDeps, MANIFEST, readDeps, resolvePackage, withManifestLock, writeDeps } from "../../../runtime/deps.js";
-import { compileServerModule, endpointRoutes, formatProblem, jobFiles, pageRoutes } from "../../../runtime/bundler.js";
-import { verifyBuild } from "../../../runtime/typecheck.js";
-import { runBrowserTest, type BrowserStep } from "../../../runtime/browser.js";
-import { runQuickScan } from "../../../platform/security.js";
-import { formatFinding } from "../../../runtime/securityScan.js";
-import { addMemory, deleteMemory, memorySettings, updateMemory, MEMORY_KINDS } from "../../../platform/memory.js";
-import { runInSandbox } from "../../../runtime/sandbox.js";
-import { publishProject } from "../../../runtime/publish.js";
-import { previewOrigin, previewUrl } from "../../../runtime/urls.js";
-import { findSymbol, projectMap, relatedFiles } from "../../../builder/index.js";
-import { rewriteImports } from "../../../builder/rename.js";
+import { endSession as endTestSession, ensureOwnerAdmin, sessionCookie, setTemporaryPassword, testSession } from "../../app-services/auth.js";
+import { fetchPublicText } from "../../../shared/safeFetch.js";
+import { serveApp } from "../../app-runtime/index.js";
+import { runJob } from "../../app-services/jobs.js";
+import { describeSchema, execSql } from "../../app-services/projectDb.js";
+import { listSecrets, requestSecret } from "../../app-services/secrets.js";
+import type { Account } from "../../identity/contracts.js";
+import { readLogs } from "../../project-observability/events.js";
+import { builderCoreModules, enabledOrgSkills } from "./CoreModulesAdapter.js";
+import { formatProblems, listProblems, recheckBuild, watchProblems } from "../../project-observability/problems.js";
+import { ensureDeps, MANIFEST, readDeps, resolvePackage, withManifestLock, writeDeps } from "../../app-runtime/index.js";
+import { compileServerModule, endpointRoutes, formatProblem, jobFiles, pageRoutes } from "../../app-runtime/index.js";
+import { verifyBuild } from "../../app-runtime/index.js";
+import { runBrowserTest, type BrowserStep } from "../../app-runtime/index.js";
+import { runQuickScan } from "../../project-observability/security.js";
+import { formatFinding } from "../../app-runtime/index.js";
+import { addMemory, deleteMemory, memorySettings, updateMemory, MEMORY_KINDS } from "../../memory/memory.js";
+import { runInSandbox } from "../../app-runtime/index.js";
+import { publishProject } from "../../app-runtime/index.js";
+import { previewOrigin, previewUrl } from "../../app-runtime/index.js";
+import { findSymbol, projectMap, relatedFiles } from "./projectIndex.js";
+import { rewriteImports } from "./rename.js";
 import { ownsFile } from "../domain/FinishGatePolicy.js";
-import { enabledOrgSkills } from "../../../platform/orgSkills.js";
-import { allSkills, findSkill, renderSkill } from "../../../builder/skills.js";
+import { allSkills, findSkill, renderSkill } from "./skills.js";
 import { standardsScan } from "../domain/Standards.js";
 
 export { previewUrl };
@@ -142,9 +141,9 @@ export const builderTools: BuilderTool[] = [
       jobs: arr(S),
     }),
     async data(_i: Record<string, never>, ctx) {
-      const files = await projects.readAllFiles(ctx.projectId);
+      const files = await builderCoreModules().projects.readAllFiles(ctx.projectId);
       return {
-        files: (await projects.listFiles(ctx.projectId)).map((f) => ({ path: f.path, size: f.size })),
+        files: (await builderCoreModules().projects.listFiles(ctx.projectId)).map((f) => ({ path: f.path, size: f.size })),
         pages: pageRoutes(files).map((p) => ({ pattern: p.pattern, file: p.file })),
         endpoints: endpointRoutes(files).map((e) => ({ method: e.method, route: e.route })),
         jobs: jobFiles(files).map((j) => j.name),
@@ -166,7 +165,7 @@ export const builderTools: BuilderTool[] = [
       "Mapa compacto del proyecto: rutas, endpoints y sus tablas, componentes y quién los usa, helpers, tareas, notas y el esquema de la base de datos. Empieza por aquí en vez de leer todo.",
     input_schema: obj({}),
     async run(_i, ctx) {
-      return clip(projectMap(await projects.readAllFiles(ctx.projectId), await describeSchema(ctx.projectId, true)));
+      return clip(projectMap(await builderCoreModules().projects.readAllFiles(ctx.projectId), await describeSchema(ctx.projectId, true)));
     },
   },
   {
@@ -174,7 +173,7 @@ export const builderTools: BuilderTool[] = [
     description: "Dónde se define y se usa un nombre (componente, función, tabla, ruta).",
     input_schema: obj({ name: str("Nombre exacto") }, ["name"]),
     async run(i: { name: string }, ctx) {
-      return clip(findSymbol(await projects.readAllFiles(ctx.projectId), i.name));
+      return clip(findSymbol(await builderCoreModules().projects.readAllFiles(ctx.projectId), i.name));
     },
   },
   {
@@ -182,7 +181,7 @@ export const builderTools: BuilderTool[] = [
     description: "Archivos conectados con uno: lo que importa, quién lo importa, y la página ↔ endpoint que se llaman.",
     input_schema: obj({ path: str("Ruta") }, ["path"]),
     async run(i: { path: string }, ctx) {
-      return relatedFiles(await projects.readAllFiles(ctx.projectId), i.path).join("\n") || "Sin conexiones.";
+      return relatedFiles(await builderCoreModules().projects.readAllFiles(ctx.projectId), i.path).join("\n") || "Sin conexiones.";
     },
   },
   typed({
@@ -208,7 +207,7 @@ export const builderTools: BuilderTool[] = [
       for (const raw of i.paths.slice(0, 20)) {
         const m = /^(.*?):(\d+)-(\d+)$/.exec(raw);
         const p = m ? m[1]! : raw;
-        const c = await projects.readFile(ctx.projectId, p);
+        const c = await builderCoreModules().projects.readFile(ctx.projectId, p);
         if (c === undefined) files.push({ path: p, exists: false });
         else if (ctx.reads && ctx.reads.get(raw) === createHash("sha1").update(c).digest("hex")) files.push({ path: p, exists: true, unchanged: true });
         else if (!m) files.push({ path: p, exists: true, content: c });
@@ -242,7 +241,7 @@ export const builderTools: BuilderTool[] = [
     input_schema: obj({ path: str("Ruta, p. ej. pages/_index.tsx"), content: str("Contenido completo") }, ["path", "content"]),
     async run(i: { path: string; content: string }, ctx) {
       assertOwned(ctx, i.path);
-      await projects.writeFile(ctx.projectId, i.path, i.content, ctx.author, ctx.actor);
+      await builderCoreModules().projects.writeFile(ctx.projectId, i.path, i.content, ctx.author, ctx.actor);
       noteWrite(ctx, i.path);
       return `Escrito ${i.path} (${i.content.length} B)`;
     },
@@ -269,7 +268,7 @@ export const builderTools: BuilderTool[] = [
       assertOwned(ctx, i.path);
       const edits = i.edits?.length ? i.edits : i.old_text !== undefined && i.new_text !== undefined ? [{ old_text: i.old_text, new_text: i.new_text, replace_all: i.replace_all }] : [];
       if (!edits.length) throw new Error("Hace falta old_text y new_text, o una lista edits.");
-      let c = await projects.readFile(ctx.projectId, i.path);
+      let c = await builderCoreModules().projects.readFile(ctx.projectId, i.path);
       if (c === undefined) throw new Error(`No existe ${i.path}`);
       let total = 0;
       for (const [n, e] of edits.entries()) {
@@ -280,7 +279,7 @@ export const builderTools: BuilderTool[] = [
         c = e.replace_all ? c.split(e.old_text).join(e.new_text) : c.replace(e.old_text, () => e.new_text);
         total += e.replace_all ? count : 1;
       }
-      await projects.writeFile(ctx.projectId, i.path, c, ctx.author, ctx.actor);
+      await builderCoreModules().projects.writeFile(ctx.projectId, i.path, c, ctx.author, ctx.actor);
       noteWrite(ctx, i.path);
       return `Editado ${i.path} (${total} reemplazo${total > 1 ? "s" : ""})`;
     },
@@ -292,7 +291,7 @@ export const builderTools: BuilderTool[] = [
     input_schema: obj({ path: str("Ruta") }, ["path"]),
     async run(i: { path: string }, ctx) {
       assertOwned(ctx, i.path);
-      await projects.deleteFile(ctx.projectId, i.path, ctx.author);
+      await builderCoreModules().projects.deleteFile(ctx.projectId, i.path, ctx.author);
       noteWrite(ctx, i.path);
       return `Borrado ${i.path}`;
     },
@@ -306,13 +305,13 @@ export const builderTools: BuilderTool[] = [
       assertOwned(ctx, i.from);
       assertOwned(ctx, i.to);
       if (i.from === i.to) return "La ruta nueva es igual a la actual; no se cambió nada.";
-      const files = await projects.readAllFiles(ctx.projectId);
+      const files = await builderCoreModules().projects.readAllFiles(ctx.projectId);
       if (!(i.from in files)) throw new Error(`No existe ${i.from}. Usa list_files para ver las rutas.`);
       if (i.to in files) throw new Error(`Ya existe ${i.to}. Elige otra ruta o borra ese archivo primero con delete_file.`);
       const rewrites = rewriteImports(files, i.from, i.to);
       for (const p of Object.keys(rewrites)) if (p !== i.to) assertOwned(ctx, p);
-      await projects.renameFile(ctx.projectId, i.from, i.to, ctx.author);
-      for (const [p, content] of Object.entries(rewrites)) await projects.writeFile(ctx.projectId, p, content, ctx.author, ctx.actor);
+      await builderCoreModules().projects.renameFile(ctx.projectId, i.from, i.to, ctx.author);
+      for (const [p, content] of Object.entries(rewrites)) await builderCoreModules().projects.writeFile(ctx.projectId, p, content, ctx.author, ctx.actor);
       noteWrite(ctx, i.from, i.to, ...Object.keys(rewrites));
       const stem = i.from.replace(/\.tsx?$/, "");
       const siblings = Object.keys(files).filter((p) => p !== i.from && (p.startsWith(`${stem}.module.`) || p.startsWith(`${stem}.example.`)));
@@ -342,12 +341,12 @@ export const builderTools: BuilderTool[] = [
       const pkg = await resolvePackage(i.name.trim(), i.version?.trim() || undefined);
       // package.json is shared by every agent of the turn: this tool may edit it whoever owns it.
       const before = await withManifestLock(ctx.projectId, async () => {
-        const files = await projects.readAllFiles(ctx.projectId);
+        const files = await builderCoreModules().projects.readAllFiles(ctx.projectId);
         const deps = readDeps(files);
         const prev = deps[pkg.name];
         const next = { ...deps, [pkg.name]: pkg.version };
         await ensureDeps(next);
-        await projects.writeFile(ctx.projectId, MANIFEST, writeDeps(files, next), ctx.author, ctx.actor);
+        await builderCoreModules().projects.writeFile(ctx.projectId, MANIFEST, writeDeps(files, next), ctx.author, ctx.actor);
         noteWrite(ctx, MANIFEST);
         return prev;
       });
@@ -364,11 +363,11 @@ export const builderTools: BuilderTool[] = [
     input_schema: obj({ name: str("Nombre del paquete") }, ["name"]),
     async run(i: { name: string }, ctx) {
       return withManifestLock(ctx.projectId, async () => {
-        const files = await projects.readAllFiles(ctx.projectId);
+        const files = await builderCoreModules().projects.readAllFiles(ctx.projectId);
         const deps = readDeps(files);
         if (!(i.name in deps)) return `${i.name} no estaba instalado. Paquetes: ${Object.keys(deps).join(", ") || "ninguno"}.`;
         delete deps[i.name];
-        await projects.writeFile(ctx.projectId, MANIFEST, writeDeps(files, deps), ctx.author, ctx.actor);
+        await builderCoreModules().projects.writeFile(ctx.projectId, MANIFEST, writeDeps(files, deps), ctx.author, ctx.actor);
         noteWrite(ctx, MANIFEST);
         return `Quitado ${i.name}.`;
       });
@@ -391,7 +390,7 @@ export const builderTools: BuilderTool[] = [
       }
       const matches: { path: string; line: number; text: string }[] = [];
       let truncated = false;
-      for (const [path, content] of Object.entries(await projects.readAllFiles(ctx.projectId))) {
+      for (const [path, content] of Object.entries(await builderCoreModules().projects.readAllFiles(ctx.projectId))) {
         if (i.path_prefix && !path.startsWith(i.path_prefix)) continue;
         content.split("\n").forEach((line, n) => {
           if (!re.test(line)) return;
@@ -418,7 +417,7 @@ export const builderTools: BuilderTool[] = [
       ["method", "route"],
     ),
     async run(i: { method: "GET" | "POST"; route: string; query?: Record<string, unknown>; body?: unknown; as_user_email?: string }, ctx) {
-      const project = (await projects.getProject(ctx.projectId))!;
+      const project = (await builderCoreModules().projects.getProject(ctx.projectId))!;
       const qs = i.query ? "?" + new URLSearchParams(Object.entries(i.query).map(([k, v]) => [k, String(v)])) : "";
       const route = i.route.replace(/^\/?(_api\/)?/, "");
       const session = i.as_user_email ? await testSession(ctx.projectId, i.as_user_email) : null;
@@ -469,7 +468,7 @@ export const builderTools: BuilderTool[] = [
       ["steps"],
     ),
     async run(i: { steps: BrowserStep[]; viewport?: "desktop" | "tablet" | "mobile"; as_user_email?: string }, ctx) {
-      const project = (await projects.getProject(ctx.projectId))!;
+      const project = (await builderCoreModules().projects.getProject(ctx.projectId))!;
       const session = i.as_user_email ? await testSession(ctx.projectId, i.as_user_email) : null;
       try {
         return await runBrowserTest(project, {
@@ -504,8 +503,8 @@ export const builderTools: BuilderTool[] = [
       part: str("Solo para las skills con partes (el índice dice cuántas): la ruta de la parte que quieres leer, por ejemplo reference/critique. Sin ella recibes la skill y la lista de sus partes."),
     }, ["name"]),
     async run(i: { name: string; part?: string }, ctx) {
-      const files = await projects.readAllFiles(ctx.projectId);
-      const org = await enabledOrgSkills((await projects.getProject(ctx.projectId))?.orgId);
+      const files = await builderCoreModules().projects.readAllFiles(ctx.projectId);
+      const org = await enabledOrgSkills((await builderCoreModules().projects.getProject(ctx.projectId))?.orgId);
       const skill = findSkill(files, i.name, org);
       if (!skill) throw new Error(`No hay ninguna skill llamada "${i.name}". Las que hay: ${allSkills(files, org).map(s => s.name).join(", ")}.`);
       return renderSkill(skill, i.part);
@@ -517,7 +516,7 @@ export const builderTools: BuilderTool[] = [
     input_schema: obj({}),
     output_schema: out({ findings: arr(out({ file: S, line: I, text: S }, ["line"])) }),
     async data(_i: Record<string, never>, ctx) {
-      const found = standardsScan(await projects.readAllFiles(ctx.projectId));
+      const found = standardsScan(await builderCoreModules().projects.readAllFiles(ctx.projectId));
       return { findings: found.filter(p => ownsFile(ctx, p.file)).slice(0, 40).map(p => ({ file: p.file, line: p.line ?? 0, text: p.text })) };
     },
     format: d => d.findings.length ? `${d.findings.length} hallazgo(s):\n${d.findings.map(f => `${f.file}${f.line ? `:${f.line}` : ""} — ${f.text}`).join("\n")}` : "Cumple los estándares.",
@@ -613,7 +612,7 @@ export const builderTools: BuilderTool[] = [
     input_schema: obj({}),
     output_schema: out({ ok: B, problems: arr(out({ file: S, line: I, column: I, text: S }, ["line", "column"])) }),
     async data(_i: Record<string, never>, ctx) {
-      return verifyBuild(await projects.readAllFiles(ctx.projectId));
+      return verifyBuild(await builderCoreModules().projects.readAllFiles(ctx.projectId));
     },
     format: (d) => (d.problems.length ? `${d.problems.length} problema(s):\n${d.problems.map(formatProblem).join("\n")}` : "Compila sin errores."),
   }),
@@ -639,7 +638,7 @@ export const builderTools: BuilderTool[] = [
       ),
     }),
     async data(i: { path?: string }, ctx) {
-      const files = await projects.readAllFiles(ctx.projectId);
+      const files = await builderCoreModules().projects.readAllFiles(ctx.projectId);
       const specs = Object.keys(files).filter((f) => /^helpers\/.+\.spec\.tsx?$/.test(f) && (!i.path || f === i.path));
       const results: { spec: string; status: "pass" | "fail" | "empty" | "error"; test?: string; ms?: number; error?: string }[] = [];
       let failed = 0;
@@ -764,7 +763,7 @@ export const builderTools: BuilderTool[] = [
       "Guarda un punto de restauración con nombre que el dueño ve en el historial y puede restaurar. Úsalo al terminar una unidad de trabajo coherente (una función, un arreglo), no tras cada archivo, con una etiqueta que diga qué se logró (p. ej. \"Login con correo y contraseña\"). Restaura código, no filas de la base de datos.",
     input_schema: obj({ label: str("Etiqueta") }, ["label"]),
     async run(i: { label: string }, ctx) {
-      await projects.createCheckpoint(ctx.projectId, i.label, ctx.author);
+      await builderCoreModules().projects.createCheckpoint(ctx.projectId, i.label, ctx.author);
       return `Checkpoint «${i.label}» creado.`;
     },
   },
@@ -785,7 +784,7 @@ export const builderTools: BuilderTool[] = [
     input_schema: obj({}),
     output_schema: out({ url: S }),
     async data(_i: Record<string, never>, ctx) {
-      return { url: previewUrl((await projects.getProject(ctx.projectId))!, 7) };
+      return { url: previewUrl((await builderCoreModules().projects.getProject(ctx.projectId))!, 7) };
     },
     format: (d) => d.url,
   }),
