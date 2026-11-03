@@ -13,6 +13,7 @@ import {
   type MouseEvent,
   type ReactNode,
 } from "react";
+import type { z } from "zod";
 
 declare global {
   interface Window {
@@ -189,6 +190,40 @@ export const api = {
   get: <T = unknown>(path: string, query?: Record<string, unknown>) => request<T>("GET", apiUrl(path, query)),
   post: <T = unknown>(path: string, body?: unknown) => request<T>("POST", apiUrl(path), body ?? {}),
 };
+
+// --- Typed API from the contract ------------------------------------------------
+
+/** One endpoint of `helpers/contract.ts`: zod schemas for what it receives and what it returns. */
+export interface RouteSpec {
+  input: z.ZodType;
+  output: z.ZodType;
+}
+export type Contract = Record<`${"GET" | "POST"} ${string}`, RouteSpec>;
+
+type Spec<C, M extends string, R extends string> = C[Extract<keyof C, `${M} ${R}`>] extends RouteSpec ? C[Extract<keyof C, `${M} ${R}`>] : never;
+type Routes<C, M extends string> = keyof C extends infer K ? (K extends `${M} ${infer R}` ? R : never) : never;
+/** What a route takes: `RouteInput<typeof contract, "POST todos/create">`. */
+export type RouteInput<C extends Contract, K extends keyof C> = C[K] extends RouteSpec ? z.input<C[K]["input"]> : never;
+/** What a route returns: `RouteOutput<typeof contract, "GET todos/list">`. */
+export type RouteOutput<C extends Contract, K extends keyof C> = C[K] extends RouteSpec ? z.output<C[K]["output"]> : never;
+
+/**
+ * `api` typed by the contract: a route that is not in it, a wrong input or a misread
+ * output fail in check_build instead of at run time.
+ *   const todos = createApi(contract);
+ *   const { data } = todos.useGet("todos/list");     // data: output of "GET todos/list"
+ *   await todos.post("todos/create", { title });     // body: input of "POST todos/create"
+ */
+export function createApi<C extends Contract>(_contract: C) {
+  return {
+    get: <R extends Routes<C, "GET">>(route: R, query?: z.input<Spec<C, "GET", R>["input"]>) =>
+      api.get<z.output<Spec<C, "GET", R>["output"]>>(route, query as Record<string, unknown> | undefined),
+    post: <R extends Routes<C, "POST">>(route: R, body: z.input<Spec<C, "POST", R>["input"]>) => api.post<z.output<Spec<C, "POST", R>["output"]>>(route, body),
+    /** Pass null as the route to wait (for example until the user is known). */
+    useGet: <R extends Routes<C, "GET">>(route: R | null, query?: z.input<Spec<C, "GET", R>["input"]>) =>
+      useApi<z.output<Spec<C, "GET", R>["output"]>>(route, query as Record<string, unknown> | undefined),
+  };
+}
 
 /** Small data hook: `const { data, loading, error, reload } = useApi("todos/list")`. */
 export function useApi<T = unknown>(path: string | null, query?: Record<string, unknown>) {

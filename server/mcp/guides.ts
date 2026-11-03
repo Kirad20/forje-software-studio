@@ -1,4 +1,6 @@
 import { BUILDER_SYSTEM_PROMPT } from "../builder/prompt.js";
+import { BUILTIN_SKILLS } from "../builder/skillLibrary.js";
+import { renderSkill } from "../builder/skills.js";
 
 /**
  * Topic guides for external MCP agents, cut from the builder's manual so there is one
@@ -19,11 +21,11 @@ export const SECTION_IDS: Record<string, { id: string; summary: string }> = {
   "How to work": { id: "workflow", summary: "Orientarse, datos primero, construir, verificar, arreglar errores, notas." },
   "Project structure (the ONLY allowed paths)": { id: "structure", summary: "Las únicas rutas permitidas (pages, components, helpers, endpoints, jobs, static) e imports." },
   'Frontend SDK — import { ... } from "@forja/client"': { id: "frontend-sdk", summary: "Routing, api/useApi, auth, storage, realtime, ai y useHead en el navegador." },
+  "Shared contract — helpers/contract.ts": { id: "contract", summary: "El contrato de la API como código (zod): endpoints y páginas lo importan y los desajustes fallan al compilar." },
+  "Interface kit — use these, do not reinvent them": { id: "ui-kit", summary: "@forja/ui, iconos, animaciones y paquetes del catálogo: qué usar para cada cosa antes de escribir un componente." },
   "Backend — endpoints": { id: "backend", summary: "Forma de un endpoint y todo lo que trae ctx (db, storage, email, ai, jobs, payments, env)." },
   "Data model rules": { id: "data-model", summary: "Convenciones de tablas, dinero, fechas, user_id, índices y migraciones aditivas." },
   "Security rules (non-negotiable)": { id: "security", summary: "Autorizar en cada endpoint, validar con zod, SQL parametrizado, secretos solo en el servidor." },
-  "Jobs — jobs/<name>.ts": { id: "jobs", summary: "Tareas en segundo plano y programadas (cron, zona horaria, límites)." },
-  "Sign-in": { id: "auth", summary: "Cuándo y cómo añadir cuentas: setup_auth, página de login, proteger páginas." },
   Design: { id: "design", summary: "Tokens en base.css, estados vacío/carga/error, responsive, accesibilidad, SEO. Léela antes de hacer UI." },
   Memory: { id: "memory", summary: "Qué guardar con remember/forget y qué no." },
   "Before you finish a turn (checklist)": { id: "checklist", summary: "Lista de verificación antes de dar algo por terminado." },
@@ -56,7 +58,9 @@ function build(): Guide[] {
     summary: "Empieza aquí: qué es Forja, el flujo de trabajo, las rutas permitidas y las reglas. Léela antes del primer cambio.",
     body: [intro, ...OVERVIEW_PARTS.map((id) => byId.get(id)?.body ?? "")].filter(Boolean).join("\n\n"),
   };
-  return [overview, ...guides];
+  // Skills read like guides: one id each (jobs, auth, forms…), so an external agent fetches them the same way.
+  const skills: Guide[] = BUILTIN_SKILLS.map((k) => ({ id: k.name, title: `Skill: ${k.name}`, summary: k.description, body: `# Skill: ${k.name}\n${k.body}` }));
+  return [overview, ...guides, ...skills];
 }
 
 const slug = (s: string) =>

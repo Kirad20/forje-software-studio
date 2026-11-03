@@ -20,6 +20,9 @@ import { publishProject } from "../runtime/publish.js";
 import { previewOrigin, previewUrl } from "../runtime/urls.js";
 import { findSymbol, projectMap, relatedFiles } from "./index.js";
 import { rewriteImports } from "./rename.js";
+import { enabledOrgSkills } from "../platform/orgSkills.js";
+import { allSkills, findSkill, renderSkill } from "./skills.js";
+import { standardsScan } from "./standards.js";
 
 export { previewUrl };
 
@@ -320,10 +323,10 @@ export const builderTools: BuilderTool[] = [
   {
     name: "add_dependency",
     description:
-      "Instala un paquete de npm para la app (navegador o endpoints): fija la versión exacta en package.json y lo instala sin ejecutar scripts. Hazlo antes de importarlo. react, react-dom, zod y @forja/client ya vienen incluidos. Elige paquetes pequeños y conocidos; no instales nada que se resuelva con unas pocas líneas.",
+      "Instala un paquete de npm para la app (navegador o endpoints): fija la versión exacta en package.json y lo instala sin ejecutar scripts. Hazlo antes de importarlo. Ya vienen incluidos react, react-dom, zod, @forja/client, @forja/ui, radix-ui, lucide-react, motion, clsx y sonner. Los paquetes del catálogo del kit (react-hook-form, @hookform/resolvers, recharts, date-fns, @tanstack/react-table, @dnd-kit/*) se instalan siempre en la versión del catálogo. El catálogo es cerrado: cualquier otro paquete se rechaza, así que usa el kit o escribe las pocas líneas tú mismo.",
     input_schema: obj(
       {
-        name: str("Nombre en npm, p. ej. date-fns o @tanstack/react-table"),
+        name: str("Nombre en npm, p. ej. recharts o @tanstack/react-table"),
         version: str("Versión exacta (3.6.0) o etiqueta (latest). Por defecto, la última."),
       },
       ["name"],
@@ -486,6 +489,38 @@ export const builderTools: BuilderTool[] = [
     },
     format: (d) => (d.findings.length ? `${d.findings.length} hallazgo(s):\n${d.findings.map(formatFinding).join("\n")}` : "Sin hallazgos en el escaneo rápido."),
   }),
+  typed({
+    name: "check_standards",
+    description:
+      "Comprueba los estándares de Forja en el código actual: colores escritos a mano en vez de tokens de base.css, estilos visuales en línea, enlaces internos con <a href>, llamadas a la API con tipo escrito a mano cuando hay contrato, endpoints que no usan helpers/contract.ts y helpers con lógica de negocio sin pruebas. No bloquea nada, pero la comprobación automática antes de terminar te lo pedirá: úsalo tras una tanda de cambios y arregla lo que encuentre.",
+    input_schema: obj({}),
+    output_schema: out({ findings: arr(out({ file: S, line: I, text: S }, ["line"])) }),
+    async data(_i: Record<string, never>, ctx) {
+      const found = standardsScan(await projects.readAllFiles(ctx.projectId));
+      const mine = ctx.owned ? found.filter((p) => ctx.owned!.some((o) => p.file === o || (o.endsWith("/") && p.file.startsWith(o)))) : found;
+      return { findings: mine.slice(0, 40).map((p) => ({ file: p.file, line: p.line ?? 0, text: p.text })) };
+    },
+    format: (d) => (d.findings.length ? `${d.findings.length} hallazgo(s):\n${d.findings.map((f) => `${f.file}${f.line ? `:${f.line}` : ""} — ${f.text}`).join("\n")}` : "Cumple los estándares."),
+  }),
+  {
+    name: "load_skill",
+    description:
+      "Carga una skill: una guía corta y exacta para un trabajo concreto (formularios, gráficas, tablas, arrastrar y soltar, animaciones, pagos, correo, archivos, fechas y dinero, tiempo real, o las del proyecto). El índice está en tu prompt, en «Skills»: cárgala ANTES de escribir ese tipo de código, en vez de adivinar la API de una librería de memoria.",
+    input_schema: obj(
+      {
+        name: str("Nombre de la skill, tal como aparece en el índice"),
+        part: str("Solo para las skills con partes (el índice dice cuántas): la ruta de la parte que quieres leer, por ejemplo reference/critique. Sin ella recibes la skill y la lista de sus partes."),
+      },
+      ["name"],
+    ),
+    async run(i: { name: string; part?: string }, ctx) {
+      const files = await projects.readAllFiles(ctx.projectId);
+      const org = await enabledOrgSkills((await projects.getProject(ctx.projectId))?.orgId);
+      const skill = findSkill(files, i.name, org);
+      if (!skill) throw new Error(`No hay ninguna skill llamada "${i.name}". Las que hay: ${allSkills(files, org).map((s) => s.name).join(", ")}.`);
+      return renderSkill(skill, i.part);
+    },
+  },
   {
     name: "remember",
     description:

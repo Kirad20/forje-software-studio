@@ -35,11 +35,19 @@ function script(body) {
         res: reply(null, [
           call("submit_plan", {
             summary: "Haré una app de notas con su tabla, su API y su página.",
-            contract: "GET notes/list → { notes: {id:number, body:string}[] }. Tabla notes(id serial, body text).",
+            contract: [
+              'import { z } from "zod";',
+              "export const Note = z.object({ id: z.number(), body: z.string() });",
+              "export const contract = {",
+              '  "GET notes/list": { input: z.object({}), output: z.object({ notes: z.array(Note) }) },',
+              "} as const;",
+              "",
+            ].join("\n"),
+            later: ["Editar y borrar notas"],
             tasks: [
-              { id: "db", role: "data", goal: "Crea la tabla notes", files: ["helpers/types.ts"], depends_on: [] },
-              { id: "api", role: "backend", goal: "Endpoint GET notes/list", files: ["endpoints/notes/"], depends_on: ["db"] },
-              { id: "page", role: "ui", goal: "Página /notes que lista las notas", files: ["pages/notes.tsx"], depends_on: ["db"] },
+              { id: "db", role: "data", goal: "Crea la tabla notes", files: ["helpers/types.ts"], depends_on: [], done_when: ["la tabla notes existe"] },
+              { id: "api", role: "backend", goal: "Endpoint GET notes/list", files: ["endpoints/notes/"], depends_on: ["db"], done_when: ["GET notes/list responde la lista"] },
+              { id: "page", role: "ui", goal: "Página /notes que lista las notas", files: ["pages/notes.tsx"], depends_on: ["db"], done_when: ["/notes muestra las notas"] },
             ],
           }),
         ]),

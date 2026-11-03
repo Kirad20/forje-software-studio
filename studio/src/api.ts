@@ -65,6 +65,8 @@ export interface Project {
   favorite: boolean;
   archived: boolean;
   folderId: string | null;
+  /** The organization the project belongs to (its members and shared skills). */
+  orgId?: string | null;
   systemPrompt: string;
   designPrompt: string;
   seo: { siteName?: string; siteDescription?: string; robots?: boolean; sitemap?: boolean; themeColor?: string };

@@ -340,7 +340,9 @@ const creation = changes.at(-1);
 ok(creation.kind === "checkpoint" && creation.label === "Proyecto creado", "first entry is the creation checkpoint", JSON.stringify(creation));
 await req("POST", `/api/projects/${project.id}/changes/${creation.id}/restore`, { body: {} });
 const filesAfter = await req("GET", `/api/projects/${project.id}/files`);
-ok(filesAfter.json.files.length === 3, "restore to the starter files", filesAfter.text);
+// The starter (server/templates/starter.ts): tokens, the home page with its styles, and the layout that mounts <Toaster />.
+const STARTER = ["base.css", "pages/_index.module.css", "pages/_index.tsx", "pages/_layout.tsx"];
+ok(JSON.stringify(filesAfter.json.files.map((f) => f.path).sort()) === JSON.stringify(STARTER), "restore to the starter files", filesAfter.text);
 ok((await req("GET", `/api/projects/${project.id}/db/rows?table=todos`)).json.total === 1, "restore leaves data alone");
 const restoreEntry = (await req("GET", `/api/projects/${project.id}/changes`)).json.changes[0];
 const beforeRestore = (await req("GET", `/api/projects/${project.id}/changes`)).json.changes[1];

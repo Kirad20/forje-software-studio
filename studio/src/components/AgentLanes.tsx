@@ -20,6 +20,8 @@ export interface Lane {
   usd?: number;
   tokens?: number;
   dependsOn?: string[];
+  /** Acceptance criteria from the plan: what the reviewer checks for this task. */
+  doneWhen?: string[];
 }
 
 export interface TeamTurn {
@@ -94,6 +96,16 @@ function LaneCard({ lane }: { lane: Lane }) {
         )}
       </div>
       {lane.goal && <div className="small muted lane-goal">{lane.goal}</div>}
+      {!!lane.doneWhen?.length && (
+        <details className="small muted lane-criteria">
+          <summary>Se dará por hecho cuando ({lane.doneWhen.length})</summary>
+          <ul>
+            {lane.doneWhen.map((c, i) => (
+              <li key={i}>{c}</li>
+            ))}
+          </ul>
+        </details>
+      )}
       {lane.steps.length > 0 && (
         <button className="ghost sm lane-toggle" onClick={() => setOpen((o) => !o)}>
           {open ? "▾" : "▸"} {lane.steps.length} paso{lane.steps.length === 1 ? "" : "s"}

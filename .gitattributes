@@ -1,0 +1,2 @@
+# Skills copied from open-source projects: keep the bytes exactly as published (no line-ending conversion)
+server/builder/skills/** -text

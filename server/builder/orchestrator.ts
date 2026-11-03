@@ -6,7 +6,12 @@ import { describeSchema } from "../baas/projectDb.js";
 import { getAccount, type Account } from "../platform/accounts.js";
 import { one, q } from "../platform/db.js";
 import { addMemory, memorySection, memorySettings, MEMORY_KINDS } from "../platform/memory.js";
-import { createCheckpoint, getProject, readAllFiles, type Project } from "../platform/projects.js";
+import { createCheckpoint, getProject, readAllFiles, writeFile, type Project } from "../platform/projects.js";
+import { formatProblem } from "../runtime/bundler.js";
+import { typecheckProject } from "../runtime/typecheck.js";
+import { enabledOrgSkills } from "../platform/orgSkills.js";
+import { skillIndex } from "./skills.js";
+import { checkContract, criteriaOf, CONTRACT_FILE, planOverview, ROLE_FOLDERS, validatePlan, type Plan, type PlanTask, type SpecialistRole } from "./plan.js";
 import { imageBlocks, runAgent, save, UPLOADS, type AgentEvent, type AgentResult } from "./agent.js";
 import { formatProblems, listProblems, recheckBuild, watchProblems } from "../platform/problems.js";
 import { holdSync, releaseSync } from "../platform/github.js";
@@ -26,19 +31,6 @@ const active = new Map<string, AbortController>();
 export const isBuilding = (projectId: string) => active.has(projectId);
 export const stopBuilding = (projectId: string) => active.get(projectId)?.abort();
 
-type SpecialistRole = "data" | "backend" | "ui";
-interface PlanTask {
-  id: string;
-  role: SpecialistRole;
-  goal: string;
-  files: string[];
-  dependsOn: string[];
-}
-interface Plan {
-  summary: string;
-  contract: string;
-  tasks: PlanTask[];
-}
 interface Review {
   ok: boolean;
   summary: string;
@@ -162,35 +154,30 @@ async function extractMemories(projectId: string, billing: Billing, scope: { acc
 
 // --- Plan validation -------------------------------------------------------------------------------
 
-const ROLE_FOLDERS: Record<SpecialistRole, RegExp> = {
-  data: /^(helpers\/|static\/__dev\/)/,
-  backend: /^(endpoints\/|jobs\/|helpers\/|static\/)/,
-  ui: /^(pages\/|components\/|base\.css$|static\/|helpers\/)/,
-};
-
-function validatePlan(raw: unknown): Plan | null {
-  const p = raw as { summary?: string; contract?: string; tasks?: { id?: string; role?: string; goal?: string; files?: string[]; depends_on?: string[] }[] };
-  if (!p || !Array.isArray(p.tasks) || !p.tasks.length) return null;
-  const claimed = new Set<string>();
-  const tasks: PlanTask[] = [];
-  for (const [i, t] of p.tasks.slice(0, 6).entries()) {
-    const role = t.role as SpecialistRole;
-    if (!(role in ROLE_FOLDERS) || !t.goal) continue;
-    const id = String(t.id || `${role}-${i + 1}`).replace(/[^a-z0-9_-]/gi, "").slice(0, 30) || `${role}-${i + 1}`;
-    // A file belongs to one task; paths outside the role's folders are dropped.
-    const files = [...new Set((t.files ?? []).map(String))].filter((f) => ROLE_FOLDERS[role].test(f) && !claimed.has(f));
-    files.forEach((f) => claimed.add(f));
-    if (role === "data" && !files.length) files.push("helpers/types.ts");
-    tasks.push({ id, role, goal: String(t.goal).slice(0, 4000), files, dependsOn: (t.depends_on ?? []).map(String) });
+/**
+ * What submit_plan checks: the plan's shape, the contract against the tasks, and the
+ * contract file against the compiler. The file is only written once the plan runs, so it
+ * is checked as if it were already in the project.
+ */
+async function checkPlan(projectId: string, raw: unknown): Promise<{ plan: Plan | null; errors: string[] }> {
+  const { plan, errors } = validatePlan(raw);
+  if (!plan) return { plan, errors };
+  errors.push(...checkContract(plan));
+  if (!errors.length) {
+    const files = { ...(await readAllFiles(projectId)), [CONTRACT_FILE]: plan.contract };
+    const problems = (await typecheckProject(files)).filter((p) => p.file === CONTRACT_FILE);
+    errors.push(...problems.slice(0, 8).map((p) => `${CONTRACT_FILE}: ${formatProblem(p)}`));
   }
-  const ids = new Set(tasks.map((t) => t.id));
-  for (const t of tasks) t.dependsOn = t.dependsOn.filter((d) => ids.has(d) && d !== t.id);
-  // Break cycles: drop dependencies on tasks that come later in the list.
-  const order = new Map(tasks.map((t, i) => [t.id, i]));
-  for (const t of tasks) t.dependsOn = t.dependsOn.filter((d) => order.get(d)! < order.get(t.id)!);
-  if (!tasks.length) return null;
-  return { summary: String(p.summary ?? "").slice(0, 2000), contract: String(p.contract ?? "").slice(0, 12_000), tasks };
+  return { plan: errors.length ? null : plan, errors };
 }
+
+/** The contract goes into the project before any specialist starts: they import it, not copy it. */
+async function writeContract(s: TurnState, plan: Plan) {
+  if ((await readAllFiles(s.project.id))[CONTRACT_FILE] === plan.contract) return;
+  await writeFile(s.project.id, CONTRACT_FILE, plan.contract, "builder");
+  s.wrote = true;
+}
+
 
 // --- Scheduler -----------------------------------------------------------------------------------
 
@@ -230,6 +217,8 @@ interface TurnState {
   context: string;
   /** The "# Memoria" block, loaded once per turn. */
   memory: string;
+  /** The skills index: built-in skills plus the project's own (static/__dev/skills/). */
+  skills: string;
   signal: AbortSignal;
   emit: (e: AgentEvent) => void;
   wrote: boolean;
@@ -247,6 +236,7 @@ function projectSection(s: TurnState) {
     p.systemPrompt ? `# Owner's project instructions\n${p.systemPrompt}` : "",
     p.designPrompt ? `# Owner's design guidelines\n${p.designPrompt}` : "",
     s.memory,
+    s.skills,
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -281,8 +271,8 @@ export function rewardOf(r: Pick<AgentResult, "buildOk" | "testsOk" | "hitStepLi
   return Math.max(0, Math.min(1, reward));
 }
 
-async function insertTask(s: TurnState, t: { id: string; role: string; goal: string; files: string[]; dependsOn: string[] }) {
-  await q(`insert into agent_tasks (id, project_id, turn_id, role, goal, files, depends_on) values ($1, $2, $3, $4, $5, $6, $7)`, [
+async function insertTask(s: TurnState, t: { id: string; role: string; goal: string; files: string[]; dependsOn: string[]; doneWhen?: string[] }) {
+  await q(`insert into agent_tasks (id, project_id, turn_id, role, goal, files, depends_on, done_when) values ($1, $2, $3, $4, $5, $6, $7, $8)`, [
     `${s.turnId}:${t.id}`,
     s.project.id,
     s.turnId,
@@ -290,6 +280,7 @@ async function insertTask(s: TurnState, t: { id: string; role: string; goal: str
     t.goal,
     JSON.stringify(t.files),
     JSON.stringify(t.dependsOn),
+    JSON.stringify(t.doneWhen ?? []),
   ]);
 }
 
@@ -314,7 +305,7 @@ async function finishTask(s: TurnState, taskId: string, r: AgentResult | Error) 
 /** Runs one role as a lane in the chat, recording its model, steps, tokens and cost. */
 async function runLane(
   s: TurnState,
-  task: { id: string; role: Role; goal: string; files: string[]; dependsOn: string[] },
+  task: { id: string; role: Role; goal: string; files: string[]; dependsOn: string[]; doneWhen?: string[] },
   spec: {
     system: string;
     messages: LlmMessage[];
@@ -472,17 +463,24 @@ async function runTeam(s: TurnState, opts: { given?: Plan; planOnly?: boolean } 
   const canSee = (await allowedModels(s.scope)).some((m) => m.vision && m.tools);
 
   // 1. Plan.
-  let plan: Plan | null = opts.given ?? null;
+  // A plan approved before done_when and later existed has neither: read them as empty.
+  let plan: Plan | null = opts.given ? { ...opts.given, later: opts.given.later ?? [], tasks: opts.given.tasks.map((t) => ({ ...t, doneWhen: t.doneWhen ?? [] })) } : null;
   const submitPlan: BuilderTool = {
     name: "submit_plan",
-    description: "Entrega el plan final, una sola vez y al terminar de planificar. Es la única forma de que el equipo empiece a trabajar.",
+    description:
+      "Entrega el plan final, una sola vez y al terminar de planificar. Es la única forma de que el equipo empiece a trabajar. Si algo no cumple las reglas (archivos solapados, tarea sin archivos, ruta del contrato sin dueño, contrato que no compila…) se rechaza con la lista de problemas: corrígelos y vuelve a llamar.",
     input_schema: {
       type: "object",
       properties: {
         summary: { type: "string", description: "Para el dueño, en su idioma: qué se va a construir (2–4 frases)." },
         contract: {
           type: "string",
-          description: "Contrato compartido, completo: cada endpoint (método, ruta, JSON de entrada y de salida), cada tabla con sus columnas y tipos, y los nombres de los tipos compartidos.",
+          description: `Código TypeScript COMPLETO de ${CONTRACT_FILE}, que se escribe tal cual en el proyecto y que backend y ui importan. Importa zod y exporta los esquemas de las entidades (con su tipo inferido) y "export const contract = { "GET ruta": { input, output }, "POST ruta": { input, output } } as const" con una entrada por endpoint (la ruta es la del archivo endpoints/<ruta>_<MÉTODO>.ts). Si el proyecto ya tiene contrato, devuélvelo completo conservando las rutas existentes.`,
+        },
+        later: {
+          type: "array",
+          items: { type: "string" },
+          description: "Opcional, para peticiones muy grandes: trabajo que dejas para una segunda ronda (máx. 8, una frase cada uno). Este plan solo debe contener la primera fase.",
         },
         tasks: {
           type: "array",
@@ -499,16 +497,22 @@ async function runTeam(s: TurnState, opts: { given?: Plan; planOnly?: boolean } 
                 description: 'Archivos que solo esta tarea puede escribir: rutas exactas o carpetas terminadas en "/". Dos tareas nunca comparten un archivo.',
               },
               depends_on: { type: "array", items: { type: "string" }, description: "ids de las tareas que deben terminar antes (las de datos van primero)." },
+              done_when: {
+                type: "array",
+                items: { type: "string" },
+                description: 'De 1 a 8 resultados observables que el revisor comprobará uno a uno, p. ej. "POST notes/create sin sesión responde 401", "la página /notes muestra el estado vacío con un botón para crear".',
+              },
             },
-            required: ["id", "role", "goal", "files"],
+            required: ["id", "role", "goal", "files", "done_when"],
           },
         },
       },
       required: ["summary", "contract", "tasks"],
     },
     async run(input) {
-      plan = validatePlan(input);
-      if (!plan) throw new Error("Plan no válido: hace falta al menos una tarea con role data|backend|ui y goal.");
+      const checked = await checkPlan(s.project.id, input);
+      if (!checked.plan) throw new Error(`Plan rechazado (${checked.errors.length}):\n${checked.errors.map((e, i) => `${i + 1}. ${e}`).join("\n")}\nCorrige todo y vuelve a llamar a submit_plan.`);
+      plan = checked.plan;
       return `Plan aceptado: ${plan.tasks.length} tareas. Termina ahora con un mensaje corto.`;
     },
   };
@@ -534,7 +538,7 @@ async function runTeam(s: TurnState, opts: { given?: Plan; planOnly?: boolean } 
   );
   const finalPlan = plan as Plan | null;
   if (!finalPlan) return false;
-  s.emit({ type: "plan", summary: finalPlan.summary, tasks: finalPlan.tasks.map((t) => ({ id: t.id, role: t.role, goal: t.goal, files: t.files, dependsOn: t.dependsOn })) });
+  s.emit({ type: "plan", summary: finalPlan.summary, tasks: finalPlan.tasks.map((t) => ({ id: t.id, role: t.role, goal: t.goal, files: t.files, dependsOn: t.dependsOn, doneWhen: t.doneWhen })) });
   if (opts.planOnly) {
     await q(
       `insert into project_plans (project_id, turn_id, plan) values ($1, $2, $3)
@@ -547,6 +551,8 @@ async function runTeam(s: TurnState, opts: { given?: Plan; planOnly?: boolean } 
       finalPlan.tasks
         .map((t, i) => `${i + 1}. **${ROLE_ES[t.role]}** — ${t.goal.split("\n")[0]!.slice(0, 240)}${t.dependsOn.length ? ` (después de ${t.dependsOn.join(", ")})` : ""}`)
         .join("\n"),
+      finalPlan.tasks.some((t) => t.doneWhen.length) ? `**Se dará por hecho cuando**\n${finalPlan.tasks.map((t) => `- ${t.id}: ${t.doneWhen.join("; ")}`).join("\n")}` : "",
+      finalPlan.later.length ? `**Para una segunda ronda**\n${finalPlan.later.map((l) => `- ${l}`).join("\n")}` : "",
       finalPlan.contract ? `**Contrato**\n${finalPlan.contract.slice(0, 1500)}` : "",
       "Pulsa «Implementar plan» para construirlo, o dime qué cambiar.",
     ]
@@ -557,9 +563,11 @@ async function runTeam(s: TurnState, opts: { given?: Plan; planOnly?: boolean } 
     return true;
   }
   if (finalPlan.summary && !opts.given) s.emit({ type: "text", text: finalPlan.summary });
+  if (finalPlan.later.length && !opts.given) s.emit({ type: "text", text: `Para una segunda ronda dejo:\n${finalPlan.later.map((l) => `- ${l}`).join("\n")}` });
+  await writeContract(s, finalPlan);
 
   // 2. Specialists in parallel along the dependency graph.
-  const overview = finalPlan.tasks.map((t) => `- ${t.id} (${t.role}): ${t.goal.split("\n")[0]!.slice(0, 160)} · archivos: ${t.files.join(", ") || "—"}`).join("\n");
+  const overview = planOverview(finalPlan);
   const runSpecialist = async (t: PlanTask, extra = ""): Promise<AgentResult> => {
     const current = await readAllFiles(s.project.id);
     const preload = selectContext(current, `${t.goal}\n${finalPlan.contract}`, t.files, 30_000);
@@ -567,7 +575,8 @@ async function runTeam(s: TurnState, opts: { given?: Plan; planOnly?: boolean } 
     const text = [
       `# Tu tarea (${t.role}, id ${t.id})\n${t.goal}`,
       `# Tus archivos (solo puedes escribir estos)\n${t.files.join("\n") || "(ninguno)"}`,
-      finalPlan.contract && `# Contrato compartido\n${finalPlan.contract}`,
+      criteriaOf(t) && `# Se dará por hecho cuando\n${criteriaOf(t)}`,
+      finalPlan.contract && `# Contrato compartido (ya está escrito en ${CONTRACT_FILE}: impórtalo, no lo copies ni lo cambies)\n${finalPlan.contract}`,
       `# Plan del equipo\n${overview}`,
       extra,
       `# Petición original del dueño\n${s.request}`,
@@ -641,7 +650,7 @@ async function runTeam(s: TurnState, opts: { given?: Plan; planOnly?: boolean } 
         messages: [
           {
             role: "user",
-            content: `# Petición del dueño\n${s.request}\n\n# Plan\n${overview}\n\n# Contrato\n${finalPlan.contract}\n\n# Informes de los especialistas\n${reports}\n\nRevisa y llama a report_review.`,
+            content: `# Petición del dueño\n${s.request}\n\n# Plan\n${overview}\n\n# Criterios de aceptación por tarea (comprueba cada uno)\n${finalPlan.tasks.map((t) => `## ${t.id}\n${criteriaOf(t) || "(sin criterios)"}`).join("\n")}\n\n# Contrato (${CONTRACT_FILE})\n${finalPlan.contract}\n\n# Informes de los especialistas\n${reports}\n\nRevisa y llama a report_review.`,
           },
         ],
         tools: [...tools(ROLE_TOOLS.qa), reportReview],
@@ -670,6 +679,7 @@ async function runTeam(s: TurnState, opts: { given?: Plan; planOnly?: boolean } 
         goal: `Corrige lo que encontró la revisión:\n${issues.map((i) => `- ${i.problem}${i.fix ? ` → ${i.fix}` : ""}${i.files.length ? ` (${i.files.join(", ")})` : ""}`).join("\n")}`,
         files: fixFiles,
         dependsOn: [],
+        doneWhen: [],
       });
     }
     const fixed = await schedule(fixTasks, limit, s.signal, (t) => runSpecialist(t, "# Contexto\nEs una ronda de correcciones tras la revisión."));
@@ -755,6 +765,7 @@ export async function runBuilderTurn(
     images: [],
     context: "",
     memory: "",
+    skills: skillIndex(),
     signal: abort.signal,
     emit,
     wrote: false,
@@ -778,7 +789,9 @@ export async function runBuilderTurn(
     await recheckBuild(projectId).catch(() => {});
     const open = listProblems(projectId);
     if (open.length) s.context += `\n\n## Problemas abiertos en la vista previa\n${formatProblems(open, 8)}`;
-    const fileCount = Object.keys(await readAllFiles(projectId)).length;
+    const projectFiles = await readAllFiles(projectId);
+    const fileCount = Object.keys(projectFiles).length;
+    s.skills = skillIndex(projectFiles, await enabledOrgSkills(project.orgId));
     s.features = await analyzeRequest(scope, userText, { images: s.images.length, targeted: userText.includes("[Elemento seleccionado"), fileCount });
     const approved = implementPlan && mode === "build" ? await pendingPlan(projectId) : null;
     const fast = mode === "chat" || (mode === "build" && !approved && useFastPath(s.features));

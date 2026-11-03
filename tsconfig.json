@@ -16,5 +16,6 @@
       "@forja/client": ["./sdk/client/index.ts"]
     }
   },
-  "include": ["server", "sdk", "studio/src", "test"]
+  "include": ["server", "sdk", "studio/src", "test"],
+  "exclude": ["server/builder/skills"]
 }

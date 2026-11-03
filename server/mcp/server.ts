@@ -35,7 +35,7 @@ Un proyecto SOLO admite estas rutas:
 - jobs/<nombre>.ts · static/<archivo> (static/__dev/ = notas, nunca se publican) · base.css
 - package.json solo con add_dependency / remove_dependency
 Una tool devuelve su resultado o "PENDING jobId=…": en ese caso consulta get_job_status(jobId, wait_seconds) hasta tener el resultado.
-Flujo: get_guides("forja-overview") antes del primer cambio y get_guides("design") antes de hacer UI. Luego project_map (o list_files) y lee antes de editar. Datos primero (execute_sql), luego endpoints y páginas. Verifica con check_build, call_endpoint, get_problems y browser_test antes de decir que algo funciona.
+Flujo: get_guides("forja-overview") antes del primer cambio y get_guides("design") y get_guides("ui-kit") antes de hacer UI. Luego project_map (o list_files) y lee antes de editar. Datos primero (execute_sql), luego endpoints y páginas. Verifica con check_build, call_endpoint, get_problems y browser_test antes de decir que algo funciona.
 Concurrencia: list_files, project_map y read_files devuelven la versión del proyecto; pásala como expected_version en write_file, edit_file, delete_file, rename_file y las dependencias para no pisar cambios del dueño en el studio. Cada escritura devuelve la versión nueva.
 Depuración: get_problems y get_logs antes de suponer la causa.
 Comparte con el usuario el enlace de vista previa (create_project o get_preview_url) desde el primer cambio para que vea la construcción en vivo.
@@ -117,6 +117,8 @@ export const TOOL_HINTS: Record<string, Hints> = {
   get_problems: READ,
   list_secrets: READ,
   security_scan: READ,
+  check_standards: READ,
+  load_skill: READ,
   get_preview_url: READ,
   write_file: WRITE,
   edit_file: WRITE,
