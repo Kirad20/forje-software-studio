@@ -16,20 +16,12 @@ const FRONTEND = section("Frontend SDK");
 const BACKEND = section("Backend");
 const DATA = section("Data model rules");
 const SECURITY = section("Security rules");
-const JOBS = section("Jobs");
-const SIGNIN = section("Sign-in");
 const DESIGN = section("Design");
 const CONTRACT = section("Shared contract");
 const KIT = section("Interface kit");
 const CHECKLIST = section("Before you finish");
 const RULES = section("Rules");
 const MEMORY = section("Memory");
-
-/** The sign-in section with only the bullet for one side ("Server" or "Pages"). */
-const signIn = (side: "Server" | "Pages") =>
-  SIGNIN.split("\n")
-    .filter((l) => !l.startsWith("- ") || l.startsWith(`- ${side}:`))
-    .join("\n");
 
 const TEAM = `# Working in a team
 You are one of several agents building this request in parallel. A planner split the work; you own only the files listed in your task, and writes outside them are refused. Other agents are writing the other parts at the same time — follow the shared contract (routes, request/response shapes, table columns) exactly so the pieces fit.
@@ -111,13 +103,13 @@ This request starts a new app. The owner will iterate on it, so:
 - It must build and run with no errors before you finish.`;
 
 export const ROLE_PROMPTS: Record<"planner" | "data" | "backend" | "ui" | "qa" | "fast" | "chat" | "security", string> = {
-  security: [INTRO, SECURITY_REVIEW, STRUCTURE, BACKEND, DATA, SECURITY, signIn("Server"), RULES].join("\n\n"),
+  security: [INTRO, SECURITY_REVIEW, STRUCTURE, BACKEND, DATA, SECURITY, RULES].join("\n\n"),
   fast: BUILDER_SYSTEM_PROMPT,
   chat: [INTRO, CHAT, MEMORY, STRUCTURE, FRONTEND, CONTRACT, KIT, BACKEND, DATA, SECURITY, RULES].join("\n\n"),
   planner: [INTRO, PLANNER, MEMORY, STRUCTURE, CONTRACT, KIT, DATA, SECURITY, RULES].join("\n\n"),
   data: [INTRO, TEAM, DATA_ROLE, STRUCTURE, CONTRACT, DATA, SECURITY, RULES].join("\n\n"),
-  backend: [INTRO, TEAM, BACKEND_ROLE, STRUCTURE, CONTRACT, BACKEND, DATA, SECURITY, JOBS, signIn("Server"), RULES].join("\n\n"),
-  ui: [INTRO, TEAM, UI_ROLE, STRUCTURE, FRONTEND, CONTRACT, KIT, signIn("Pages"), DESIGN, RULES].join("\n\n"),
+  backend: [INTRO, TEAM, BACKEND_ROLE, STRUCTURE, CONTRACT, BACKEND, DATA, SECURITY, RULES].join("\n\n"),
+  ui: [INTRO, TEAM, UI_ROLE, STRUCTURE, FRONTEND, CONTRACT, KIT, DESIGN, RULES].join("\n\n"),
   qa: [INTRO, QA, STRUCTURE, CONTRACT, KIT, BACKEND, SECURITY, CHECKLIST, RULES].join("\n\n"),
 };
 

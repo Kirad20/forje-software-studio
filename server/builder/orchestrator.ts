@@ -9,6 +9,7 @@ import { addMemory, memorySection, memorySettings, MEMORY_KINDS } from "../platf
 import { createCheckpoint, getProject, readAllFiles, writeFile, type Project } from "../platform/projects.js";
 import { formatProblem } from "../runtime/bundler.js";
 import { typecheckProject } from "../runtime/typecheck.js";
+import { enabledOrgSkills } from "../platform/orgSkills.js";
 import { skillIndex } from "./skills.js";
 import { checkContract, criteriaOf, CONTRACT_FILE, planOverview, ROLE_FOLDERS, validatePlan, type Plan, type PlanTask, type SpecialistRole } from "./plan.js";
 import { imageBlocks, runAgent, save, UPLOADS, type AgentEvent, type AgentResult } from "./agent.js";
@@ -790,7 +791,7 @@ export async function runBuilderTurn(
     if (open.length) s.context += `\n\n## Problemas abiertos en la vista previa\n${formatProblems(open, 8)}`;
     const projectFiles = await readAllFiles(projectId);
     const fileCount = Object.keys(projectFiles).length;
-    s.skills = skillIndex(projectFiles);
+    s.skills = skillIndex(projectFiles, await enabledOrgSkills(project.orgId));
     s.features = await analyzeRequest(scope, userText, { images: s.images.length, targeted: userText.includes("[Elemento seleccionado"), fileCount });
     const approved = implementPlan && mode === "build" ? await pendingPlan(projectId) : null;
     const fast = mode === "chat" || (mode === "build" && !approved && useFastPath(s.features));

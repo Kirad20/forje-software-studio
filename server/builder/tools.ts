@@ -20,6 +20,7 @@ import { publishProject } from "../runtime/publish.js";
 import { previewOrigin, previewUrl } from "../runtime/urls.js";
 import { findSymbol, projectMap, relatedFiles } from "./index.js";
 import { rewriteImports } from "./rename.js";
+import { enabledOrgSkills } from "../platform/orgSkills.js";
 import { allSkills, findSkill } from "./skills.js";
 import { standardsScan } from "./standards.js";
 
@@ -508,8 +509,9 @@ export const builderTools: BuilderTool[] = [
     input_schema: obj({ name: str("Nombre de la skill, tal como aparece en el índice") }, ["name"]),
     async run(i: { name: string }, ctx) {
       const files = await projects.readAllFiles(ctx.projectId);
-      const skill = findSkill(files, i.name);
-      if (!skill) throw new Error(`No hay ninguna skill llamada "${i.name}". Las que hay: ${allSkills(files).map((s) => s.name).join(", ")}.`);
+      const org = await enabledOrgSkills((await projects.getProject(ctx.projectId))?.orgId);
+      const skill = findSkill(files, i.name, org);
+      if (!skill) throw new Error(`No hay ninguna skill llamada "${i.name}". Las que hay: ${allSkills(files, org).map((s) => s.name).join(", ")}.`);
       return `# Skill: ${skill.name}
 ${skill.description}
 

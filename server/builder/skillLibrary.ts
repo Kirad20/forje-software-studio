@@ -289,6 +289,52 @@ Style the table in a CSS Module with tokens; wrap it in an overflow-x: auto cont
   export const formatMoney = (cents: number, currency = "MXN", locale = "es") => new Intl.NumberFormat(locale, { style: "currency", currency }).format(cents / 100);`,
   },
   {
+    name: "jobs",
+    description: "Background and scheduled work (jobs/<name>.ts): cron schedule, time zone, limits, safe re-runs",
+    body: `A job is a file jobs/<name>.ts (letters, digits, - and _). It runs in the background: from ctx.jobs.run(name, payload) now, from ctx.jobs.runAt(name, payload, dateOrDelayMs) between 1 minute and 7 days ahead, or on a cron schedule.
+- export const schedule is optional, only runs in the published app, at most every 5 minutes, at most 10 scheduled jobs per project. export const timezone is optional (default UTC): set the business's zone, for example "America/Mexico_City".
+- ctx.payload carries the arguments; the job has the same services as an endpoint (db, email, storage, ai, jobs, realtime, env, log).
+- A run may last 15 minutes and is NOT retried: record progress in the database and make every run safe to repeat (mark rows as done, skip the ones already done), because the same job can be started twice.
+- Try it with the run_job tool and read the result with get_logs; a schedule only fires once published.
+
+  import type { JobCtx } from "@forja/server";
+
+  export const schedule = "0 8 * * 1-5";
+  export const timezone = "America/Mexico_City";
+
+  export default async function (ctx: JobCtx) {
+    const due = await ctx.db.query<{ id: number; email: string }>("select id, email from reminders where sent_at is null and due_at <= now() order by id limit 100");
+    for (const r of due) {
+      await ctx.email.send({ to: r.email, subject: "Recordatorio", html: "<p>Te esperamos hoy.</p>" });
+      await ctx.db.exec("update reminders set sent_at = now() where id = " + Number(r.id));
+    }
+    ctx.log("recordatorios enviados", due.length);
+  }`,
+  },
+  {
+    name: "auth",
+    description: "Accounts: setup_auth, login, sign-up and forgot-password pages, guarding pages and endpoints",
+    body: `When the app needs accounts:
+- Server: call setup_auth once (it creates the owner's admin account, with no password) and protect every private endpoint with ctx.requireUser() (ctx.requireUser("admin") for admin-only), checking that the row belongs to that user.
+- Pages: build pages/login.tsx with sign-in, sign-up and the full forgot-password flow (request a code with auth.requestPasswordReset(email), then auth.resetPassword({ email, code, password }) with the 8-digit code). Use auth.signIn, auth.signUp and auth.signOut from @forja/client, @forja/ui inputs with inline errors, and toast for failures.
+- Guard private pages with useUser(): undefined means loading (show a Spinner), null means signed out (navigate to /login), an object is the user { id, email, name, role }.
+- Tell the owner to set their own admin password with "forgot password".
+- Hiding a button is not security: every check that matters is server-side.
+
+  import { useEffect, type ReactNode } from "react";
+  import { navigate, useUser } from "@forja/client";
+  import { Spinner } from "@forja/ui";
+
+  export function RequireUser({ children }: { children: ReactNode }) {
+    const user = useUser();
+    useEffect(() => {
+      if (user === null) navigate("/login");
+    }, [user]);
+    if (user === undefined) return <Spinner />;
+    return user ? <>{children}</> : null;
+  }`,
+  },
+  {
     name: "realtime",
     description: "Live updates between users and tabs: channels, publish after writes, refreshing screens",
     body: `- Server: after a write, ctx.realtime.publish(channel, data) in the same endpoint. Name channels by what changes and who may see it: "orders:" + user.id for private data, "orders" only for data every signed-in user may see. Never publish another user's private data on a shared channel.

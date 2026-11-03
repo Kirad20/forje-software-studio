@@ -21,6 +21,7 @@ import { addMemory, deleteMemory, listMemories, setMemoryEnabled, updateMemory }
 import * as github from "../platform/github.js";
 import * as projects from "../platform/projects.js";
 import { adminApi } from "../admin/api.js";
+import * as orgSkills from "../platform/orgSkills.js";
 import { evalsApi } from "../evals/api.js";
 import { EVAL_EMAIL } from "../evals/runner.js";
 import { removeProjectData } from "../runtime/projectData.js";
@@ -375,6 +376,12 @@ studioApi.use("/orgs/:id/*", async (c, next) => {
   await next();
 });
 studioApi.get("/orgs/:id/members", async (c) => c.json({ members: await orgs.listOrgMembers(c.req.param("id")!), role: c.get("orgRole") }));
+studioApi.get("/orgs/:id/skills", async (c) => c.json({ skills: await orgSkills.listOrgSkills(c.req.param("id")!), role: c.get("orgRole") }));
+studioApi.put("/orgs/:id/skills/:name", async (c) => {
+  const input = await c.req.json<{ description?: string; body?: string; enabled?: boolean }>().catch(() => ({}));
+  return c.json({ skills: await orgSkills.saveOrgSkill(c.req.param("id")!, c.get("orgRole"), c.get("account").id, { ...input, name: c.req.param("name") }) });
+});
+studioApi.delete("/orgs/:id/skills/:name", async (c) => c.json({ skills: await orgSkills.deleteOrgSkill(c.req.param("id")!, c.get("orgRole"), c.req.param("name")!) }));
 studioApi.post("/orgs/:id/members", async (c) => {
   const { email, role } = await c.req.json<{ email: string; role?: orgs.OrgRole }>();
   await orgs.addOrgMember(c.req.param("id")!, c.get("orgRole"), email ?? "", role ?? "member");

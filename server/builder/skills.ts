@@ -1,9 +1,10 @@
 import { BUILTIN_SKILLS, type Skill } from "./skillLibrary.js";
 
 /**
- * Skills the agents can load on demand. Two sources: the ones that ship with Forja and the
- * project's own, written by the owner or by an agent as static/__dev/skills/<name>.md (the
- * folder is never published). A project skill with the same name replaces the built-in one.
+ * Skills the agents can load on demand. Three sources: the ones that ship with Forja, the
+ * organization's (platform/orgSkills.ts, edited in the Studio) and the project's own, written
+ * by the owner or by an agent as static/__dev/skills/<name>.md (never published). The more
+ * specific source wins when two skills share a name: project, then organization, then built-in.
  *
  * The prompt carries only the index (name and one line each); load_skill returns the body.
  * A project skill is the owner's own text, so it is read as guidance like the owner's
@@ -36,22 +37,24 @@ export function projectSkills(files: Record<string, string>): Skill[] {
     .filter((s): s is Skill => !!s);
 }
 
-/** Built-in skills first, each replaced by the project's skill of the same name; the rest follow. */
-export function allSkills(files: Record<string, string>): Skill[] {
-  const mine = new Map(projectSkills(files).map((s) => [s.name, s]));
-  const builtin = BUILTIN_SKILLS.map((s) => mine.get(s.name) ?? s);
-  const names = new Set(BUILTIN_SKILLS.map((s) => s.name));
-  return [...builtin, ...[...mine.values()].filter((s) => !names.has(s.name))];
+/**
+ * Built-in skills first, then the organization's, then the project's: a later source replaces
+ * an earlier skill of the same name (keeping its place) and brings its own new ones after.
+ */
+export function allSkills(files: Record<string, string>, org: Skill[] = []): Skill[] {
+  const byName = new Map<string, Skill>();
+  for (const s of [...BUILTIN_SKILLS, ...org, ...projectSkills(files)]) byName.set(s.name, s);
+  return [...byName.values()];
 }
 
-export const findSkill = (files: Record<string, string>, name: string) => allSkills(files).find((s) => s.name === name.trim().toLowerCase());
+export const findSkill = (files: Record<string, string>, name: string, org: Skill[] = []) => allSkills(files, org).find((s) => s.name === name.trim().toLowerCase());
 
 /** The section every prompt carries: what exists, and when to load it. */
-export function skillIndex(files: Record<string, string> = {}): string {
+export function skillIndex(files: Record<string, string> = {}, org: Skill[] = []): string {
   return [
     "# Skills (load on demand)",
     "Focused how-tos for specific jobs. Before work that matches one, call load_skill with its name and follow it; do not guess the API of a library from memory.",
-    ...allSkills(files).map((s) => `- ${s.name}: ${s.description}`),
-    `The owner or you can add project skills as ${SKILLS_DIR}<name>.md (optional front matter: name, description).`,
+    ...allSkills(files, org).map((s) => `- ${s.name}: ${s.description}`),
+    `The owner or you can add project skills as ${SKILLS_DIR}<name>.md (optional front matter: name, description). The organization may add its own in the Studio.`,
   ].join("\n");
 }

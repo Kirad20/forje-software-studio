@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { BUILDER_SYSTEM_PROMPT } from "../../server/builder/prompt.js";
 import { ROLE_PROMPTS, ROLE_TOOLS } from "../../server/builder/roles.js";
 import { BUILTIN_SKILLS } from "../../server/builder/skillLibrary.js";
 import { SKILLS_DIR, allSkills, findSkill, parseSkill, projectSkills, skillIndex } from "../../server/builder/skills.js";
@@ -43,6 +44,14 @@ describe("skills", () => {
     expect(index).toContain("- facturas: Cómo emitimos facturas");
     expect(index).toContain("- forms: Nuestros formularios");
     expect(index).toContain("load_skill");
+  });
+
+  it("moved Jobs and Sign-in out of the manual into skills", () => {
+    expect(BUILDER_SYSTEM_PROMPT).not.toMatch(/^# Jobs/m);
+    expect(BUILDER_SYSTEM_PROMPT).not.toMatch(/^# Sign-in/m);
+    expect(findSkill({}, "jobs")!.body).toContain("export const schedule");
+    expect(findSkill({}, "auth")!.body).toContain("setup_auth");
+    expect(ROLE_PROMPTS.backend).not.toContain("export const schedule");
   });
 
   it("is in every role's tools and tells the planner to name skills in each goal", () => {
