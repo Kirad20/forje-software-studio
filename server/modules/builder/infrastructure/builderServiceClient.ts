@@ -31,6 +31,14 @@ export class BuilderServiceClient {
     });
   }
 
+  stream(projectId: string): Promise<Response> {
+    return fetch(`${this.baseUrl}/internal/builder/stream`, {
+      method: "POST",
+      headers: this.headers(),
+      body: JSON.stringify({ projectId }),
+    });
+  }
+
   tool(
     name: string,
     input: Record<string, unknown>,

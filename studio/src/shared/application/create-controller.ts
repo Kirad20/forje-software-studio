@@ -5,5 +5,7 @@ export function createController(client: HttpPort) {
     request: <T = unknown, Body = unknown>(path: string, options?: HttpOptions<Body>) => client.request<T, Body>(path, options),
     stream: <T, Body = unknown>(path: string, body: Body, onEvent: (event: T) => void, signal?: AbortSignal) =>
       client.stream(path, body, onEvent, signal),
+    streamGet: <T>(path: string, onEvent: (event: T) => void, signal?: AbortSignal) =>
+      client.streamGet(path, onEvent, signal),
   };
 }

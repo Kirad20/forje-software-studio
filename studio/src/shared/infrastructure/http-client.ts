@@ -58,7 +58,17 @@ export class HttpClient implements HttpPort {
       throw toApiError(response.status, await readJson(response));
     }
 
-    const reader = response.body.getReader();
+    await this.readStream(response.body.getReader(), onEvent, signal);
+  }
+
+  async streamGet<T>(path: string, onEvent: (event: T) => void, signal?: AbortSignal): Promise<void> {
+    throwIfAborted(signal);
+    const response = await this.response(path, signal);
+    if (!response.body) throw toApiError(response.status, await readJson(response));
+    await this.readStream(response.body.getReader(), onEvent, signal);
+  }
+
+  private async readStream<T>(reader: ReadableStreamDefaultReader<Uint8Array>, onEvent: (event: T) => void, signal?: AbortSignal): Promise<void> {
     const decoder = new TextDecoder();
     let buffer = "";
     let completed = false;

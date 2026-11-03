@@ -51,6 +51,21 @@ it("returns the worker's SSE response without consuming it", async () => {
   expect(response.headers.get("content-type")).toBe("text/event-stream");
 });
 
+it("opens a reconnectable stream for an active worker turn", async () => {
+  const sse = new Response('data: {"type":"text","text":"resumed"}\n\n', {
+    headers: { "content-type": "text/event-stream" },
+  });
+  const fetch = vi.fn(async () => sse);
+  vi.stubGlobal("fetch", fetch);
+  const client = new BuilderServiceClient("http://builder:4300", "builder-token");
+
+  await expect(client.stream("p1")).resolves.toBe(sse);
+  expect(fetch).toHaveBeenCalledWith("http://builder:4300/internal/builder/stream", expect.objectContaining({
+    method: "POST",
+    body: JSON.stringify({ projectId: "p1" }),
+  }));
+});
+
 it("delegates deep security review requests to the worker", async () => {
   const fetch = vi.fn(async () => Response.json({ started: true }));
   vi.stubGlobal("fetch", fetch);
