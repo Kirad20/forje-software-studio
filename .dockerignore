@@ -6,4 +6,12 @@ data-preview
 .env.*
 !.env.example
 test/.tmp
+test/.tmp-*
+graphify-out
+.graphify_python
+.graphify_root
+.git
+Python
+prompts.txt
+soclo-cal.py
 *.log
