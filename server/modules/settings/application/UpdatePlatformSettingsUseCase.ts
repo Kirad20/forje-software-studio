@@ -7,6 +7,7 @@ export class UpdatePlatformSettingsUseCase {
   ) {}
 
   async execute(patch: Record<string, unknown>): Promise<void> {
+    const parsed: [string, unknown][] = [];
     for (const [key, val] of Object.entries(patch)) {
       const def = this.registry.getDefinition(key);
       if (!def) {
@@ -16,7 +17,8 @@ export class UpdatePlatformSettingsUseCase {
         continue;
       }
       const validated = def.validate(val);
-      await this.store.set(key, validated);
+      parsed.push([key, validated]);
     }
+    await this.store.setMany(Object.fromEntries(parsed));
   }
 }

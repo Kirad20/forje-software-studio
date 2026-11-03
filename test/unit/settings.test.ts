@@ -107,4 +107,37 @@ describe("platform settings", () => {
     expect([...seen]).toEqual(["closed"]);
     await store.resetSetting("signup", null);
   });
+
+  it("public module use cases read current values and validate lists without coercion", async () => {
+    const module = await import("../../server/modules/settings/index.js");
+    await module.updatePlatformSettingsUseCase.execute({ signup: "closed", "models.allow": ["custom:*"] });
+    expect(await module.settingsStore.get("signup")).toBe("closed");
+    expect(await module.getPlatformSettingsUseCase.execute()).toMatchObject({ signup: "closed", "models.allow": ["custom:*"] });
+    await expect(module.updatePlatformSettingsUseCase.execute({ signup: "open", "models.allow": "not-a-list" })).rejects.toThrow();
+    expect(config.signup).toBe("closed");
+    await store.resetSetting("signup", null);
+    await store.resetSetting("models.allow", null);
+  });
+
+  it("rolls back the entire patch and audit if persistence fails after a previous write", async () => {
+    const before = await q("select key, value, value_enc from settings order by key");
+    const auditBefore = await q("select id from settings_audit order by id");
+    const signupBefore = config.signup;
+    const notified: string[][] = [];
+    store.onSettingsChanged((keys) => notified.push(keys));
+    await q(`alter table settings add constraint test_rejected_email
+      check (key <> 'emailFrom' or value <> '"__forja_test_rejected__"'::jsonb)`);
+    try {
+      await expect(store.updateSettings({
+        signup: signupBefore === "closed" ? "open" : "closed",
+        emailFrom: "__forja_test_rejected__",
+      }, null)).rejects.toThrow();
+      expect(await q("select key, value, value_enc from settings order by key")).toEqual(before);
+      expect(await q("select id from settings_audit order by id")).toEqual(auditBefore);
+      expect(config.signup).toBe(signupBefore);
+      expect(notified).toEqual([]);
+    } finally {
+      await q("alter table settings drop constraint test_rejected_email");
+    }
+  });
 });

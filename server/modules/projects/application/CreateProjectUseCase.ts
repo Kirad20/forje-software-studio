@@ -1,10 +1,13 @@
 import { Project, type Visibility } from "../domain/Project.js";
-import type { IProjectRepository, IProjectFileRepository } from "../ports/repositories.js";
+import { Checkpoint } from "../domain/Checkpoint.js";
+import { CreateCheckpointUseCase } from "./CreateCheckpointUseCase.js";
+import type { ProjectSnapshot } from "../domain/ProjectSnapshot.js";
+import type { ProjectsStore, ProjectServices } from "../ports/projects.js";
 
 export interface CreateProjectInput {
-  id: string;
+  id?: string;
   ownerId: string;
-  orgId: string;
+  orgId?: string;
   name: string;
   description?: string;
   visibility?: Visibility;
@@ -13,36 +16,27 @@ export interface CreateProjectInput {
 
 export class CreateProjectUseCase {
   constructor(
-    private readonly projectRepo: IProjectRepository,
-    private readonly fileRepo: IProjectFileRepository,
+    private readonly store: Pick<ProjectsStore, "create" | "getProject" | "logChange">,
+    private readonly services: Pick<ProjectServices, "projectId" | "templates" | "warmup">,
   ) {}
 
-  async execute(input: CreateProjectInput): Promise<Project> {
+  async execute(input: CreateProjectInput): Promise<ProjectSnapshot> {
     const project = new Project({
-      id: input.id,
+      id: input.id ?? this.services.projectId(),
       ownerId: input.ownerId,
-      orgId: input.orgId,
+      orgId: input.orgId ?? null,
       name: input.name,
       description: input.description ?? "",
       visibility: input.visibility ?? "public",
       files: input.files,
     });
 
-    await this.projectRepo.save(project);
-
-    if (input.files) {
-      for (const [path, content] of Object.entries(input.files)) {
-        await this.fileRepo.writeFile(input.id, path, content);
-      }
-    }
-
-    await this.fileRepo.logChange(input.id, {
-      kind: "checkpoint",
-      paths: [],
-      author: "system",
-      label: "Proyecto creado",
-    });
-
-    return project;
+    await this.store.create(project, input.files ?? this.services.templates(input.name), input.orgId);
+    await new CreateCheckpointUseCase(this.store).execute(project.id, new Checkpoint({
+      projectId: project.id, label: "Proyecto creado", author: "system",
+    }));
+    // Warmup is best effort and must not delay the first project response.
+    void Promise.resolve().then(() => this.services.warmup(project.id)).catch(() => {});
+    return (await this.store.getProject(project.id))!;
   }
 }

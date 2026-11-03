@@ -46,6 +46,10 @@ export class PostgresSessionRepository implements ISessionRepository {
     await q(`delete from account_sessions where token_hash = $1`, [sha256(token)]);
   }
 
+  async deleteAllSessions(accountId: string): Promise<void> {
+    await q(`delete from account_sessions where account_id = $1`, [accountId]);
+  }
+
   async deleteOtherSessions(accountId: string, currentToken: string): Promise<number> {
     const r = await q(`delete from account_sessions where account_id = $1 and token_hash <> $2 returning 1`, [
       accountId,

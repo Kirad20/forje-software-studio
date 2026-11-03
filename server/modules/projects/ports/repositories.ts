@@ -1,6 +1,7 @@
 import type { Project, Visibility } from "../domain/Project.js";
 
-export type Author = "owner" | "builder" | "mcp" | "github" | "system";
+import type { Author } from "../domain/Author.js";
+export type { Author } from "../domain/Author.js";
 
 export interface LogChangeInput {
   kind: "create" | "edit" | "delete" | "rename" | "checkpoint" | "restore" | "publish";

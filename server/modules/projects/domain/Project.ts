@@ -3,7 +3,7 @@ export type Visibility = "public" | "private";
 export interface ProjectProps {
   id: string;
   ownerId: string;
-  orgId: string;
+  orgId: string | null;
   name: string;
   description: string;
   visibility?: Visibility;
@@ -17,7 +17,7 @@ export interface ProjectProps {
 export class Project {
   readonly id: string;
   readonly ownerId: string;
-  readonly orgId: string;
+  readonly orgId: string | null;
   name: string;
   description: string;
   visibility: Visibility;

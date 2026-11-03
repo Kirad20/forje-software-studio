@@ -1,4 +1,4 @@
-import type { Author } from "../ports/repositories.js";
+import type { Author } from "./Author.js";
 
 export interface CheckpointProps {
   id?: number;

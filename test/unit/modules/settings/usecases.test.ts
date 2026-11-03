@@ -39,6 +39,9 @@ describe("Settings Use Cases (TDD)", () => {
       set: vi.fn(async (k: string, v: unknown) => {
         inMemory[k] = v;
       }),
+      setMany: vi.fn(async (patch: Record<string, unknown>) => {
+        Object.assign(inMemory, patch);
+      }),
       reset: vi.fn(async (k: string) => {
         delete inMemory[k];
       }),
@@ -57,11 +60,18 @@ describe("Settings Use Cases (TDD)", () => {
   });
 
   describe("UpdatePlatformSettingsUseCase", () => {
+    it("does not partially write a patch rejected by a later key", async () => {
+      const useCase = new UpdatePlatformSettingsUseCase(registry, store);
+      await expect(useCase.execute({ signup: "closed", unknown_key: "value" })).rejects.toThrow("Ajuste desconocido");
+      expect(store.set).not.toHaveBeenCalled();
+      expect(store.setMany).not.toHaveBeenCalled();
+    });
+
     it("validates and updates valid non-masked settings", async () => {
       const useCase = new UpdatePlatformSettingsUseCase(registry, store);
       await useCase.execute({ signup: "closed" });
 
-      expect(store.set).toHaveBeenCalledWith("signup", "closed");
+      expect(store.setMany).toHaveBeenCalledWith({ signup: "closed" });
     });
 
     it("ignores masked secret values so keys are not accidentally overwritten", async () => {

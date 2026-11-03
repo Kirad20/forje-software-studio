@@ -56,6 +56,10 @@ export class PostgresAccountRepository implements IAccountRepository {
     await q(`delete from accounts where id = $1`, [id]);
   }
 
+  async rehashPassword(id: string, hash: string): Promise<void> {
+    await q(`update accounts set password_hash = $2 where id = $1`, [id, hash]);
+  }
+
   private toDomain(row: AccountRow): Account {
     return new Account({
       id: row.id,

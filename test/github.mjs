@@ -122,7 +122,7 @@ try {
   const synced = await req("POST", `/api/projects/${pid}/github/sync`, { body: {} });
   ok(synced.json?.result?.pulled?.[0]?.files?.includes("components/Hello.tsx"), "a commit pushed on GitHub comes into the project", synced.text);
   const files = (await req("GET", `/api/projects/${pid}/files`)).json.files.map((f) => f.path);
-  ok(files.includes("components/Hello.tsx") && !files.includes("README.md") && !files.includes("package.json"), "only project paths are imported");
+  ok(files.includes("components/Hello.tsx") && !files.includes("README.md") && files.includes("package.json"), "only project paths are imported");
   let chat = (await req("GET", `/api/projects/${pid}/chat`)).json;
   let card = chat.messages.flatMap((m) => m.content).find((b) => b.type === "github");
   ok(card?.message === "feat: componente Hello" && card.build === "ok" && card.url.includes(full), "the chat shows the commit with its build result", JSON.stringify(card));

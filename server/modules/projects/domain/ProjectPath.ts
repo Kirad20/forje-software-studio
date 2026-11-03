@@ -24,7 +24,11 @@ export class ProjectPath {
   }
 
   isDevFile(): boolean {
-    return this.value.startsWith("static/__dev/");
+    return ProjectPath.isDevPath(this.value);
+  }
+
+  static isDevPath(path: string): boolean {
+    return path.startsWith("static/__dev/");
   }
 
   toString(): string {

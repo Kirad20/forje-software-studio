@@ -8,6 +8,7 @@ export interface SettingDefinitionProps {
   options?: string[];
   min?: number;
   max?: number;
+  validate?: (value: unknown) => unknown;
 }
 
 export class SettingDefinition {
@@ -18,6 +19,7 @@ export class SettingDefinition {
   readonly options?: string[];
   readonly min?: number;
   readonly max?: number;
+  private readonly validator?: (value: unknown) => unknown;
 
   constructor(props: SettingDefinitionProps) {
     this.key = props.key;
@@ -27,6 +29,7 @@ export class SettingDefinition {
     this.options = props.options;
     this.min = props.min;
     this.max = props.max;
+    this.validator = props.validate;
   }
 
   isSecret(): boolean {
@@ -34,6 +37,7 @@ export class SettingDefinition {
   }
 
   validate(value: unknown): unknown {
+    if (this.validator) return this.validator(value);
     if (this.type === "number") {
       const num = typeof value === "number" ? value : Number(value);
       if (Number.isNaN(num)) throw new Error("Debe ser un número");

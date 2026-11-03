@@ -59,14 +59,29 @@ Pruebas: necesitan un Postgres en `TEST_DATABASE_URL` (por defecto `postgres://f
 
 ## Cómo está hecho
 
+La plataforma es un **monolito modular**: un proceso Node y una base Postgres de plataforma, sin introducir microservicios ni cambiar las APIs del studio, MCP o las apps. Los contextos de negocio están en `server/modules/`:
+
+| Contexto DDD | Responsabilidad |
+|---|---|
+| `identity` | Cuentas, acceso, sesiones, contraseñas y tokens |
+| `collaboration` | Organizaciones, miembros, invitaciones y permisos |
+| `projects` | Proyectos, archivos virtuales, carpetas, checkpoints e historial |
+| `settings` | Validación de ajustes, secretos, auditoría y configuración en vivo |
+| `builder` | Ejecución de agentes y políticas del constructor |
+
+Cada contexto separa `domain/` (entidades, objetos de valor y reglas), `application/` (casos de uso), `ports/` (contratos) e `infrastructure/` (Postgres e integraciones). Las dependencias del núcleo apuntan hacia dentro y se inyectan; los consumidores acceden por las entradas públicas del módulo. `server/platform/` y `server/settings/` conservan las entradas anteriores como fachadas de compatibilidad. LLM, runtime, BaaS e integraciones siguen como servicios técnicos del mismo proceso; no son servicios desplegados aparte.
+
+La migración se valida con ciclos TDD y pruebas de regresión. `npm run test:architecture` comprueba las dependencias hacia dentro, los accesos por entradas públicas, la ausencia de SQL en las fachadas migradas y que los módulos no vuelvan a llamar a sus propias fachadas; `npm test` incluye estas restricciones junto con las pruebas de comportamiento. Los tests de casos de uso con puertos simulados no requieren Postgres; los de adaptadores e integración sí. En equipos con pocos recursos o Postgres compartido: `npm test -- --maxWorkers=2 --hookTimeout=30000`.
+
 ```
 studio (React)  ──/api──▶  servidor de plataforma (Hono, Node 22+)
-                              ├─ builder/   equipo de agentes (orquestador, roles, índice del proyecto) + herramientas
+                              ├─ modules/   identity, collaboration, projects, settings y builder (hexágonos DDD)
+                              ├─ builder/   adaptadores del constructor, roles, índice del proyecto y herramientas
                               ├─ llm/       catálogo de modelos, enrutador con aprendizaje, Anthropic / OpenRouter / compatibles OpenAI
                               ├─ mcp/       las mismas herramientas como servidor MCP remoto (/mcp, token Bearer)
                               ├─ runtime/   bundler esbuild desde archivos en BD, servidor de apps, publicación
                               ├─ baas/      Postgres por proyecto, auth, archivos, correo, IA, tareas, tiempo real, pagos, secretos
-                              └─ platform/  cuentas, proyectos, archivos, checkpoints, eventos y registros
+                              └─ platform/  fachadas de compatibilidad, eventos, registros e integraciones
 apps generadas ──▶  pv-<id>.localhost   (vista previa, enlace con token)
                     <slug>.localhost    (publicada)
 ```

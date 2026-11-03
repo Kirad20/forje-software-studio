@@ -1,7 +1,25 @@
 import { one, q } from "../../../platform/db.js";
 import type { IMemberRepository } from "../ports/repositories.js";
+import type { IMemberQueries, MemberView, InviteView } from "../ports/queries.js";
 
-export class PostgresMemberRepository implements IMemberRepository {
+export class PostgresMemberRepository implements IMemberRepository, IMemberQueries {
+  async listMembers(projectId: string): Promise<{ members: MemberView[]; invites: InviteView[] }> {
+    const members = await q<MemberView>(
+      `select m.account_id as "accountId", a.email, a.name, m.role, m.created_at as "createdAt"
+       from project_members m join accounts a on a.id = m.account_id where m.project_id = $1 order by m.created_at`,
+      [projectId],
+    );
+    const invites = await q<InviteView>(
+      `select email, role, created_at as "createdAt" from project_invites where project_id = $1 order by created_at`,
+      [projectId],
+    );
+    return { members, invites };
+  }
+
+  async hasProjectInvite(email: string): Promise<boolean> {
+    return !!(await one(`select 1 from project_invites where email = $1`, [email.toLowerCase()]));
+  }
+
   async checkAccess(accountId: string, projectId: string, orgId: string | null): Promise<boolean> {
     const m = await one(
       `select 1 from project_members where project_id = $1 and account_id = $2

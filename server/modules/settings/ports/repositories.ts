@@ -8,6 +8,7 @@ export interface ISettingsRegistry {
 export interface ISettingsStore {
   get(key: string): Promise<unknown>;
   set(key: string, value: unknown): Promise<void>;
+  setMany(patch: Record<string, unknown>): Promise<void>;
   reset(key: string): Promise<void>;
   getAll(): Promise<Record<string, unknown>>;
 }
