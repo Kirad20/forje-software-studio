@@ -3288,9 +3288,9 @@
     "semantic_hash": ""
   },
   "test/studio.mjs": {
-    "mtime": 1793695529.405575,
-    "seen": 1793695562.6772718,
-    "ast_hash": "d1e0c85db163e1e123034c74c6d2a529",
+    "mtime": 1793696748.5032732,
+    "seen": 1793696753.1337306,
+    "ast_hash": "80949c5b7ef10902fd0bed4640bf3218",
     "semantic_hash": ""
   },
   "test/unit/modules/settings/coreComposition.test.ts": {

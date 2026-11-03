@@ -290,30 +290,61 @@ async function main() {
     }
   });
 
-  await step("móvil: el dashboard se adapta a 390px con la barra lateral en fila", async () => {
-    await page.setViewportSize({ width: 390, height: 844 });
-    await page.goto("/");
-    await page.getByRole("button", { name: "Crear proyecto" }).waitFor();
-    const layout = await page.evaluate(() => {
-      const box = (sel) => {
-        const el = document.querySelector(sel);
-        const r = el.getBoundingClientRect();
-        return { display: getComputedStyle(el).display, left: Math.round(r.left), right: Math.round(r.right) };
-      };
-      return {
-        sidebar: getComputedStyle(document.querySelector("aside.sidebar")).flexDirection,
-        nav: box("aside.sidebar nav"),
-        account: box(".account-mini"),
-        viewport: window.innerWidth,
-        scrollWidth: document.documentElement.scrollWidth,
-        theme: document.documentElement.dataset.theme,
-      };
+  // Font metrics differ per platform (CI's Linux Chromium renders wider than Windows), so the
+  // mobile shell is measured with the default font and with a deliberately wide one.
+  const WIDE_FONT = '*, *::before, *::after { font-family: "DejaVu Sans", Verdana, "Bitstream Vera Sans", sans-serif !important; }';
+  for (const [width, wide] of [[390, false], [390, true], [320, false], [320, true]]) {
+    await step(`móvil: el dashboard se adapta a ${width}px${wide ? " con fuente ancha" : ""} sin desbordar y con la cuenta accesible`, async () => {
+      await page.setViewportSize({ width, height: 844 });
+      await page.goto("/");
+      await page.getByRole("button", { name: "Crear proyecto" }).waitFor();
+      if (wide) await page.addStyleTag({ content: WIDE_FONT });
+      const layout = await page.evaluate(() => {
+        const box = (sel) => {
+          const el = document.querySelector(sel);
+          const r = el.getBoundingClientRect();
+          return { display: getComputedStyle(el).display, left: Math.round(r.left), right: Math.round(r.right) };
+        };
+        return {
+          sidebar: getComputedStyle(document.querySelector("aside.sidebar")).flexDirection,
+          nav: box("aside.sidebar nav"),
+          account: box(".account-mini"),
+          accountButton: box(".account-mini button"),
+          viewport: window.innerWidth,
+          scrollWidth: document.documentElement.scrollWidth,
+          theme: document.documentElement.dataset.theme,
+        };
+      });
+      console.log(`       móvil ${width}${wide ? " ancha" : ""}: ${JSON.stringify(layout)}`);
+      assert(layout.sidebar === "row", `la barra lateral no está en fila: ${layout.sidebar}`);
+      assert(layout.scrollWidth <= layout.viewport + 1, `hay desbordamiento horizontal en móvil: ${JSON.stringify(layout)}`);
+      assert(layout.accountButton.display !== "none" && layout.accountButton.left >= 0 && layout.accountButton.right <= layout.viewport, `el menú de cuenta no cabe en pantalla: ${JSON.stringify(layout.accountButton)}`);
+      assert(layout.theme === "dark", "el tema no persistió en móvil");
+      // Account, theme and logout stay reachable from the account menu.
+      await page.locator(".account-mini button").first().click();
+      const oscuro = page.locator('button[title="Oscuro"]');
+      await oscuro.waitFor();
+      const menu = await oscuro.boundingBox();
+      assert(menu && menu.x >= 0 && menu.x + menu.width <= width, `el selector de tema queda fuera de pantalla: ${JSON.stringify(menu)}`);
+      await oscuro.click();
+      const logout = page.getByRole("button", { name: "Cerrar sesión" });
+      await logout.waitFor();
+      const open = await page.evaluate(() => {
+        const r = document.querySelector(".account-mini .popover").getBoundingClientRect();
+        return { left: Math.round(r.left), right: Math.round(r.right), top: Math.round(r.top), scrollWidth: document.documentElement.scrollWidth, theme: document.documentElement.dataset.theme };
+      });
+      assert(open.left >= 0 && open.right <= width && open.top >= 0, `el menú de cuenta abierto queda fuera de pantalla: ${JSON.stringify(open)}`);
+      assert(open.scrollWidth <= width + 1, `el menú de cuenta abierto desborda en horizontal: ${JSON.stringify(open)}`);
+      assert(open.theme === "dark", "elegir Oscuro desde el menú móvil no aplicó el tema");
+      const out = await logout.boundingBox();
+      assert(out && out.x >= 0 && out.x + out.width <= width, `«Cerrar sesión» queda fuera de pantalla: ${JSON.stringify(out)}`);
+      // Closing the menu by toggling its button must leave the page without overflow too.
+      await page.locator(".account-mini button").first().click();
+      await logout.waitFor({ state: "detached" });
+      const closed = await page.evaluate(() => document.documentElement.scrollWidth);
+      assert(closed <= width + 1, `desbordamiento tras cerrar el menú: ${closed}`);
     });
-    console.log(`       móvil: ${JSON.stringify(layout)}`);
-    assert(layout.sidebar === "row", `la barra lateral no está en fila: ${layout.sidebar}`);
-    assert(layout.scrollWidth <= layout.viewport + 1, `hay desbordamiento horizontal en móvil: ${JSON.stringify(layout)}`);
-    assert(layout.theme === "dark", "el tema no persistió en móvil");
-  });
+  }
 
   await step("sin errores de JavaScript en la página", async () => {
     assert(pageErrors.length === 0, `errores: ${pageErrors.join(" | ")}`);
