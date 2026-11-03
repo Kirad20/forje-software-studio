@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { api, streamPost } from "../application/controller.js";
+import { api, streamGet, streamPost } from "../application/controller.js";
 import type { ChatStreamEvent } from "../application/contracts.js";
 import { browser } from "../../../shared/infrastructure/browser.js";
 import { AgentLanes, type Lane, type TeamTurn } from "./AgentLanes.js";
@@ -233,6 +233,48 @@ function toItems(messages: Message[], tasks: TaskRow[] = []): Item[] {
     items.splice(i + 1, 0, { kind: "changes", title: turnTitle(firstText.get(t) ?? ""), turn: t });
   }
   return items;
+}
+
+function liveTurn(onChange: (items: Item[]) => void, setError: (message: string) => void, initial: Item[] = []) {
+  const items = initial;
+  let team: TeamTurn | null = null;
+  const lane = (id: string, role = "fast"): Lane => {
+    if (!team) {
+      team = { lanes: [] };
+      items.push({ kind: "team", team });
+    }
+    let l = team.lanes.find((x) => x.id === id);
+    if (!l) team.lanes.push((l = { id, role, goal: "", status: "pending", steps: [] }));
+    return l;
+  };
+  const update = () =>
+    onChange(items.map((it) => (it.kind === "team" ? { kind: "team", team: { ...it.team, lanes: it.team.lanes.map((l) => ({ ...l, steps: [...l.steps] })) } } : it)));
+  const onEvent = (e: ChatStreamEvent) => {
+    if (e.type === "route") {
+      if (!e.fastPath) lane("plan", "planner").goal = "Planificar el trabajo del equipo";
+    } else if (e.type === "plan") {
+      for (const t of e.tasks) Object.assign(lane(t.id, t.role), { goal: t.goal, dependsOn: t.dependsOn, doneWhen: t.doneWhen ?? [] });
+    } else if (e.type === "task_start") Object.assign(lane(e.taskId, e.role), { status: "running", model: e.model });
+    else if (e.type === "task_end") Object.assign(lane(e.taskId), { status: e.ok ? "done" : "failed", usd: e.usd, tokens: e.tokens, note: e.taskId === "fast" || e.taskId === "chat" ? undefined : e.summary });
+    else if (e.type === "review" && team) team.review = { ok: e.ok, summary: e.summary, issues: e.issues };
+    else if (e.type === "done" && team) team.metrics = { usd: e.usd, baselineUsd: e.baselineUsd, cachedTokens: e.cachedTokens };
+    else if (e.type === "text" && e.taskId && e.taskId !== "fast" && e.taskId !== "chat") lane(e.taskId).note = e.text;
+    else if (e.type === "text") items.push({ kind: "ai", text: e.text });
+    else if (e.type === "tool_start" && e.taskId) lane(e.taskId).steps.push({ id: e.id, name: e.name, summary: e.summary, state: "running" });
+    else if (e.type === "tool_end" && e.taskId) {
+      const step = lane(e.taskId).steps.find((x) => x.id === e.id);
+      if (step) Object.assign(step, { state: e.ok ? "ok" : "err", output: e.output });
+    } else if (e.type === "tool_start") {
+      const last = items[items.length - 1];
+      const step: Step = { id: e.id, name: e.name, summary: e.summary, state: "running" };
+      if (last?.kind === "steps") last.steps.push(step);
+      else items.push({ kind: "steps", steps: [step] });
+    } else if (e.type === "tool_end") {
+      for (const it of items) if (it.kind === "steps") for (const step of it.steps) if (step.id === e.id) Object.assign(step, { state: e.ok ? "ok" : "err", output: e.output });
+    } else if (e.type === "error") setError(e.message);
+    update();
+  };
+  return { items, onEvent };
 }
 
 /** What the details view lists for a turn: the request, the steps and the replies, in order. */
@@ -626,6 +668,7 @@ export function Chat({
       setItems(toItems(r.messages, r.tasks));
       setPlanTurn(r.pendingPlanTurn ?? null);
       setLoadCount((n) => n + 1);
+      setBusy(r.building);
       return r;
     });
 
@@ -663,7 +706,28 @@ export function Chat({
   }, [outbox?.nonce]);
 
   useEffect(() => {
+    let disposed = false;
+    const controller = new AbortController();
     void load().then((r) => {
+      if (disposed) return;
+      if (r.building) {
+        const turn = liveTurn(setLive, setError);
+        void streamGet(`/projects/${projectId}/chat/stream`, turn.onEvent, controller.signal)
+          .catch((e) => {
+            if (!controller.signal.aborted) setError((e as Error).message);
+          })
+          .finally(async () => {
+            if (disposed) return;
+            await load();
+            setLive([]);
+            onTurnEnd();
+            const next = queueRef.current[0];
+            if (next) {
+              setQueue((q) => q.slice(1));
+              void send(next.text, { mode: next.mode });
+            }
+          });
+      }
       // First message from the dashboard prompt box.
       const first = browser.sessionStorage.getItem(`forja:first:${projectId}`);
       if (first && !started.current && r.messages.length === 0) {
@@ -672,6 +736,10 @@ export function Chat({
         void send(first);
       }
     });
+    return () => {
+      disposed = true;
+      controller.abort();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
@@ -732,45 +800,10 @@ export function Chat({
     const files = attachments;
     onClearSelection();
     setAttachments([]);
-    const turn: Item[] = [{ ...userItem(message), attachments: files } as Item];
-    setLive([...turn]);
-    const update = () => setLive(turn.map((it) => (it.kind === "team" ? { kind: "team", team: { ...it.team, lanes: it.team.lanes.map((l) => ({ ...l, steps: [...l.steps] })) } } : it)));
-    let team: TeamTurn | null = null;
-    const lane = (id: string, role = "fast"): Lane => {
-      if (!team) {
-        team = { lanes: [] };
-        turn.push({ kind: "team", team });
-      }
-      let l = team.lanes.find((x) => x.id === id);
-      if (!l) team.lanes.push((l = { id, role, goal: "", status: "pending", steps: [] }));
-      return l;
-    };
+    const turn = liveTurn(setLive, setError, [{ ...userItem(message), attachments: files } as Item]);
+    setLive(turn.items);
     try {
-      await streamPost<ChatStreamEvent>(`/projects/${projectId}/chat`, { message, attachments: files, mode: turnMode, implementPlan: !!opts.implementPlan }, (e) => {
-        if (e.type === "route") {
-          if (!e.fastPath) lane("plan", "planner").goal = "Planificar el trabajo del equipo";
-        } else if (e.type === "plan") {
-          for (const t of e.tasks) Object.assign(lane(t.id, t.role), { goal: t.goal, dependsOn: t.dependsOn, doneWhen: t.doneWhen ?? [] });
-        } else if (e.type === "task_start") Object.assign(lane(e.taskId, e.role), { status: "running", model: e.model });
-        else if (e.type === "task_end") Object.assign(lane(e.taskId), { status: e.ok ? "done" : "failed", usd: e.usd, tokens: e.tokens, note: e.taskId === "fast" || e.taskId === "chat" ? undefined : e.summary });
-        else if (e.type === "review" && team) team.review = { ok: e.ok, summary: e.summary, issues: e.issues };
-        else if (e.type === "done" && team) team.metrics = { usd: e.usd, baselineUsd: e.baselineUsd, cachedTokens: e.cachedTokens };
-        else if (e.type === "text" && e.taskId && e.taskId !== "fast" && e.taskId !== "chat") lane(e.taskId).note = e.text;
-        else if (e.type === "text") turn.push({ kind: "ai", text: e.text });
-        else if (e.type === "tool_start" && e.taskId) lane(e.taskId).steps.push({ id: e.id, name: e.name, summary: e.summary, state: "running" });
-        else if (e.type === "tool_end" && e.taskId) {
-          const s = lane(e.taskId).steps.find((x) => x.id === e.id);
-          if (s) Object.assign(s, { state: e.ok ? "ok" : "err", output: e.output });
-        } else if (e.type === "tool_start") {
-          const last = turn[turn.length - 1];
-          const step: Step = { id: e.id, name: e.name, summary: e.summary, state: "running" };
-          if (last?.kind === "steps") last.steps.push(step);
-          else turn.push({ kind: "steps", steps: [step] });
-        } else if (e.type === "tool_end") {
-          for (const it of turn) if (it.kind === "steps") for (const s of it.steps) if (s.id === e.id) Object.assign(s, { state: e.ok ? "ok" : "err", output: e.output });
-        } else if (e.type === "error") setError(e.message);
-        update();
-      });
+      await streamPost<ChatStreamEvent>(`/projects/${projectId}/chat`, { message, attachments: files, mode: turnMode, implementPlan: !!opts.implementPlan }, turn.onEvent);
     } catch (e) {
       setError((e as Error).message);
     } finally {

@@ -68,6 +68,43 @@ it("streams builder events and forwards the complete turn request", async () => 
   });
 });
 
+it("replays live builder events after a client disconnects without stopping the turn", async () => {
+  const builder = ports();
+  let finish!: () => void;
+  builder.runTurn.mockImplementation(async (_input, emit) => {
+    emit({ type: "text", text: "already sent" });
+    await new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    emit({ type: "text", text: "still building" });
+  });
+  const app = createBuilderService(builder, "builder-secret");
+  const headers = { authorization: "Bearer builder-secret", "content-type": "application/json" };
+  const original = await app.request("/internal/builder/turn", {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ account, projectId: "p1", userText: "Build", mode: "build" }),
+  });
+
+  await original.body?.cancel();
+  const resumed = await app.request("/internal/builder/stream", {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ projectId: "p1" }),
+  });
+  const events = resumed.text();
+  expect(builder.stopBuilding).not.toHaveBeenCalled();
+  expect(await (await app.request("/internal/builder/status", {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ projectId: "p1" }),
+  })).json()).toEqual({ building: true });
+
+  finish();
+  await expect(events).resolves.toContain('data: {"type":"text","text":"already sent"}');
+  await expect(events).resolves.toContain('data: {"type":"text","text":"still building"}');
+});
+
 it("reports existing work and forwards stop requests", async () => {
   const builder = ports();
   builder.isBuilding.mockReturnValue(true);

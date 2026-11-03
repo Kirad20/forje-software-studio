@@ -109,6 +109,9 @@ const sse = (start: (send: (data: unknown) => void, close: () => void) => () => 
   return new Response(stream, { headers: { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" } });
 };
 
+type ChatStreamSubscriber = { send: (data: unknown) => void; close: () => void };
+const activeChatStreams = new Map<string, { events: AgentEvent[]; subscribers: Set<ChatStreamSubscriber> }>();
+
 const ipOf = (c: Context) =>
   clientIp((c.env as { incoming?: { socket?: { remoteAddress?: string } } })?.incoming?.socket?.remoteAddress, c.req.header("x-forwarded-for"));
 
@@ -772,6 +775,24 @@ projectRoutes.get("/projects/:id/chat", async (c) => {
   const plan = await pendingPlan(pid(c));
   return c.json({ messages: await loadHistory(pid(c)), tasks, building: await building(pid(c)), pendingPlanTurn: plan?.turnId ?? null });
 });
+projectRoutes.get("/projects/:id/chat/stream", async (c) => {
+  if (builderClient) {
+    const response = await builderClient.stream(pid(c));
+    return new Response(response.body, { status: response.status, statusText: response.statusText, headers: response.headers });
+  }
+  const active = activeChatStreams.get(pid(c));
+  return sse((send, close) => {
+    if (!active) {
+      send({ type: "idle" });
+      close();
+      return () => {};
+    }
+    for (const event of active.events) send(event);
+    const subscriber = { send, close };
+    active.subscribers.add(subscriber);
+    return () => active.subscribers.delete(subscriber);
+  });
+});
 projectRoutes.post("/projects/:id/chat", async (c) => {
   const { message, attachments, mode, implementPlan } = await c.req.json<{ message: string; attachments?: string[]; mode?: string; implementPlan?: boolean }>();
   const chatMode: ChatMode = mode === "chat" || mode === "plan" ? mode : "build";
@@ -785,9 +806,20 @@ projectRoutes.post("/projects/:id/chat", async (c) => {
     const response = await builderClient.turn({ account, projectId: id, userText: message, attachments: files, mode: chatMode, implementPlan: !!implementPlan });
     return new Response(response.body, { status: response.status, statusText: response.statusText, headers: response.headers });
   }
+  if (activeChatStreams.has(id)) return c.json({ error: "El constructor ya está trabajando" }, 409);
+  const active = { events: [] as AgentEvent[], subscribers: new Set<ChatStreamSubscriber>() };
+  activeChatStreams.set(id, active);
   return sse((send, close) => {
-    void runBuilderTurn(account, id, message, (e: AgentEvent) => send(e), files, chatMode, !!implementPlan).finally(close);
-    return () => {};
+    const subscriber = { send, close };
+    active.subscribers.add(subscriber);
+    void runBuilderTurn(account, id, message, (event: AgentEvent) => {
+      active.events.push(event);
+      for (const listener of active.subscribers) listener.send(event);
+    }, files, chatMode, !!implementPlan).finally(() => {
+      if (activeChatStreams.get(id) === active) activeChatStreams.delete(id);
+      for (const listener of [...active.subscribers]) listener.close();
+    });
+    return () => active.subscribers.delete(subscriber);
   });
 });
 
