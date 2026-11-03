@@ -191,6 +191,29 @@ async function main() {
     await page.locator('[title="Ajustes del proyecto"]').first().waitFor();
   });
 
+  await step("constructor: las herramientas integradas son localizables y navegables", async () => {
+    await page.getByRole("button", { name: "Servicios", exact: true }).click();
+    const nav = page.getByRole("navigation", { name: "Herramientas del proyecto" });
+    await nav.waitFor();
+    for (const name of ["Datos", "Usuarios", "IA", "Integraciones", "Analítica", "SEO", "Docs", "Tareas", "Archivos", "Correo", "Pagos", "Registros", "Seguridad", "Código"]) {
+      await nav.getByRole("button", { name, exact: true }).waitFor();
+    }
+    const search = nav.getByRole("searchbox", { name: "Buscar herramientas" });
+    await search.fill("suscripciones");
+    await nav.getByRole("button", { name: "Pagos", exact: true }).waitFor();
+    assert((await nav.getByRole("button").allTextContents()).some((text) => text.includes("Pagos")), "la búsqueda por sinónimo no encontró Pagos");
+    assert(!(await nav.getByRole("button", { name: "Datos", exact: true }).count()), "la búsqueda no filtró las herramientas ajenas");
+    await nav.getByRole("button", { name: "Pagos", exact: true }).click();
+    assert((await nav.getByRole("button", { name: "Pagos", exact: true }).getAttribute("aria-current")) === "page", "la herramienta seleccionada no está marcada");
+    await search.fill("autenticación");
+    await nav.getByRole("button", { name: "Usuarios", exact: true }).waitFor();
+    assert(!(await nav.getByRole("button", { name: "Pagos", exact: true }).count()), "la búsqueda no normalizó términos acentuados");
+    await search.fill("sin coincidencias");
+    await nav.getByText("No hay herramientas que coincidan.").waitFor();
+    await search.clear();
+    await page.getByRole("button", { name: "Volver a la vista previa" }).click();
+  });
+
   await step("chat: el turno se transmite por SSE y termina con la respuesta del constructor", async () => {
     assert(firstTurn, "el dashboard no envió el primer turno");
     const first = await firstTurn;
@@ -306,7 +329,7 @@ async function main() {
           return { display: getComputedStyle(el).display, left: Math.round(r.left), right: Math.round(r.right) };
         };
         return {
-          sidebar: getComputedStyle(document.querySelector("aside.sidebar")).flexDirection,
+          sidebarDisplay: getComputedStyle(document.querySelector("aside.sidebar")).display,
           nav: box("aside.sidebar nav"),
           account: box(".account-mini"),
           accountButton: box(".account-mini button"),
@@ -316,7 +339,7 @@ async function main() {
         };
       });
       console.log(`       móvil ${width}${wide ? " ancha" : ""}: ${JSON.stringify(layout)}`);
-      assert(layout.sidebar === "row", `la barra lateral no está en fila: ${layout.sidebar}`);
+      assert(layout.sidebarDisplay === "grid", `la barra lateral móvil no usa la disposición compacta: ${layout.sidebarDisplay}`);
       assert(layout.scrollWidth <= layout.viewport + 1, `hay desbordamiento horizontal en móvil: ${JSON.stringify(layout)}`);
       assert(layout.accountButton.display !== "none" && layout.accountButton.left >= 0 && layout.accountButton.right <= layout.viewport, `el menú de cuenta no cabe en pantalla: ${JSON.stringify(layout.accountButton)}`);
       assert(layout.theme === "dark", "el tema no persistió en móvil");
@@ -345,6 +368,61 @@ async function main() {
       assert(closed <= width + 1, `desbordamiento tras cerrar el menú: ${closed}`);
     });
   }
+
+  await step("móvil: alternar entre chat y vista previa mantiene el constructor utilizable", async () => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto(projectUrl);
+    const panes = page.getByRole("navigation", { name: "Espacio de trabajo" });
+    await panes.waitFor();
+    await panes.getByRole("button", { name: /Chat/ }).click();
+    await page.getByLabel("Mensaje para el constructor").waitFor();
+    let state = await page.locator(".ws-body").evaluate((el) => ({
+      chat: el.classList.contains("mobile-chat"),
+      previewHidden: getComputedStyle(el.querySelector(":scope > section")).display === "none",
+      scrollWidth: document.documentElement.scrollWidth,
+      overflow: [...document.querySelectorAll("body *")].filter((node) => {
+        const style = getComputedStyle(node);
+        const rect = node.getBoundingClientRect();
+        return style.display !== "none" && style.visibility !== "hidden" && rect.right > window.innerWidth + 1;
+      }).slice(0, 8).map((node) => `${node.tagName.toLowerCase()}.${String(node.className).replaceAll(" ", ".")}:${Math.round(node.getBoundingClientRect().right)}`),
+    }));
+    assert(state.chat && state.previewHidden, `el chat no ocupa el espacio móvil: ${JSON.stringify(state)}`);
+    assert(state.scrollWidth <= 391, `el chat desborda horizontalmente: ${JSON.stringify(state)}`);
+    await panes.getByRole("button", { name: /Vista previa/ }).click();
+    await page.locator('iframe[title="Vista previa"]').waitFor();
+    state = await page.locator(".ws-body").evaluate((el) => ({
+      preview: el.classList.contains("mobile-preview"),
+      chatHidden: getComputedStyle(el.querySelector(".drawer")).display === "none",
+      scrollWidth: document.documentElement.scrollWidth,
+      overflow: [...document.querySelectorAll("body *")].filter((node) => {
+        const style = getComputedStyle(node);
+        const rect = node.getBoundingClientRect();
+        return style.display !== "none" && style.visibility !== "hidden" && rect.right > window.innerWidth + 1;
+      }).slice(0, 8).map((node) => `${node.tagName.toLowerCase()}.${String(node.className).replaceAll(" ", ".")}:${Math.round(node.getBoundingClientRect().right)}`),
+    }));
+    assert(state.preview && state.chatHidden, `la vista previa no ocupa el espacio móvil: ${JSON.stringify(state)}`);
+    assert(state.scrollWidth <= 391, `la vista previa desborda horizontalmente: ${JSON.stringify(state)}`);
+  });
+
+  await step("móvil: buscar herramientas permite abrir servicios fuera del primer grupo", async () => {
+    await page.setViewportSize({ width: 320, height: 844 });
+    await page.goto(projectUrl);
+    await page.getByRole("button", { name: "Servicios", exact: true }).click();
+    const nav = page.getByRole("navigation", { name: "Herramientas del proyecto" });
+    const search = nav.getByRole("searchbox", { name: "Buscar herramientas" });
+    await search.fill("suscripciones");
+    const payments = nav.getByRole("button", { name: "Pagos", exact: true });
+    await payments.waitFor();
+    await payments.click();
+    assert((await payments.getAttribute("aria-current")) === "page", "Pagos no se pudo abrir desde la navegación móvil");
+    await search.fill("seguridad");
+    const security = nav.getByRole("button", { name: "Seguridad", exact: true });
+    await security.waitFor();
+    await security.click();
+    assert((await security.getAttribute("aria-current")) === "page", "Seguridad no se pudo abrir desde la navegación móvil");
+    const bounds = await nav.evaluate((el) => ({ left: el.getBoundingClientRect().left, right: el.getBoundingClientRect().right, scrollWidth: document.documentElement.scrollWidth }));
+    assert(bounds.left >= 0 && bounds.right <= 320 && bounds.scrollWidth <= 321, `la navegación móvil de herramientas desborda: ${JSON.stringify(bounds)}`);
+  });
 
   await step("sin errores de JavaScript en la página", async () => {
     assert(pageErrors.length === 0, `errores: ${pageErrors.join(" | ")}`);

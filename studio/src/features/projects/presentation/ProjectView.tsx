@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ComponentType } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState, type ComponentType } from "react";
 import { api, projectsController } from "../application/controller.js";
 import type { ProjectLogLine } from "../application/contracts.js";
 import type { Project, Me } from "../../../shared/contracts/index.js";
@@ -25,21 +25,22 @@ const TEXT_EDIT_WHY: Record<string, string> = {
 type View = "preview" | "services" | "settings" | "details";
 type ServiceKey = "data" | "users" | "ai" | "integrations" | "analytics" | "seo" | "docs" | "jobs" | "storage" | "email" | "payments" | "logs" | "security" | "code";
 
-const SERVICES: { key: ServiceKey; label: string; icon: string }[] = [
-  { key: "data", label: "Datos", icon: "⛁" },
-  { key: "users", label: "Usuarios", icon: "☺" },
-  { key: "ai", label: "IA", icon: "✦" },
-  { key: "integrations", label: "Integraciones", icon: "⚷" },
-  { key: "analytics", label: "Analítica", icon: "▥" },
-  { key: "seo", label: "SEO", icon: "◎" },
-  { key: "docs", label: "Docs", icon: "▢" },
-  { key: "jobs", label: "Tareas", icon: "◷" },
-  { key: "storage", label: "Archivos", icon: "⇪" },
-  { key: "email", label: "Correo", icon: "✉" },
-  { key: "payments", label: "Pagos", icon: "¤" },
-  { key: "logs", label: "Registros", icon: "≡" },
-  { key: "security", label: "Seguridad", icon: "⛨" },
+const SERVICES: { key: ServiceKey; label: string; icon: string; search: string }[] = [
+  { key: "data", label: "Datos", icon: "⛁", search: "base de datos postgres sql tablas" },
+  { key: "users", label: "Usuarios", icon: "☺", search: "cuentas autenticacion login" },
+  { key: "ai", label: "IA", icon: "✦", search: "inteligencia artificial modelos" },
+  { key: "integrations", label: "Integraciones", icon: "⚷", search: "servicios externos api claves" },
+  { key: "analytics", label: "Analítica", icon: "▥", search: "estadisticas metricas visitas" },
+  { key: "seo", label: "SEO", icon: "◎", search: "buscadores metadatos posicionamiento" },
+  { key: "docs", label: "Docs", icon: "▢", search: "documentacion archivos" },
+  { key: "jobs", label: "Tareas", icon: "◷", search: "trabajos programados cron temporizadores" },
+  { key: "storage", label: "Archivos", icon: "⇪", search: "almacenamiento subidas uploads" },
+  { key: "email", label: "Correo", icon: "✉", search: "email mensajes envio" },
+  { key: "payments", label: "Pagos", icon: "¤", search: "cobros suscripciones stripe" },
+  { key: "logs", label: "Registros", icon: "≡", search: "logs errores actividad" },
+  { key: "security", label: "Seguridad", icon: "⛨", search: "vulnerabilidades escaneo" },
 ];
+const normalizeServiceSearch = (value: string) => value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
 /** Always listed among the used ones. */
 const ALWAYS_USED = new Set<ServiceKey>(["seo", "logs", "security"]);
 
@@ -66,12 +67,14 @@ export function ProjectView({
   const [error, setError] = useState("");
   const [view, setView] = useState<View>("preview");
   const [service, setService] = useState<ServiceKey>("data");
+  const [serviceSearch, setServiceSearch] = useState("");
   const [used, setUsed] = useState<Record<string, boolean>>({});
   const [filesKey, setFilesKey] = useState(0);
   const [logLines, setLogLines] = useState<ProjectLogLine[]>([]);
   const [building, setBuilding] = useState(false);
   const [drawer, setDrawer] = useState(() => readDrawer() || new URLSearchParams(browser.location.search).has("edit") || !!browser.sessionStorage.getItem(`forja:first:${id}`));
   const [device, setDevice] = useState<Device>("desktop");
+  const [mobilePane, setMobilePane] = useState<"preview" | "chat">("preview");
   const [fullscreen, setFullscreen] = useState(false);
   const [path, setPath] = useState("/");
   const [selecting, setSelecting] = useState(false);
@@ -102,6 +105,13 @@ export function ProjectView({
     if (on && selecting) setSelecting(false);
     preview.current?.setEditingText(on);
   };
+  const showChat = useCallback(() => {
+    setDrawer(true);
+    setMobilePane("chat");
+  }, []);
+  useEffect(() => {
+    if (view !== "preview" && mobilePane !== "preview") setMobilePane("preview");
+  }, [view, mobilePane]);
   const onEditEnded = useCallback(() => setEditingText(false), []);
   // A text rewritten in the preview: patched directly when unambiguous, otherwise handed to the builder.
   const onTextEdit = useCallback(
@@ -125,7 +135,7 @@ export function ProjectView({
           return;
         }
         const why = TEXT_EDIT_WHY[r.reason ?? ""] ?? "No pude cambiarlo directamente.";
-        setDrawer(true);
+        showChat();
         setInsert({
           text: `Cambia el texto «${e.before.trim()}» por «${e.after.trim()}» en la página ${e.path}${r.matches?.length ? ` (aparece en ${r.matches.join(", ")})` : ""}.`,
           nonce: Date.now(),
@@ -135,7 +145,7 @@ export function ProjectView({
         setNotice({ text: (err as Error).message, tone: "warn" });
       }
     },
-    [id],
+    [id, showChat],
   );
   const checkpointRef = useDismiss<HTMLDivElement>(panel === "checkpoints", closePanel);
   const publishRef = useDismiss<HTMLDivElement>(panel === "publish", closePanel);
@@ -176,13 +186,20 @@ export function ProjectView({
   }, [id]);
 
   const toggleDrawer = () => {
+    if (view !== "preview") {
+      setView("preview");
+      showChat();
+      return;
+    }
     setDrawer((d) => {
+      const next = !d;
       try {
-        browser.localStorage.setItem("forja:drawer", d ? "0" : "1");
+        browser.localStorage.setItem("forja:drawer", next ? "1" : "0");
       } catch {
         /* per-viewer convenience only */
       }
-      return !d;
+      setMobilePane(next ? "chat" : "preview");
+      return next;
     });
   };
   const toggleSelect = () => {
@@ -190,14 +207,14 @@ export function ProjectView({
     setSelecting(on);
     if (on) setEditingText(false);
     preview.current?.setSelecting(on);
-    if (on && !drawer) toggleDrawer();
+    if (on && !drawer) showChat();
   };
   const onSelected = useCallback((el: SelectedElement) => setSelection(el), []);
   const onSelectEnded = useCallback(() => setSelecting(false), []);
   const onFix = useCallback(() => {
-    setDrawer(true);
+    showChat();
     setFixNonce((n) => n + 1);
-  }, []);
+  }, [showChat]);
   const openService = (key: ServiceKey) => {
     setService(key);
     setView("services");
@@ -209,6 +226,9 @@ export function ProjectView({
   const errors = logLines.filter((l) => l.level === "error").length;
   const isUsed = (k: ServiceKey) => ALWAYS_USED.has(k) || !!used[k];
   const ordered = [...SERVICES.filter((s) => isUsed(s.key)), ...SERVICES.filter((s) => !isUsed(s.key))];
+  const query = normalizeServiceSearch(serviceSearch.trim());
+  const visibleServices = ordered.filter((s) => !query || normalizeServiceSearch(`${s.label} ${s.key} ${s.search}`).includes(query));
+  const showCode = !query || normalizeServiceSearch("codigo code archivos fuente editor").includes(query);
   const pageLabel = path === "/" ? "Inicio" : path;
   const publishLabel = !project.slug ? "Publicar" : project.hasUnpublishedChanges ? "Publicar cambios" : "Publicada";
 
@@ -310,7 +330,15 @@ export function ProjectView({
               {(close) => (
                 <>
                   <div className="menu-label">Constructor integrado</div>
-                  <MenuItem onClick={() => (close(), drawer || toggleDrawer())}>✦ Abrir el chat aquí</MenuItem>
+                  <MenuItem
+                    onClick={() => {
+                      close();
+                      setView("preview");
+                      showChat();
+                    }}
+                  >
+                    ✦ Abrir el chat aquí
+                  </MenuItem>
                   <div className="menu-sep" />
                   <div className="menu-label">¿Usas otro agente?</div>
                   <MenuItem onClick={() => (close(), void copyText(`Ayúdame a hacer cambios en mi proyecto de Forja ${project.id}: `))}>⧉ Copiar prompt para Claude o ChatGPT</MenuItem>
@@ -366,9 +394,23 @@ export function ProjectView({
             {editingText && <span className="small muted">Haz clic en un texto y escribe · Enter guarda · Esc cancela</span>}
           </div>
         )}
+        {view === "preview" && (
+          <nav className="mobile-pane-tabs" aria-label="Espacio de trabajo">
+            <button className={mobilePane === "chat" ? "on" : ""} aria-pressed={mobilePane === "chat"} onClick={showChat}>
+              ✦ Chat
+            </button>
+            <button
+              className={mobilePane === "preview" ? "on" : ""}
+              aria-pressed={mobilePane === "preview"}
+              onClick={() => setMobilePane("preview")}
+            >
+              ▭ Vista previa
+            </button>
+          </nav>
+        )}
       </div>
 
-      <div className="ws-body">
+      <div className={`ws-body ${mobilePane === "chat" ? "mobile-chat" : "mobile-preview"}`}>
         {drawer ? (
           <aside className="drawer">
             <div className="drawer-head">
@@ -451,21 +493,47 @@ export function ProjectView({
           )}
           {view === "services" && (
             <div className="services">
-              <nav className="svc-nav">
-                {ordered.map((s, i) => (
-                  <div key={s.key} style={{ display: "contents" }}>
-                    {i > 0 && isUsed(ordered[i - 1]!.key) && !isUsed(s.key) && <div className="sep" />}
-                    <button className={`${service === s.key ? "on" : ""} ${isUsed(s.key) ? "" : "unused"}`} onClick={() => setService(s.key)}>
-                      <span className="svc-icon">{s.icon}</span> {s.label}
-                      {s.key === "logs" && errors > 0 && <span className="pill err" style={{ marginLeft: "auto", padding: "0 6px" }}>{errors}</span>}
-                    </button>
-                  </div>
-                ))}
-                <div className="sep" />
-                <div className="menu-label">Avanzado</div>
-                <button className={service === "code" ? "on" : ""} onClick={() => setService("code")}>
-                  <span className="svc-icon">{"{}"}</span> Código
-                </button>
+              <nav className="svc-nav" aria-label="Herramientas del proyecto">
+                <div className="svc-nav-head">
+                  <strong>Herramientas</strong>
+                  <span className="count">{visibleServices.length + Number(showCode)}</span>
+                </div>
+                <label className="svc-search">
+                  <span className="sr-only">Buscar herramientas</span>
+                  <input
+                    type="search"
+                    placeholder="Buscar herramientas…"
+                    value={serviceSearch}
+                    onChange={(e) => setServiceSearch(e.target.value)}
+                  />
+                </label>
+                <div className="svc-nav-items">
+                  {visibleServices.map((s, i) => (
+                    <Fragment key={s.key}>
+                      {i > 0 && isUsed(visibleServices[i - 1]!.key) && !isUsed(s.key) && <div className="sep" />}
+                      <button
+                        className={`${service === s.key ? "on" : ""} ${isUsed(s.key) ? "" : "unused"}`}
+                        aria-current={service === s.key ? "page" : undefined}
+                        onClick={() => setService(s.key)}
+                      >
+                        <span className="svc-icon" aria-hidden>{s.icon}</span>
+                        <span className="svc-label">{s.label}</span>
+                        {s.key === "logs" && errors > 0 && <span className="pill err svc-count">{errors}</span>}
+                      </button>
+                    </Fragment>
+                  ))}
+                  {visibleServices.length > 0 && showCode && <div className="sep" />}
+                  {showCode && (
+                    <>
+                      <div className="menu-label">Avanzado</div>
+                      <button className={service === "code" ? "on" : ""} aria-current={service === "code" ? "page" : undefined} onClick={() => setService("code")}>
+                        <span className="svc-icon" aria-hidden>{"{}"}</span>
+                        <span className="svc-label">Código</span>
+                      </button>
+                    </>
+                  )}
+                  {visibleServices.length === 0 && !showCode && <div className="svc-no-results">No hay herramientas que coincidan.</div>}
+                </div>
               </nav>
               <div className={`svc-detail ${["data", "docs", "storage", "code"].includes(service) ? "" : "pad"}`}>
                 {service === "data" && <DataPanel projectId={id} projectName={project.name} reloadKey={filesKey} />}
@@ -486,7 +554,7 @@ export function ProjectView({
                     reloadKey={filesKey}
                     building={building}
                     onFix={(text) => {
-                      setDrawer(true);
+                      showChat();
                       setOutbox((o) => ({ nonce: (o?.nonce ?? 0) + 1, text }));
                     }}
                   />
