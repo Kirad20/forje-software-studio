@@ -1,4 +1,4 @@
-import { OrgPolicy, type OrgRole } from "./OrgPolicy.js";
+import { OrgPolicy } from "./OrgPolicy.js";
 
 export interface OrganizationProps {
   id: string;

@@ -1,11 +1,10 @@
-import { numericCode } from "../../../lib/crypto.js";
 import type { ILoginCodeRepository, IMailerService } from "../ports/repositories.js";
 
 export class RequestLoginCodeUseCase {
   constructor(
     private readonly loginCodeRepo: ILoginCodeRepository,
     private readonly mailer: IMailerService,
-    private readonly codeGenerator: () => string = () => numericCode(6),
+    private readonly codeGenerator: () => string,
   ) {}
 
   async execute(email: string): Promise<boolean> {

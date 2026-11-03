@@ -41,7 +41,7 @@ describe("Identity Use Cases (TDD)", () => {
 
   describe("RequestLoginCodeUseCase", () => {
     it("generates a numeric code, saves it and sends it via mailer", async () => {
-      const useCase = new RequestLoginCodeUseCase(loginCodeRepo, mailer);
+      const useCase = new RequestLoginCodeUseCase(loginCodeRepo, mailer, () => "123456");
       const result = await useCase.execute("dev@forja.test");
 
       expect(result).toBe(true);
@@ -106,6 +106,34 @@ describe("Identity Use Cases (TDD)", () => {
       const session = await useCase.execute("user@forja.test", "CORRECT");
       expect(session).toBeNull();
       expect(loginCodeRepo.incrementAttempts).not.toHaveBeenCalled();
+    });
+
+    it("consumes verified codes before rejecting blocked signup", async () => {
+      vi.mocked(loginCodeRepo.findCode).mockResolvedValue({ codeHash: "correct", attempts: 0, expired: false });
+      vi.mocked(accountRepo.findByEmail).mockResolvedValue(null);
+      const canSignUp = vi.fn().mockResolvedValue(false);
+      const create = vi.fn();
+      const claim = vi.fn();
+      const useCase = new VerifyLoginCodeUseCase(loginCodeRepo, accountRepo, sessionRepo, (code) => code, claim, canSignUp, create);
+      expect(await useCase.execute(" USER@forja.test ", " correct ")).toBeNull();
+      expect(loginCodeRepo.deleteCode).toHaveBeenCalledWith("user@forja.test");
+      expect(create).not.toHaveBeenCalled();
+      expect(claim).not.toHaveBeenCalled();
+      expect(sessionRepo.createSession).not.toHaveBeenCalled();
+    });
+
+    it("creates approved code-only accounts through the injected lifecycle before claiming invitations", async () => {
+      vi.mocked(loginCodeRepo.findCode).mockResolvedValue({ codeHash: "correct", attempts: 0, expired: false });
+      vi.mocked(accountRepo.findByEmail).mockResolvedValue(null);
+      const account = new Account({ id: "new", email: new Email("user@forja.test"), name: null, credits: 10, platformRole: "user", disabled: false });
+      vi.mocked(accountRepo.findById).mockResolvedValue(account);
+      const create = vi.fn().mockResolvedValue("new");
+      const claim = vi.fn();
+      const useCase = new VerifyLoginCodeUseCase(loginCodeRepo, accountRepo, sessionRepo, (code) => code, claim, async () => true, create);
+      expect(await useCase.execute("USER@forja.test", "correct")).toBe("session_token_xyz");
+      expect(create).toHaveBeenCalledWith("user@forja.test");
+      expect(claim).toHaveBeenCalledWith("new", "user@forja.test");
+      expect(claim.mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(sessionRepo.createSession).mock.invocationCallOrder[0]!);
     });
   });
 });

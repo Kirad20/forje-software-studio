@@ -21,4 +21,10 @@ describe("RemoveMemberUseCase (TDD)", () => {
     await useCase.execute("p1", "bob@example.com");
     expect(memberRepo.removeMember).toHaveBeenCalledWith("p1", "bob@example.com");
   });
+
+  it("normalizes the legacy email-or-account key in the application before persistence", async () => {
+    const useCase = new RemoveMemberUseCase(memberRepo);
+    await useCase.execute("p1", "BOB@Example.COM");
+    expect(memberRepo.removeMember).toHaveBeenCalledWith("p1", "bob@example.com");
+  });
 });

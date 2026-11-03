@@ -1,4 +1,3 @@
-import { sha256 } from "../../../lib/crypto.js";
 import type { IAccountRepository, ILoginCodeRepository, ISessionRepository } from "../ports/repositories.js";
 
 export class VerifyLoginCodeUseCase {
@@ -6,7 +5,7 @@ export class VerifyLoginCodeUseCase {
     private readonly loginCodeRepo: ILoginCodeRepository,
     private readonly accountRepo: IAccountRepository,
     private readonly sessionRepo: ISessionRepository,
-    private readonly hashFn: (code: string) => string = (c) => sha256(c),
+    private readonly hashFn: (code: string) => string,
     private readonly onAccountVerified?: (accountId: string, email: string) => Promise<void>,
     private readonly canSignUpCheck?: (email: string) => Promise<boolean>,
     private readonly createAccountFn?: (email: string) => Promise<string>,

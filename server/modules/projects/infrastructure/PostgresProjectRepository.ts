@@ -5,7 +5,7 @@ import type { IProjectRepository } from "../ports/repositories.js";
 interface ProjectRow {
   id: string;
   ownerId: string;
-  orgId: string;
+  orgId: string | null;
   name: string;
   description: string;
   visibility: Visibility;

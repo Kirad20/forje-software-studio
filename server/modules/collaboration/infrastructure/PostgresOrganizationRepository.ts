@@ -1,8 +1,33 @@
 import { one, q } from "../../../platform/db.js";
 import type { OrgRole } from "../domain/OrgPolicy.js";
 import type { IOrganizationRepository, OrganizationRecord } from "../ports/repositories.js";
+import type { IOrganizationQueries, IOrganizationNameDirectory, Org, OrgMemberView } from "../ports/queries.js";
 
-export class PostgresOrganizationRepository implements IOrganizationRepository {
+export class PostgresOrganizationRepository implements IOrganizationRepository, IOrganizationQueries, IOrganizationNameDirectory {
+  async organizationNames(ids: string[]): Promise<Record<string, string>> {
+    const rows = await q<{ id: string; name: string }>(
+      `select id, name from organizations where id = any($1::text[])`,
+      [ids],
+    );
+    return Object.fromEntries(rows.map((row) => [row.id, row.name]));
+  }
+
+  listOrgs(accountId: string): Promise<Org[]> {
+    return q<Org>(
+      `select o.id, o.name, o.slug, o.personal, m.role from org_members m join organizations o on o.id = m.org_id
+       where m.account_id = $1 order by o.personal desc, o.name`,
+      [accountId],
+    );
+  }
+
+  listOrgMembers(orgId: string): Promise<OrgMemberView[]> {
+    return q<OrgMemberView>(
+      `select m.account_id as "accountId", a.email, a.name, m.role, m.created_at as "createdAt"
+       from org_members m join accounts a on a.id = m.account_id where m.org_id = $1 order by m.created_at`,
+      [orgId],
+    );
+  }
+
   async findById(orgId: string): Promise<OrganizationRecord | null> {
     const row = await one<{ id: string; name: string; personal: boolean }>(
       `select id, name, personal from organizations where id = $1`,

@@ -1,24 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { RenameFileUseCase } from "../../../../server/modules/projects/application/RenameFileUseCase.js";
 import { CreateProjectUseCase } from "../../../../server/modules/projects/application/CreateProjectUseCase.js";
-import type { IProjectRepository, IProjectFileRepository } from "../../../../server/modules/projects/ports/repositories.js";
+import type { IProjectFileRepository } from "../../../../server/modules/projects/ports/repositories.js";
 import { Project } from "../../../../server/modules/projects/domain/Project.js";
 
 describe("Projects Management Use Cases (TDD)", () => {
-  let projectRepo: IProjectRepository;
   let fileRepo: IProjectFileRepository;
 
   beforeEach(() => {
-    projectRepo = {
-      findById: vi.fn(),
-      findBySlug: vi.fn(),
-      isSlugTaken: vi.fn().mockResolvedValue(false),
-      save: vi.fn(),
-      updateMetadata: vi.fn(),
-      updatePublished: vi.fn(),
-      delete: vi.fn(),
-    };
-
     fileRepo = {
       readFile: vi.fn(),
       readAllFiles: vi.fn().mockResolvedValue({}),
@@ -64,8 +53,12 @@ describe("Projects Management Use Cases (TDD)", () => {
   });
 
   describe("CreateProjectUseCase", () => {
-    it("creates a new project aggregate, saves it and creates initial files and checkpoint", async () => {
-      const useCase = new CreateProjectUseCase(projectRepo, fileRepo);
+    it("creates an aggregate through atomic persistence, then records a checkpoint", async () => {
+      const snapshot = new Project({ id: "proj123", ownerId: "owner1", orgId: "org1", name: "My App", description: "An app description" });
+      const store = { create: vi.fn(), getProject: vi.fn().mockResolvedValue(snapshot), logChange: fileRepo.logChange };
+      const useCase = new CreateProjectUseCase(store, {
+        projectId: vi.fn(), templates: vi.fn(), warmup: vi.fn().mockResolvedValue(undefined),
+      });
       const result = await useCase.execute({
         id: "proj123",
         ownerId: "owner1",
@@ -78,8 +71,9 @@ describe("Projects Management Use Cases (TDD)", () => {
       expect(result).toBeInstanceOf(Project);
       expect(result.id).toBe("proj123");
       expect(result.name).toBe("My App");
-      expect(projectRepo.save).toHaveBeenCalled();
-      expect(fileRepo.writeFile).toHaveBeenCalledWith("proj123", "pages/_index.tsx", "export default () => <h1>Hello</h1>;");
+      expect(store.create).toHaveBeenCalledWith(expect.any(Project), {
+        "pages/_index.tsx": "export default () => <h1>Hello</h1>;",
+      }, "org1");
       expect(fileRepo.logChange).toHaveBeenCalledWith("proj123", expect.objectContaining({
         kind: "checkpoint",
         label: "Proyecto creado",

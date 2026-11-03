@@ -2,7 +2,7 @@ import type { Checkpoint } from "../domain/Checkpoint.js";
 import type { IProjectFileRepository } from "../ports/repositories.js";
 
 export class CreateCheckpointUseCase {
-  constructor(private readonly fileRepo: IProjectFileRepository) {}
+  constructor(private readonly fileRepo: Pick<IProjectFileRepository, "logChange">) {}
 
   async execute(projectId: string, checkpoint: Checkpoint): Promise<number> {
     return this.fileRepo.logChange(projectId, {
