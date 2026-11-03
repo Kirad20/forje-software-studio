@@ -53,8 +53,9 @@ describe("Forja API types", () => {
         path.join(dir, "tsconfig.json"),
         JSON.stringify({ compilerOptions: { strict: true, noEmit: true, target: "es2022", module: "es2022", lib: ["es2022"], types: [] }, include: ["*.ts"] }),
       );
-      const tsc = path.resolve("node_modules/.bin/tsc");
-      execFileSync(tsc, ["-p", path.join(dir, "tsconfig.json")], { encoding: "utf8" });
+      // Through node, not the .bin shim: on Windows that is a .cmd that execFileSync cannot start.
+      const tsc = path.resolve("node_modules/typescript/bin/tsc");
+      execFileSync(process.execPath, [tsc, "-p", path.join(dir, "tsconfig.json")], { encoding: "utf8" });
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

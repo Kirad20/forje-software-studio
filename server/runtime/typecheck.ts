@@ -65,6 +65,7 @@ function tsconfig(depsFolder: string | null) {
         "~/*": ["./*"],
         "@/*": ["./*"],
         "@forja/client": [path.join(SDK, "client", "index.ts")],
+        "@forja/ui": [path.join(SDK, "ui", "index.tsx")],
         "@forja/server": [path.join(SDK, "server", "index.ts")],
         // One React, Forja's, with its types (the packages themselves ship none).
         react: [path.join(MODULES, "@types", "react")],

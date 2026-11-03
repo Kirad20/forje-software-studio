@@ -802,7 +802,7 @@ studioApi.get("/projects/:id/chat", async (c) => {
   // Agent lanes per turn: which role ran on which model, with steps, tokens and cost.
   const tasks = await q(
     `select t.id, t.turn_id as "turnId", t.role, t.goal, t.model_id as "modelId", coalesce(m.label, t.model_id) as "model", t.status, t.summary,
-       t.steps, t.files, t.depends_on as "dependsOn", t.input_tokens as "inputTokens", t.output_tokens as "outputTokens",
+       t.steps, t.files, t.depends_on as "dependsOn", t.done_when as "doneWhen", t.input_tokens as "inputTokens", t.output_tokens as "outputTokens",
        t.cache_read_tokens as "cacheReadTokens", t.usd, t.started_at as "startedAt", t.finished_at as "finishedAt"
      from agent_tasks t left join model_catalog m on m.id = t.model_id
      where t.project_id = $1 order by t.created_at desc limit 300`,

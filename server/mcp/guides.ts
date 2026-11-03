@@ -19,6 +19,8 @@ export const SECTION_IDS: Record<string, { id: string; summary: string }> = {
   "How to work": { id: "workflow", summary: "Orientarse, datos primero, construir, verificar, arreglar errores, notas." },
   "Project structure (the ONLY allowed paths)": { id: "structure", summary: "Las únicas rutas permitidas (pages, components, helpers, endpoints, jobs, static) e imports." },
   'Frontend SDK — import { ... } from "@forja/client"': { id: "frontend-sdk", summary: "Routing, api/useApi, auth, storage, realtime, ai y useHead en el navegador." },
+  "Shared contract — helpers/contract.ts": { id: "contract", summary: "El contrato de la API como código (zod): endpoints y páginas lo importan y los desajustes fallan al compilar." },
+  "Interface kit — use these, do not reinvent them": { id: "ui-kit", summary: "@forja/ui, iconos, animaciones y paquetes del catálogo: qué usar para cada cosa antes de escribir un componente." },
   "Backend — endpoints": { id: "backend", summary: "Forma de un endpoint y todo lo que trae ctx (db, storage, email, ai, jobs, payments, env)." },
   "Data model rules": { id: "data-model", summary: "Convenciones de tablas, dinero, fechas, user_id, índices y migraciones aditivas." },
   "Security rules (non-negotiable)": { id: "security", summary: "Autorizar en cada endpoint, validar con zod, SQL parametrizado, secretos solo en el servidor." },

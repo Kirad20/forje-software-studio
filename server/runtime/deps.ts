@@ -5,6 +5,7 @@ import path from "node:path";
 import { config, paths } from "../config.js";
 import { sha256 } from "../lib/crypto.js";
 import type { FileMap } from "../platform/projects.js";
+import { KIT_BUILTIN, KIT_CATALOG, kitSummary } from "./catalog.js";
 
 /**
  * npm packages for generated apps. A project lists them in its own package.json
@@ -14,7 +15,7 @@ import type { FileMap } from "../platform/projects.js";
  */
 
 /** Always available, from Forja's own node_modules; projects can't pin other versions. */
-export const BUILTIN_PACKAGES = ["react", "react-dom", "zod", "@forja/client", "@forja/server"];
+export const BUILTIN_PACKAGES = ["react", "react-dom", "zod", "@forja/client", "@forja/server", ...Object.keys(KIT_BUILTIN)];
 export const MANIFEST = "package.json";
 const MAX_DEPS = 40;
 const INSTALL_TIMEOUT_MS = 5 * 60_000;
@@ -137,8 +138,12 @@ export async function resolvePackage(name: string, version = "latest"): Promise<
   if (!isValidPackageName(name)) throw new Error(`Nombre de paquete no válido: ${name}`);
   if (BUILTIN_PACKAGES.includes(name)) throw new Error(`${name} ya viene incluido; impórtalo sin instalar nada.`);
   if (isNodeBuiltin(name)) throw new Error(`${name} es un módulo de Node, no un paquete de npm.`);
-  const wanted = version.replace(/^[\^~=v]/, "");
-  if (!EXACT.test(wanted) && !/^[a-z][a-z0-9._-]*$/i.test(wanted)) throw new Error(`Versión no válida: ${version}. Usa una versión exacta (1.4.2) o una etiqueta (latest).`);
+  // The catalog is closed: only its packages install, always at the listed version.
+  const pinned = KIT_CATALOG[name]?.version;
+  if (!pinned) throw new Error(`${name} no está en el catálogo de Forja, así que no se puede instalar. Usa lo que ya hay:
+${kitSummary()}
+Si nada de eso sirve, resuélvelo con unas pocas líneas propias o dile al dueño que hace falta ese paquete.`);
+  const wanted = pinned;
   const res = await fetch(`${config.npm.registry}/${name.replace("/", "%2f")}/${encodeURIComponent(wanted)}`, { signal: AbortSignal.timeout(20_000) });
   if (res.status === 404) throw new Error(`No existe ${name}@${wanted} en npm.`);
   if (!res.ok) throw new Error(`El registro de npm respondió ${res.status} para ${name}.`);
@@ -153,6 +158,7 @@ export async function resolvePackage(name: string, version = "latest"): Promise<
     peerDependencies?: Record<string, string>;
   };
   const warnings: string[] = [];
+  if (version !== "latest" && version.replace(/^[\^~=v]/, "") !== pinned) warnings.push(`Se instaló la versión ${pinned} del catálogo de Forja, no ${version}.`);
   if (m.deprecated) warnings.push(`Está obsoleto: ${m.deprecated}`);
   if (m.gypfile || m.os || m.cpu || m.scripts?.install || m.scripts?.postinstall) {
     warnings.push("Usa código nativo o scripts de instalación, que aquí no se ejecutan: es probable que no funcione.");

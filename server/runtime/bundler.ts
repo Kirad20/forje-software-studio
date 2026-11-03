@@ -8,6 +8,7 @@ import type { FileMap } from "../platform/projects.js";
 import { BUILTIN_PACKAGES, ensureDeps, isNodeBuiltin, MANIFEST, packageName, readDeps, type Deps } from "./deps.js";
 
 const SDK_CLIENT = path.join(ROOT_DIR, "sdk", "client", "index.ts");
+const SDK_UI = path.join(ROOT_DIR, "sdk", "ui", "index.tsx");
 const RESOLVE_EXT = ["", ".tsx", ".ts", ".jsx", ".js", ".css", ".json", "/index.tsx", "/index.ts"];
 
 export interface BuildProblem {
@@ -63,6 +64,8 @@ function vfsPlugin(files: FileMap, pkgs: Packages, opts: { entry?: { path: strin
     name: "forja-vfs",
     setup(build) {
       build.onResolve({ filter: /^@forja\/client$/ }, () => ({ path: SDK_CLIENT }));
+      // The interface kit is browser-only: endpoints and jobs have no use for it.
+      build.onResolve({ filter: /^@forja\/ui$/ }, () => (opts.node ? { errors: [{ text: "@forja/ui es solo para páginas y componentes: los endpoints y las tareas no pueden importarlo." }] } : { path: SDK_UI }));
       // Types only (ctx of endpoints and jobs); a value import of it bundles to nothing.
       build.onResolve({ filter: /^@forja\/server$/ }, () => ({ path: "@forja/server", namespace: "forja-types" }));
       build.onLoad({ filter: /.*/, namespace: "forja-types" }, () => ({ contents: "export {};", loader: "js" }));

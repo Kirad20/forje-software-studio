@@ -1,16 +1,30 @@
 /** Files every new project starts with. The builder replaces them on its first turn. */
 export function starterFiles(name: string): Record<string, string> {
   return {
-    "base.css": `:root {
+    "base.css": `/* Design tokens: the only place colors, radii, shadows and type sizes are defined.
+   @forja/ui and every component read them, so editing this file restyles the whole app. */
+:root {
   --bg: #fafaf9;
   --surface: #ffffff;
   --text: #1c1917;
-  --muted: #78716c;
-  --border: #e7e5e4;
-  --primary: #ea580c;
+  --muted: #6b645f;
+  --border: #e0ddda;
+  --primary: #c2410c;
   --primary-text: #ffffff;
+  --danger: #b91c1c;
+  --success: #15803d;
   --radius: 12px;
+  --shadow: 0 8px 24px rgb(0 0 0 / 0.12);
   --font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --text-sm: 0.875rem;
+  --text-md: 1rem;
+  --text-lg: 1.25rem;
+  --text-xl: 2rem;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 16px;
+  --space-4: 24px;
+  --space-5: 40px;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -19,14 +33,32 @@ export function starterFiles(name: string): Record<string, string> {
     --surface: #1c1917;
     --text: #fafaf9;
     --muted: #a8a29e;
-    --border: #292524;
+    --border: #2f2b28;
+    --primary: #fb923c;
+    --primary-text: #1c1917;
+    --danger: #f87171;
+    --success: #4ade80;
+    --shadow: 0 8px 24px rgb(0 0 0 / 0.5);
   }
 }
 
 * { box-sizing: border-box; }
-html, body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--font); }
+html, body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--font); font-size: var(--text-md); }
 a { color: inherit; }
 button { font: inherit; cursor: pointer; }
+`,
+    "pages/_layout.tsx": `import type { ReactNode } from "react";
+import { Toaster } from "@forja/ui";
+
+// Wraps every page. <Toaster /> shows the toast.success(...) / toast.error(...) messages.
+export default function Layout({ children }: { children: ReactNode }) {
+  return (
+    <>
+      {children}
+      <Toaster />
+    </>
+  );
+}
 `,
     "pages/_index.tsx": `import styles from "./_index.module.css";
 
