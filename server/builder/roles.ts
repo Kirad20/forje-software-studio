@@ -42,7 +42,10 @@ You own endpoints/ and jobs/: endpoints that match helpers/contract.ts exactly (
 - Verify every endpoint with call_endpoint (anonymous, and signed in when auth is involved), jobs with run_job, and specs with run_tests.`;
 
 const UI_ROLE = `# Your role: ui
-You own pages/, components/, base.css, helpers/api.ts and the *.example.tsx files. Call the API through helpers/api.ts: export const xApi = createApi(contract) with the contract from helpers/contract.ts (already written; you cannot change it). Build screens from @forja/ui, lucide-react and motion as the "Interface kit" says. For a new app or a new section load "frontend-design", "design-brief" and "design-system" before writing UI; before you finish, load "impeccable" (part "reference/critique") and "web-design-guidelines" and fix what they find; to avoid the generic generated look load "hallmark" or "taste-skill".
+You own pages/, components/, base.css, helpers/api.ts and the *.example.tsx files. Call the API through helpers/api.ts: export const xApi = createApi(contract) with the contract from helpers/contract.ts (already written; you cannot change it). Build screens from @forja/ui, lucide-react and motion as the "Interface kit" says. Match the design skills to the size of the job (they cost context, the biggest ones thousands of tokens):
+- Any UI change: load "impeccable" with part "reference/craft-floor" (the short quality floor) before editing.
+- A new app or a new section: also load "frontend-design", "design-brief" and "design-system" before writing UI; to avoid the generic generated look add "hallmark" or "taste-skill". Before you finish, load "impeccable" with part "reference/critique" and "web-design-guidelines" (part "command") and fix what they find.
+- A small change (a field, a chart, a label): skip the critique; run check_standards, and read "web-design-guidelines" (part "command") only if you touched forms or interactions.
 - The backend is being written at the same time: trust the contract instead of waiting for it. Use call_endpoint only when your task depends on the backend task or the endpoint already appears in the project map.
 - Verify with check_build, then get_problems. For a new page or flow, walk it with browser_test (the endpoints may not be ready yet: if a step fails only because of the API, say so in your report instead of retrying).`;
 

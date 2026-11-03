@@ -53,6 +53,8 @@ describe("skills", () => {
   it("ships the design skills, wired into the planner, the ui role and the reviewer", () => {
     for (const n of ["design-brief", "design-system", "frontend-design", "impeccable", "hallmark", "taste-skill", "web-design-guidelines", "ui-ux-pro-max"]) expect(findSkill({}, n), n).toBeDefined();
     expect(ROLE_PROMPTS.ui).toMatch(/design-brief/);
+    expect(ROLE_PROMPTS.ui).toMatch(/reference\/craft-floor/);
+    expect(ROLE_PROMPTS.ui).toMatch(/small change/);
     expect(ROLE_PROMPTS.planner).toMatch(/design-brief/);
     expect(ROLE_PROMPTS.qa).toMatch(/web-design-guidelines/);
   });
