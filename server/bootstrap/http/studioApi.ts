@@ -18,7 +18,7 @@ import {
 import { realtimeStats } from "../../modules/app-services/realtime.js";
 import { deleteSecret, listSecrets, setSecret } from "../../modules/app-services/secrets.js";
 import { deleteObject, listObjects, storageUsage } from "../../modules/app-services/storage.js";
-import { listTasks, loadHistory, type AgentEvent } from "../../modules/builder/index.js";
+import { BuilderServiceClient, listTasks, loadHistory, type AgentEvent } from "../../modules/builder/index.js";
 import { isBuilding, penalizeTurn, pendingPlan, runBuilderTurn, stopBuilding, type ChatMode } from "../../modules/builder/index.js";
 import { replaceVisibleText } from "../../modules/builder/contracts.js";
 import type { IdentityModule, PublicAccount } from "../../modules/identity/index.js";
@@ -73,7 +73,12 @@ type StudioApiModules = {
 
 export const SESSION_COOKIE = "forja_session";
 
-export function createStudioApi({ identity: accounts, projects, collaboration: orgs, settings, models }: StudioApiModules) {
+export function createStudioApi(
+  { identity: accounts, projects, collaboration: orgs, settings, models }: StudioApiModules,
+  builderClient = config.builderServiceUrl ? new BuilderServiceClient(config.builderServiceUrl, config.builderServiceToken) : undefined,
+) {
+const building = async (projectId: string) => builderClient ? (await builderClient.status(projectId)).building : isBuilding(projectId);
+const stopBuild = async (projectId: string) => builderClient ? builderClient.stop(projectId) : stopBuilding(projectId);
 const studioApi = new Hono<Env>();
 const publicRoutes = new Hono<Env>();
 
@@ -412,7 +417,7 @@ const projectView = async (p: Project) => ({
   // A private app's link carries the share token, like the preview's.
   appUrl: p.slug ? (p.visibility === "private" ? `${appUrl(p.slug)}/?share=${shareToken(p, 365)}` : appUrl(p.slug)) : null,
   suggestedSlug: p.slug ?? suggestSlug(p.name),
-  building: isBuilding(p.id),
+  building: await building(p.id),
   hasUnpublishedChanges: p.slug ? await projects.hasUnpublishedChanges(p.id) : false,
 });
 
@@ -545,7 +550,9 @@ projectRoutes.post("/projects/:id/security/scan", async (c) => {
   return c.json(await getSecurity(pid(c)));
 });
 projectRoutes.post("/projects/:id/security/deep", async (c) => {
-  const started = await startSecurityReview(c.get("account"), pid(c));
+  const started = builderClient
+    ? (await builderClient.securityReview(c.get("account"), pid(c))).started
+    : await startSecurityReview(c.get("account"), pid(c));
   return c.json({ started, ...(await getSecurity(pid(c))) }, started ? 202 : 409);
 });
 projectRoutes.post("/projects/:id/security/ignore", async (c) => {
@@ -745,7 +752,7 @@ projectRoutes.put("/projects/:id/file", async (c) => {
 projectRoutes.post("/projects/:id/text-edit", async (c) => {
   const { before, after } = await c.req.json<{ before: string; after: string }>();
   if (typeof before !== "string" || typeof after !== "string" || before.length > 2000 || after.length > 2000) return c.json({ error: "Texto no válido" }, 400);
-  if (isBuilding(pid(c))) return c.json({ ok: false, reason: "building" });
+  if (await building(pid(c))) return c.json({ ok: false, reason: "building" });
   const r = replaceVisibleText(await projects.readAllFiles(pid(c)), before, after);
   if (!r.ok) return c.json(r);
   // The point to restore for "Deshacer": the last change before this edit.
@@ -763,17 +770,21 @@ projectRoutes.get("/projects/:id/chat", async (c) => {
   const labels = new Map((await models.catalog.availableModels()).map((m) => [m.id, m.label]));
   for (const t of tasks) if (t.modelId && labels.has(t.modelId)) t.model = labels.get(t.modelId)!;
   const plan = await pendingPlan(pid(c));
-  return c.json({ messages: await loadHistory(pid(c)), tasks, building: isBuilding(pid(c)), pendingPlanTurn: plan?.turnId ?? null });
+  return c.json({ messages: await loadHistory(pid(c)), tasks, building: await building(pid(c)), pendingPlanTurn: plan?.turnId ?? null });
 });
 projectRoutes.post("/projects/:id/chat", async (c) => {
   const { message, attachments, mode, implementPlan } = await c.req.json<{ message: string; attachments?: string[]; mode?: string; implementPlan?: boolean }>();
   const chatMode: ChatMode = mode === "chat" || mode === "plan" ? mode : "build";
   if (!message?.trim()) return c.json({ error: "Mensaje vacío" }, 400);
   if (message.length > 20_000) return c.json({ error: "Mensaje demasiado largo" }, 400);
-  if (isBuilding(pid(c))) return c.json({ error: "El constructor ya está trabajando" }, 409);
+  if (await building(pid(c))) return c.json({ error: "El constructor ya está trabajando" }, 409);
   const account = c.get("account");
   const id = pid(c);
   const files = (Array.isArray(attachments) ? attachments : []).filter((p) => typeof p === "string");
+  if (builderClient) {
+    const response = await builderClient.turn({ account, projectId: id, userText: message, attachments: files, mode: chatMode, implementPlan: !!implementPlan });
+    return new Response(response.body, { status: response.status, statusText: response.statusText, headers: response.headers });
+  }
   return sse((send, close) => {
     void runBuilderTurn(account, id, message, (e: AgentEvent) => send(e), files, chatMode, !!implementPlan).finally(close);
     return () => {};
@@ -821,14 +832,14 @@ projectRoutes.post("/projects/:id/icon", async (c) => {
   await projects.writeFile(pid(c), `static/icon.${ext}`, content, "owner", c.get("account").email);
   return c.json({ path: `static/icon.${ext}` });
 });
-projectRoutes.post("/projects/:id/chat/stop", (c) => {
-  stopBuilding(pid(c));
+projectRoutes.post("/projects/:id/chat/stop", async (c) => {
+  await stopBuild(pid(c));
   return c.json({ ok: true });
 });
 
 // Data
 projectRoutes.get("/projects/:id/db/schema", async (c) =>
-  c.json({ tables: await describeSchema(pid(c), c.req.query("internal") === "1"), awake: isAwake(pid(c)) }),
+  c.json({ tables: await describeSchema(pid(c), c.req.query("internal") === "1"), awake: await isAwake(pid(c)) }),
 );
 projectRoutes.get("/projects/:id/db/rows", async (c) => {
   const table = c.req.query("table") ?? "";

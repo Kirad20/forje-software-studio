@@ -5,6 +5,8 @@ import type { AgentExecutionResult } from "./domain/AgentExecution.js";
 
 export type AgentResult = AgentExecutionResult<ModelInfo>;
 export { bindBuilderCoreModules } from "./infrastructure/CoreModulesAdapter.js";
+export { createBuilderService, type BuilderServicePorts, type BuilderTurnInput, type BuilderToolResult } from "./infrastructure/builderService.js";
+export { BuilderServiceClient } from "./infrastructure/builderServiceClient.js";
 export { listTasks } from "./infrastructure/TaskQueriesAdapter.js";
 export type { AgentTaskView } from "./ports/AgentTaskQueries.js";
 

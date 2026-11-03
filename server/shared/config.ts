@@ -53,6 +53,12 @@ export function resolvePublicUrl(vars: Record<string, string | undefined>): stri
   }
 }
 
+export function resolveAppRuntimePublicUrl(publicUrl: string, publicPort: string): string {
+  const url = new URL(publicUrl);
+  if (publicPort) url.port = publicPort;
+  return url.origin;
+}
+
 /**
  * Platform defaults when FORJA_MODELS_ALLOW is empty: Sonnet and Haiku, every model of
  * self-declared OpenAI-compatible providers, and a curated, cheap-to-strong spread from
@@ -89,6 +95,15 @@ export const config = {
   dataDir: path.resolve(ROOT_DIR, env.DATA_DIR ?? "data"),
   /** The platform database (Postgres). Project app databases stay in PGlite under dataDir. */
   databaseUrl: env.DATABASE_URL ?? "",
+  /** Optional owner service for per-project PGlite databases. Unset means local ownership. */
+  appDataServiceUrl: env.APP_DATA_SERVICE_URL ?? "",
+  appDataServiceToken: env.APP_DATA_SERVICE_TOKEN ?? "",
+  appRuntimeInternalUrl: env.APP_RUNTIME_INTERNAL_URL ?? "",
+  /** Optional isolated worker for builder turns and MCP tools. */
+  builderServiceUrl: env.BUILDER_SERVICE_URL ?? "",
+  builderServiceToken: env.BUILDER_SERVICE_TOKEN ?? "",
+  /** Optional public port for preview/published app hosts when the runtime has its own local port. */
+  appRuntimePublicPort: env.APP_RUNTIME_PUBLIC_PORT ?? "",
   secretsKey: env.SECRETS_KEY ?? "",
   /**
    * Reverse proxies in front of Forja (Traefik in Coolify, nginx…). With N > 0 the client IP is

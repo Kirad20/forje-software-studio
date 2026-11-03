@@ -8,13 +8,16 @@ secretos y pone el dominio y el HTTPS con su proxy (Traefik).
 
 | Pieza | Dónde |
 |---|---|
-| Studio, API, MCP, apps publicadas y vistas previas | un solo contenedor `forja`, puerto interno 4100 |
+| Studio, API y MCP | contenedor `forja`, puerto interno 4100 |
+| Turnos del constructor, SSE y ejecución de tools | contenedor interno `builder`, puerto 4300 |
+| Apps publicadas, vistas previas, WebSocket y propietario de PGlite | contenedor `app-runtime`, puerto 4200 |
 | Base de datos de la plataforma: cuentas, proyectos, configuración, modelos | servicio `postgres`, volumen `forja-pg` (**respaldar**) |
-| Bases de datos de las apps (PGlite embebido), archivos, versiones publicadas | volumen `forja-data` → `/app/data` (**respaldar**) |
+| Bases de datos PGlite, archivos y versiones publicadas | volumen compartido `forja-data` → `/app/data` (**respaldar**); solo `app-runtime` abre las bases |
 | Caché de paquetes npm de las apps | volumen `forja-deps` (desechable) |
 
-Una sola réplica de `forja`. Las bases de las apps son PGlite embebido sobre el volumen: dos
-procesos escribiendo la misma carpeta la corromperían. No actives réplicas ni «rolling updates» con solapamiento.
+No escales estos servicios ni actives «rolling updates» con solapamiento: `app-runtime` debe ser el
+único propietario de las bases PGlite y el estado de concurrencia del constructor vive en `builder`.
+Los procesos se comunican por APIs internas autenticadas, dentro de la red privada de Compose.
 
 ## Requisitos
 
@@ -70,7 +73,7 @@ studio, porque su cookie exige `Secure`).
 1. **Projects → (tu proyecto) → + New → Docker Compose** (o «Public/Private Repository» con build
    pack **Docker Compose**). Repositorio `Kirad20/forje-software-studio`, rama `main`, archivo
    `/docker-compose.yml`. Para un repositorio privado usa la GitHub App de Coolify.
-2. Coolify lee el compose y muestra los servicios `forja` y `postgres`. En **Domains** del servicio
+2. Coolify lee el compose y muestra `forja`, `builder`, `app-runtime` y `postgres`. En **Domains** del servicio
    `forja` pon `https://forja.tudominio.com:4100`. El sufijo `:4100` es el puerto interno del
    contenedor: le dice al proxy a dónde enrutar, y el navegador sigue entrando por el 443 sin
    puerto. Sin dominio en `forja`, Coolify no genera las reglas del proxy y el sitio responde
@@ -84,6 +87,8 @@ studio, porque su cookie exige `Secure`).
      descifrar. No la cambies nunca después del primer arranque.
    - `SERVICE_PASSWORD_BOOTSTRAP` → token para crear la primera cuenta de administrador.
    - `SERVICE_PASSWORD_POSTGRES` → contraseña del servicio `postgres` (la usa `DATABASE_URL`).
+   - `SERVICE_PASSWORD_APP_DATA` → token aleatorio para las APIs internas de datos/runtime.
+   - `SERVICE_PASSWORD_BUILDER` → token aleatorio para el API interno del constructor.
 
    Rellena tú (Coolify las guarda cifradas; no las pegues en chats ni en el repo):
 
@@ -92,12 +97,13 @@ studio, porque su cookie exige `Secure`).
    | `FORJA_DOMAIN` | `forja.tudominio.com` (el host del studio, sin `https://` ni puerto) **obligatoria**: de ella salen las URLs de las apps y vistas previas |
    | `PUBLIC_URL` | opcional: déjala vacía. Forja usa `SERVICE_URL_FORJA_4100`, `COOLIFY_URL` o, si Coolify no las define, `https://FORJA_DOMAIN`. El log de arranque dice cuál quedó (`plataforma en …`) |
 
-   Nada más: proveedores y modelos, registro de cuentas, SMTP, GitHub, Langfuse, evals… se
+   Para los dos tokens internos, usa valores largos y aleatorios; no los reutilices. Nada más:
+   proveedores y modelos, registro de cuentas, SMTP, GitHub, Langfuse, evals… se
    configuran en el studio (**Administración**) y se guardan en Postgres, con los secretos cifrados
    con `SERVICE_HEX_64_SECRETSKEY`. Las variables antiguas (`ANTHROPIC_API_KEY`, `SMTP_URL`,
    `FORJA_SIGNUP`…) ya no se leen; si siguen puestas, el log lo avisa al arrancar.
-4. **Deploy**. La primera construcción tarda unos minutos (instala Chromium). El healthcheck
-   (`/healthz`) marca el servicio como sano a los ~30 s del arranque.
+4. **Deploy**. La primera construcción tarda unos minutos (instala Chromium). Los healthchecks
+   (`/healthz`) esperan a Postgres y a `app-runtime` antes de iniciar `forja` y `builder`.
 
 ## 3. Primer acceso
 
@@ -153,10 +159,9 @@ studio, porque su cookie exige `Secure`).
 - **Detrás de Traefik**: `FORJA_TRUST_PROXY=1` hace que los límites de intentos (login, códigos,
   setup) cuenten por IP real del cliente (`X-Forwarded-For`) y no por la del proxy. Si pones
   Cloudflare con proxy delante de Coolify, súbelo a `2`.
-- **Postgres y PGlite**: la plataforma vive en Postgres (servicio `postgres`). Las apps siguen
-  con una base PGlite por proyecto que se duerme cuando no se usa; llevarlas a Postgres es otro
-  cambio de código (esquemas por proyecto, límites), y tendrá sentido cuando haga falta más de una
-  réplica.
+- **Postgres y PGlite**: la plataforma vive en Postgres (servicio `postgres`). `app-runtime` es
+  dueño exclusivo de las bases PGlite por proyecto; `forja` y `builder` usan su API interna. Los
+  tres procesos comparten el volumen de archivos y la configuración de plataforma.
 - **¿Langfuse autoalojado en este compose?** No. Langfuse v3 necesita Postgres, ClickHouse, Redis
   y almacenamiento S3 (varios GB de RAM). Usa Langfuse Cloud o despliégalo como recurso aparte con
   la plantilla de Coolify y pon su URL en Administración → General → Observabilidad.

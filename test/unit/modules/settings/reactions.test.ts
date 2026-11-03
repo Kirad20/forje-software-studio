@@ -13,6 +13,7 @@ describe("Bootstrap setting reactions", () => {
       resetTransport: vi.fn(),
       reloadLangfuse: vi.fn(),
       reschedulePoll: vi.fn(),
+      reloadServices: vi.fn(),
     };
     const reactions = createSettingReactions({ onSettingsChanged }, ports);
 
@@ -23,6 +24,7 @@ describe("Bootstrap setting reactions", () => {
     expect(ports.resetTransport).toHaveBeenCalledOnce();
     expect(ports.reloadLangfuse).toHaveBeenCalledOnce();
     expect(ports.reschedulePoll).toHaveBeenCalledOnce();
+    expect(ports.reloadServices).toHaveBeenCalledOnce();
 
     reactions.stop();
     reactions.stop();

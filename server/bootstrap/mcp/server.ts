@@ -1,7 +1,7 @@
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
-import { builderTools, previewUrl, toolByName } from "../../modules/builder/index.js";
+import { builderTools, previewUrl, toolByName, type BuilderServiceClient } from "../../modules/builder/index.js";
 import type { IdentityModule, PublicAccount } from "../../modules/identity/index.js";
 import { memorySection } from "../../modules/memory/memory.js";
 import type { ProjectsModule, Project } from "../../modules/projects/index.js";
@@ -175,7 +175,7 @@ export async function projectContext(project: Project, accountId: string) {
   ].join("\n");
 }
 
-function buildServer(account: PublicAccount, projects: ProjectsModule, collaboration: CollaborationModule) {
+function buildServer(account: PublicAccount, projects: ProjectsModule, collaboration: CollaborationModule, builderClient?: BuilderServiceClient) {
   // A token limited to one organization sees only that organization's projects.
   const inTokenScope = (p: { orgId: string | null }) => !account.tokenOrgId || p.orgId === account.tokenOrgId;
   const server = new Server(
@@ -271,7 +271,9 @@ function buildServer(account: PublicAccount, projects: ProjectsModule, collabora
         let structuredContent: Record<string, unknown> | undefined;
         try {
           const ctx = { account, projectId, author: "mcp" as const };
-          if (tool.call) ({ data: structuredContent, output: out } = await tool.call(args, ctx));
+          if (builderClient) {
+            ({ data: structuredContent, output: out } = await builderClient.tool(tool.name, args, ctx, !!tool.call));
+          } else if (tool.call) ({ data: structuredContent, output: out } = await tool.call(args, ctx));
           else out = await tool.run(args, ctx);
         } catch (e) {
           metric(false, (e as Error).message.length);
@@ -299,7 +301,7 @@ function buildServer(account: PublicAccount, projects: ProjectsModule, collabora
 /** Stateless: a fresh server and transport per request, so any instance can answer. */
 type McpModules = { identity: IdentityModule; projects: ProjectsModule; collaboration: CollaborationModule };
 
-export function createMcpHandler({ identity, projects, collaboration }: McpModules) {
+export function createMcpHandler({ identity, projects, collaboration }: McpModules, builderClient?: BuilderServiceClient) {
   return async (req: Request, authenticated?: PublicAccount): Promise<Response> => {
     const bearer = req.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
     const account = authenticated ?? (await identity.accountFromApiToken(bearer));
@@ -309,7 +311,7 @@ export function createMcpHandler({ identity, projects, collaboration }: McpModul
         { status: 401 },
       );
     }
-    const server = buildServer(account, projects, collaboration);
+    const server = buildServer(account, projects, collaboration, builderClient);
     const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
     await server.connect(transport);
     try {

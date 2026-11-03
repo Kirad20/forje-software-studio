@@ -1,5 +1,5 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
-import { config } from "../../../shared/config.js";
+import { config, resolveAppRuntimePublicUrl } from "../../../shared/config.js";
 import { createShareAccess } from "../application/share.js";
 
 /**
@@ -14,6 +14,8 @@ export { SHARE_COOKIE, type ShareScope } from "../domain/share.js";
 const sign = (projectId: string, epoch: number, exp: string) =>
   createHmac("sha256", config.secretsKey).update(`share:${projectId}:${epoch}:${exp}`).digest("base64url").slice(0, 22);
 
+const appPublicUrl = () => resolveAppRuntimePublicUrl(config.publicUrl, config.appRuntimePublicPort);
+
 /**
  * `<epoch>.<expiry>.<signature>`. Tokens expire, and bumping the project's share epoch
  * ("revoke links") invalidates every token handed out before, including ones already
@@ -21,7 +23,7 @@ const sign = (projectId: string, epoch: number, exp: string) =>
  */
 export const { shareToken, checkShareToken, previewOrigin, previewUrl, appUrl, parseAppHost } = createShareAccess({
   now: () => Date.now(),
-  publicUrl: () => config.publicUrl,
+  publicUrl: appPublicUrl,
   sign,
   equal(a, b) {
     const left = Buffer.from(a);

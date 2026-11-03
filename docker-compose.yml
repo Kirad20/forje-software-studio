@@ -7,9 +7,8 @@
 # Local:     cp .env.example .env   (rellena SERVICE_HEX_64_SECRETSKEY y SERVICE_PASSWORD_POSTGRES)
 #            docker compose -f docker-compose.yml -f docker-compose.local.yml up --build
 #
-# La plataforma guarda sus datos en el servicio postgres (volumen forja-pg). Una sola instancia de
-# forja a propósito: las bases de datos de las apps son PGlite embebido sobre el volumen forja-data,
-# y dos procesos escribiendo la misma carpeta la corromperían. No escales réplicas.
+# La plataforma guarda sus datos en postgres. app-runtime es el único propietario de las bases PGlite
+# del volumen forja-data; forja accede a ellas por su API interna, nunca las abre directamente.
 
 services:
   forja:
@@ -42,6 +41,12 @@ services:
       - PORT=4100
       - DATA_DIR=/app/data
       - NODE_ENV=production
+      - APP_DATA_SERVICE_URL=http://app-runtime:4200
+      - APP_DATA_SERVICE_TOKEN=${SERVICE_PASSWORD_APP_DATA:?Set SERVICE_PASSWORD_APP_DATA}
+      - APP_RUNTIME_INTERNAL_URL=http://app-runtime:4200
+      - BUILDER_SERVICE_URL=http://builder:4300
+      - BUILDER_SERVICE_TOKEN=${SERVICE_PASSWORD_BUILDER:?Set SERVICE_PASSWORD_BUILDER}
+      - APP_RUNTIME_PUBLIC_PORT=${APP_RUNTIME_PUBLIC_PORT:-}
 
       # Base de datos de la plataforma (servicio postgres de abajo).
       # Si Coolify no genera SERVICE_PASSWORD_POSTGRES se usa un valor fijo: Postgres no publica puerto y
@@ -52,6 +57,10 @@ services:
       # Langfuse, evals, npm…) ya no va aquí: se edita en el studio, Administración → General.
     depends_on:
       postgres:
+        condition: service_healthy
+      app-runtime:
+        condition: service_healthy
+      builder:
         condition: service_healthy
     volumes:
       # Bases de datos de las apps (PGlite), archivos subidos y versiones publicadas. Respáldalo junto a forja-pg.
@@ -66,26 +75,6 @@ services:
       start_period: 30s
     # Deja que PGlite cierre limpio (SIGTERM → closeAll) antes de matar el proceso.
     stop_grace_period: 30s
-    labels:
-      # Apps publicadas (<slug>.<dominio>) y vistas previas (pv-<id>.<dominio>) viven en subdominios
-      # del dominio del studio. Este router los manda a Forja; el certificado comodín
-      # *.FORJA_DOMAIN lo emite Traefik con DNS challenge (ver la guía). Prioridad baja para que el
-      # dominio propio del studio (router de Coolify) gane siempre. La prioridad 100 también hace
-      # que este router gane al router wildcard-placeholder (prioridad 1) que solicita el certificado.
-      - traefik.enable=true
-      - traefik.http.routers.forja-apps.rule=HostRegexp(`^[a-z0-9-]+\.${FORJA_DOMAIN:-forja.localhost}$$`)
-      - traefik.http.routers.forja-apps.entrypoints=https
-      - traefik.http.routers.forja-apps.tls=true
-      - traefik.http.routers.forja-apps.priority=100
-      - traefik.http.routers.forja-apps.service=forja-apps
-      - traefik.http.routers.forja-apps-http.rule=HostRegexp(`^[a-z0-9-]+\.${FORJA_DOMAIN:-forja.localhost}$$`)
-      - traefik.http.routers.forja-apps-http.entrypoints=http
-      - traefik.http.routers.forja-apps-http.priority=100
-      - traefik.http.routers.forja-apps-http.middlewares=forja-apps-https
-      - traefik.http.routers.forja-apps-http.service=forja-apps
-      - traefik.http.middlewares.forja-apps-https.redirectscheme.scheme=https
-      - traefik.http.services.forja-apps.loadbalancer.server.port=4100
-
   postgres:
     image: postgres:17-alpine
     restart: unless-stopped
@@ -100,6 +89,97 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+
+  app-runtime:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        BROWSER: ${FORJA_BROWSER:-1}
+    command: ["node", "--import", "tsx", "server/bootstrap/appRuntimeServer.ts"]
+    restart: unless-stopped
+    expose:
+      - "4200"
+    environment:
+      - PORT=4200
+      - DATA_DIR=/app/data
+      - NODE_ENV=production
+      - PUBLIC_URL=${PUBLIC_URL:-}
+      - FORJA_DOMAIN=${FORJA_DOMAIN:-}
+      - FORJA_TRUST_PROXY=${FORJA_TRUST_PROXY:-1}
+      - SECRETS_KEY=${SERVICE_HEX_64_SECRETSKEY}
+      - DATABASE_URL=postgres://forja:${SERVICE_PASSWORD_POSTGRES:-forja-internal-db}@postgres:5432/forja
+      - APP_RUNTIME_PUBLIC_PORT=${APP_RUNTIME_PUBLIC_PORT:-}
+      - APP_DATA_SERVICE_TOKEN=${SERVICE_PASSWORD_APP_DATA:?Set SERVICE_PASSWORD_APP_DATA}
+    volumes:
+      # Este es el único proceso que abre/escribe las bases PGlite de los proyectos.
+      - forja-data:/app/data
+      - forja-deps:/app/node_modules/.forja-deps
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4200/healthz').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    stop_grace_period: 30s
+    labels:
+      # Las apps tienen otro runtime y proceso de datos que el studio/API.
+      - traefik.enable=true
+      - traefik.http.routers.forja-apps.rule=HostRegexp(`^[a-z0-9-]+\.${FORJA_DOMAIN:-forja.localhost}$$`)
+      - traefik.http.routers.forja-apps.entrypoints=https
+      - traefik.http.routers.forja-apps.tls=true
+      - traefik.http.routers.forja-apps.priority=100
+      - traefik.http.routers.forja-apps.service=forja-apps
+      - traefik.http.routers.forja-apps-http.rule=HostRegexp(`^[a-z0-9-]+\.${FORJA_DOMAIN:-forja.localhost}$$`)
+      - traefik.http.routers.forja-apps-http.entrypoints=http
+      - traefik.http.routers.forja-apps-http.priority=100
+      - traefik.http.routers.forja-apps-http.middlewares=forja-apps-https
+      - traefik.http.routers.forja-apps-http.service=forja-apps
+      - traefik.http.middlewares.forja-apps-https.redirectscheme.scheme=https
+      - traefik.http.services.forja-apps.loadbalancer.server.port=4200
+
+  builder:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        BROWSER: ${FORJA_BROWSER:-1}
+    command: ["node", "--import", "tsx", "server/bootstrap/builderServer.ts"]
+    restart: unless-stopped
+    expose:
+      - "4300"
+    environment:
+      - PORT=4300
+      - DATA_DIR=/app/data
+      - NODE_ENV=production
+      - SECRETS_KEY=${SERVICE_HEX_64_SECRETSKEY}
+      - DATABASE_URL=postgres://forja:${SERVICE_PASSWORD_POSTGRES:-forja-internal-db}@postgres:5432/forja
+      - APP_DATA_SERVICE_URL=http://app-runtime:4200
+      - APP_DATA_SERVICE_TOKEN=${SERVICE_PASSWORD_APP_DATA:?Set SERVICE_PASSWORD_APP_DATA}
+      - APP_RUNTIME_INTERNAL_URL=http://app-runtime:4200
+      - APP_RUNTIME_PUBLIC_PORT=${APP_RUNTIME_PUBLIC_PORT:-}
+      - BUILDER_SERVICE_TOKEN=${SERVICE_PASSWORD_BUILDER:?Set SERVICE_PASSWORD_BUILDER}
+      - PUBLIC_URL=${PUBLIC_URL:-}
+      - FORJA_DOMAIN=${FORJA_DOMAIN:-}
+      - FORJA_TRUST_PROXY=${FORJA_TRUST_PROXY:-1}
+    volumes:
+      - forja-data:/app/data
+      - forja-deps:/app/node_modules/.forja-deps
+    depends_on:
+      postgres:
+        condition: service_healthy
+      app-runtime:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4300/healthz').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    stop_grace_period: 30s
 
 volumes:
   forja-pg:

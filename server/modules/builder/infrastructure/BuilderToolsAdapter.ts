@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
 import { endSession as endTestSession, ensureOwnerAdmin, sessionCookie, setTemporaryPassword, testSession } from "../../app-services/auth.js";
 import { fetchPublicText } from "../../../shared/safeFetch.js";
-import { serveApp } from "../../app-runtime/index.js";
+import { callRuntimeEndpoint, serveApp } from "../../app-runtime/index.js";
+import { config } from "../../../shared/config.js";
 import { runJob } from "../../app-services/jobs.js";
 import { describeSchema, execSql } from "../../app-services/projectDb.js";
 import { listSecrets, requestSecret } from "../../app-services/secrets.js";
@@ -419,20 +420,35 @@ export const builderTools: BuilderTool[] = [
     async run(i: { method: "GET" | "POST"; route: string; query?: Record<string, unknown>; body?: unknown; as_user_email?: string }, ctx) {
       const project = (await builderCoreModules().projects.getProject(ctx.projectId))!;
       const qs = i.query ? "?" + new URLSearchParams(Object.entries(i.query).map(([k, v]) => [k, String(v)])) : "";
+      const query = i.query ? Object.fromEntries(Object.entries(i.query).map(([k, v]) => [k, String(v)])) : undefined;
       const route = i.route.replace(/^\/?(_api\/)?/, "");
       const session = i.as_user_email ? await testSession(ctx.projectId, i.as_user_email) : null;
       try {
-        const req = new Request(`${previewOrigin(ctx.projectId)}/_api/${route}${qs}`, {
-          method: i.method,
-          headers: {
-            "content-type": "application/json",
-            ...(session ? { cookie: `${sessionCookie(ctx.projectId)}=${session.token}` } : {}),
-          },
-          body: i.method === "POST" ? JSON.stringify(i.body ?? {}) : undefined,
-        });
-        const res = await serveApp(req, { project, env: "preview", base: "" }, `/_api/${route}`);
-        const text = await res.text();
-        return clip(`${i.method} /_api/${route}${qs}${session ? ` (como ${session.user.email})` : " (anónimo)"} → ${res.status}\n${text}`);
+        const cookieHeader = session ? `${sessionCookie(ctx.projectId)}=${session.token}` : undefined;
+        let status: number;
+        let text: string;
+        if (config.appRuntimeInternalUrl) {
+          const response = await callRuntimeEndpoint({
+            projectId: ctx.projectId,
+            method: i.method,
+            route,
+            query,
+            cookie: cookieHeader,
+            body: i.method === "POST" ? JSON.stringify(i.body ?? {}) : undefined,
+          });
+          status = response.status;
+          text = response.body;
+        } else {
+          const req = new Request(`${previewOrigin(ctx.projectId)}/_api/${route}${qs}`, {
+            method: i.method,
+            headers: { "content-type": "application/json", ...(cookieHeader ? { cookie: cookieHeader } : {}) },
+            body: i.method === "POST" ? JSON.stringify(i.body ?? {}) : undefined,
+          });
+          const response = await serveApp(req, { project, env: "preview", base: "" }, `/_api/${route}`);
+          status = response.status;
+          text = await response.text();
+        }
+        return clip(`${i.method} /_api/${route}${qs}${session ? ` (como ${session.user.email})` : " (anónimo)"} → ${status}\n${text}`);
       } finally {
         if (session) await endTestSession(ctx.projectId, session.token);
       }

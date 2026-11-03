@@ -35,7 +35,7 @@ docker run -p 4100:4100 -v forja-data:/app/data -e SECRETS_KEY=... -e DATABASE_U
 Con Docker Compose (Postgres, volúmenes, healthcheck y variables listos; el mismo archivo se importa en Coolify):
 
 ```bash
-cp .env.example .env   # SERVICE_HEX_64_SECRETSKEY=$(openssl rand -hex 32) y SERVICE_PASSWORD_POSTGRES
+cp .env.example .env   # define SERVICE_HEX_64_SECRETSKEY, SERVICE_PASSWORD_POSTGRES, SERVICE_PASSWORD_APP_DATA y SERVICE_PASSWORD_BUILDER
 docker compose -f docker-compose.yml -f docker-compose.local.yml up --build
 ```
 
@@ -59,7 +59,7 @@ Pruebas: necesitan un Postgres en `TEST_DATABASE_URL` (por defecto `postgres://f
 
 ## Cómo está hecho
 
-La plataforma es un **monolito modular**: un proceso Node y una base Postgres de plataforma, sin introducir microservicios ni cambiar las APIs del studio, MCP o las apps. Los contextos de negocio están en `server/modules/`:
+La aplicación conserva un núcleo modular y sus APIs públicas, pero Compose ejecuta tres procesos Node: `forja` (studio/API/MCP), `app-runtime` (apps y propietario único de PGlite) y `builder` (turnos de agentes y tools). Comparten Postgres y el volumen de archivos; las llamadas internas están autenticadas. En desarrollo sin Compose, los límites de servicios siguen siendo opcionales y los adaptadores locales se conservan. Los contextos de negocio están en `server/modules/`:
 
 | Contexto DDD | Responsabilidad |
 |---|---|
@@ -79,7 +79,7 @@ La plataforma es un **monolito modular**: un proceso Node y una base Postgres de
 
 Cada contexto separa `domain/` (entidades, objetos de valor y reglas), `application/` (casos de uso), `ports/` (contratos) e `infrastructure/` (Postgres e integraciones). Las dependencias del núcleo apuntan hacia dentro y se inyectan; otros contextos acceden únicamente por entradas públicas. No quedan directorios ni fachadas de compatibilidad del backend antiguo.
 
-`server/bootstrap/` compone los módulos, transportes HTTP/MCP y lifecycle: arranque explícito y cierre inverso de timers, HTTP/WebSocket, navegador, workers y bases de datos. Las reacciones entre módulos se conectan aquí mediante puertos, sin ciclos de dependencias. `server/shared/` contiene infraestructura técnica, no lógica de negocio compartida. Las transacciones de Postgres preservan cuenta + organización personal y proyecto + archivos; Postgres, PGlite y servicios externos no forman una transacción distribuida.
+`server/bootstrap/` compone los módulos y los entrypoints de los tres procesos (`server.ts`, `appRuntimeServer.ts`, `builderServer.ts`). Los servicios comparten Postgres; `app-runtime` es el único que abre las bases PGlite y `forja`/`builder` acceden por su API interna. Los turnos SSE y tools del builder cruzan un API interno autenticado; eventos de archivos y cambios de configuración se propagan entre procesos. Las transacciones de Postgres preservan cuenta + organización personal y proyecto + archivos; Postgres, PGlite y servicios externos no forman una transacción distribuida.
 
 Studio organiza su shell en `studio/src/app/`, capacidades en `studio/src/features/` y componentes/transportes técnicos en `studio/src/shared/`. Los workflows usan puertos de transporte comprobables sin navegador. SDK mantiene las entradas de producto `@forja/client`, `@forja/server` y `@forja/ui`, con implementaciones internas por capacidad y dependencias de navegador inyectables.
 
@@ -88,15 +88,11 @@ Studio organiza su shell en `studio/src/app/`, capacidades en `studio/src/featur
 La migración se valida con ciclos TDD y pruebas de regresión. `npm run test:architecture` comprueba todos los contextos: dependencias hacia dentro, entradas públicas, ciclos runtime (incluyendo imports dinámicos y reexports), aislamiento de Studio/SDK y ausencia de SQL en núcleo y handlers. `npm test` incluye estas restricciones y la ausencia de acceso a DB/timers al importar módulos. Los casos de uso con puertos simulados no requieren Postgres; los adaptadores e integraciones sí. En equipos con pocos recursos o Postgres compartido: `npm test -- --maxWorkers=2 --hookTimeout=30000`. `npm run test:studio` verifica flujos reales del Studio en Chromium; CI ejecuta también GitHub simulado y arranque/Chromium de Docker.
 
 ```
-studio (React)  ──/api──▶  servidor de plataforma (Hono, Node 22+)
-                              ├─ bootstrap/ composición, lifecycle, HTTP y MCP (/mcp, token Bearer)
-                              ├─ modules/   contextos DDD con puertos y adaptadores propios
-                              │   ├─ identity, collaboration, projects, settings, builder
-                              │   ├─ model-management, app-runtime, app-services
-                              │   └─ integrations, usage, memory, project-observability, evaluations
-                              └─ shared/    configuración, DB/migraciones, criptografía y seguridad técnica
-apps generadas ──▶  pv-<id>.localhost   (vista previa, enlace con token)
-                    <slug>.localhost    (publicada)
+studio ──/api──▶ forja (Hono, Node 22+) ──┬──▶ Postgres
+                   │                      ├──▶ builder (SSE, tools, Node 22+)
+                   │                      └──▶ app-runtime (apps, PGlite propietario)
+                   └── MCP (/mcp) ────────────▶ builder
+apps generadas ──▶ app-runtime: pv-<id> (vista previa) / <slug> (publicada)
 ```
 
 - **Proyecto** = árbol de archivos virtual guardado en la BD de la plataforma: `pages/`, `components/`, `helpers/`, `endpoints/<ruta>_GET|POST.ts`, `jobs/`, `static/`, `base.css`. No hay disco por proyecto; esbuild compila directo desde la BD.

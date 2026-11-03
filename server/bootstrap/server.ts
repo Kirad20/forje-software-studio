@@ -15,73 +15,81 @@ import { createLocalSeed } from "./database/localSeed.js";
 import { reloadProviders } from "../modules/model-management/providers.js";
 import { createSettingReactions } from "./settingReactions.js";
 import { warnMovedEnv } from "../modules/settings/index.js";
-import type { Project } from "../modules/projects/index.js";
-import { cookie, parseCookies, serveApp } from "../modules/app-runtime/index.js";
+import { cookie, serveApp } from "../modules/app-runtime/index.js";
 import { startGithubSync, stopGithubSync } from "../modules/integrations/github.js";
-import { clientIp as ipOfClient, rateLimit, STUDIO_HEADERS, startRateLimitCleanup, stopRateLimitCleanup } from "../shared/security.js";
-import { langfuse, metricsIdle, stopBuilder, reloadLangfuse } from "../modules/builder/index.js";
+import { rateLimit, STUDIO_HEADERS, startRateLimitCleanup, stopRateLimitCleanup } from "../shared/security.js";
+import { BuilderServiceClient, langfuse, metricsIdle, stopBuilder, reloadLangfuse } from "../modules/builder/index.js";
 import { stopAppRuntime } from "../modules/app-runtime/index.js";
-import { checkShareToken, parseAppHost, SHARE_COOKIE } from "../modules/app-runtime/index.js";
+import { checkShareToken, parseAppHost } from "../modules/app-runtime/index.js";
 import { ApplicationLifecycle } from "./ApplicationLifecycle.js";
 import { createMonolith } from "./composition.js";
 import { resetTransport, stopEmailTransport } from "../modules/app-services/email.js";
 import { reschedulePoll } from "../modules/integrations/github.js";
 import { stopProblems } from "../modules/project-observability/problems.js";
+import { resolveApp as resolveRuntimeApp, handleAppRuntimeRequest } from "./appRuntimeHttp.js";
+import { startAppRuntimeEventRelay } from "./appRuntimeEventRelay.js";
+import { emitProject } from "../modules/project-observability/events.js";
 
 const monolith = createMonolith();
-const studioApi = createStudioApi(monolith);
-const handleMcp = createMcpHandler(monolith);
+const builderClient = config.builderServiceUrl ? new BuilderServiceClient(config.builderServiceUrl, config.builderServiceToken) : undefined;
+const studioApi = createStudioApi(monolith, builderClient);
+const handleMcp = createMcpHandler(monolith, builderClient);
 const { getProject, getProjectBySlug } = monolith.projects;
 const { accountFromApiToken } = monolith.identity;
 const seedLocal = createLocalSeed(monolith.settings);
-const reactions = createSettingReactions(monolith.settings, { resetTransport, reloadLangfuse, reschedulePoll });
+const reactions = createSettingReactions(monolith.settings, {
+  resetTransport,
+  reloadLangfuse,
+  reschedulePoll,
+  reloadServices: () => {
+    const services = [
+    [config.appRuntimeInternalUrl, "/internal/runtime/reload", config.appDataServiceToken],
+    [config.builderServiceUrl, "/internal/builder/reload", config.builderServiceToken],
+    ] as const;
+  for (const [baseUrl, path, token] of services) {
+      if (!baseUrl) continue;
+      void fetch(`${baseUrl.replace(/\/+$/, "")}${path}`, {
+        method: "POST",
+      headers: { authorization: `Bearer ${token}` },
+      }).then((response) => {
+        if (!response.ok) throw new Error(`Settings reload returned ${response.status}: ${response.statusText}`);
+      }).catch((error) => {
+        console.error("[forja] service settings reload:", error);
+      });
+    }
+  },
+});
+let stopRuntimeEventRelay = () => {};
 
 const STUDIO_DIST = path.join(ROOT_DIR, "dist", "studio");
 
 /** Finds the app a Host header points at, and whether this browser may open it. */
-async function resolveApp(host: string | undefined, url: URL, cookieHeader: string | null) {
-  const target = parseAppHost(host);
-  if (!target) return null;
-  let project: Project | undefined;
-  let env: "preview" | "published";
-  if (target.kind === "preview") {
-    project = await getProject(target.projectId);
-    env = "preview";
-  } else {
-    project = await getProjectBySlug(target.slug);
-    env = "published";
-  }
-  if (!project || (env === "published" && !project.publishedVersionId)) return { project: undefined, env, allowed: false, fromQuery: false };
-  // Previews and private apps need the share token, once from the link, then from a cookie.
-  const needsToken = env === "preview" || project.visibility === "private";
-  const fromQuery = checkShareToken(project, url.searchParams.get("share"));
-  const allowed = !needsToken || fromQuery || checkShareToken(project, parseCookies(cookieHeader)[SHARE_COOKIE]);
-  return { project, env, allowed, fromQuery };
-}
+const runtimeAccessPorts = {
+  getProject,
+  getProjectBySlug,
+  parseAppHost,
+  checkShareToken,
+};
+const runtimeHttpPorts = {
+  ...runtimeAccessPorts,
+  cookie,
+  serveApp,
+  internalToken: config.appDataServiceToken,
+  emitProject,
+  reloadSettings: async () => {
+    await monolith.settings.loadSettings();
+    await reloadProviders();
+  },
+};
+const resolveApp = (host: string | undefined, url: URL, cookieHeader: string | null) =>
+  resolveRuntimeApp(host, url, cookieHeader, runtimeAccessPorts);
 
 const app = new Hono();
 
 app.use("*", async (c, next) => {
-  const url = new URL(c.req.url);
-  const resolved = await resolveApp(c.req.header("host"), url, c.req.header("cookie") ?? null);
-  if (!resolved) return next();
-  if (!resolved.project) return c.html(page("App no encontrada", "Esta dirección no tiene ninguna app publicada."), 404);
-  if (!resolved.allowed) return c.html(page("Enlace privado", "Abre esta app desde el enlace que te compartieron."), 403);
-  if (resolved.fromQuery) {
-    // Trade the token in the link for a cookie on this app's own host, and clean the URL.
-    url.searchParams.delete("share");
-    return new Response(null, {
-      status: 302,
-      headers: {
-        location: url.pathname + (url.search || ""),
-        "set-cookie": cookie(SHARE_COOKIE, c.req.query("share")!, "/", 3600 * 24 * 30, resolved.env),
-      },
-    });
-  }
   const socketIp = (c.env as { incoming?: { socket?: { remoteAddress?: string } } })?.incoming?.socket?.remoteAddress;
-  const ip = ipOfClient(socketIp, c.req.header("x-forwarded-for"));
-  const clientIp = ip === "unknown" ? undefined : ip;
-  return serveApp(c.req.raw, { project: resolved.project, env: resolved.env, base: "", clientIp }, url.pathname);
+  const response = await handleAppRuntimeRequest(c.req.raw, runtimeHttpPorts, socketIp);
+  return response ?? next();
 });
 
 // The studio itself: never framed, no sniffing. Apps returned above set their own headers.
@@ -180,6 +188,9 @@ const lifecycle = new ApplicationLifecycle([
   { name: "module bindings", start: monolith.startBindings, stop: monolith.stopBindings },
   { name: "application databases", start: async () => {}, stop: closeAll },
   { name: "application runtime", start: async () => {}, stop: stopAppRuntime },
+  { name: "application runtime event relay", start: async () => {
+    stopRuntimeEventRelay = startAppRuntimeEventRelay(config.appRuntimeInternalUrl, config.appDataServiceToken);
+  }, stop: async () => { stopRuntimeEventRelay(); } },
   { name: "project observation", start: async () => {}, stop: stopProblems },
   { name: "application transports", start: async () => {}, stop: async () => {
     stopRealtime();

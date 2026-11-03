@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolvePublicUrl } from "../../server/shared/config.js";
+import { resolveAppRuntimePublicUrl, resolvePublicUrl } from "../../server/shared/config.js";
 import { requestOrigin } from "../../server/shared/security.js";
 
 describe("resolvePublicUrl", () => {
@@ -76,5 +76,12 @@ describe("requestOrigin", () => {
   it("returns null without a usable host", () => {
     expect(requestOrigin({}, 1)).toBeNull();
     expect(requestOrigin({ host: "bad host/" }, 0)).toBeNull();
+  });
+});
+
+describe("resolveAppRuntimePublicUrl", () => {
+  it("uses the dedicated public port for preview and app hostnames when configured", () => {
+    expect(resolveAppRuntimePublicUrl("http://localhost:4100", "4200")).toBe("http://localhost:4200");
+    expect(resolveAppRuntimePublicUrl("https://forja.example.com", "")).toBe("https://forja.example.com");
   });
 });

@@ -2,7 +2,12 @@ import { mkdirSync, rmSync } from "node:fs";
 import { PGlite } from "@electric-sql/pglite";
 import { config, paths } from "../../../shared/config.js";
 import type { ProjectDb } from "../ports/database.js";
+import { ProjectDbClient } from "./projectDbClient.js";
 export type { ProjectDb } from "../ports/database.js";
+
+const remote = config.appDataServiceUrl
+  ? new ProjectDbClient(config.appDataServiceUrl, config.appDataServiceToken)
+  : undefined;
 
 /**
  * One Postgres database per project, shared by the preview and the published app.
@@ -86,6 +91,7 @@ async function run<T>(projectId: string, fn: (db: PGlite) => Promise<T>): Promis
 }
 
 export function projectDb(projectId: string): ProjectDb {
+  if (remote) return remote.forProject(projectId);
   const api: ProjectDb = {
     query: (sql, params = []) => run(projectId, async (db) => (await db.query(sql, params)).rows as never),
     one: async (sql, params = []) => (await api.query(sql, params))[0] as never,
@@ -106,6 +112,7 @@ export function projectDb(projectId: string): ProjectDb {
 
 /** Runs arbitrary SQL (possibly several statements) and returns every result set, for the Data tab and the builder. */
 export async function execSql(projectId: string, sql: string) {
+  if (remote) return remote.execSql(projectId, sql);
   return run(projectId, async (db) => {
     const results = await db.exec(sql);
     return results.map((r) => ({
@@ -118,11 +125,13 @@ export async function execSql(projectId: string, sql: string) {
 
 /** A full copy of the database files, for the Data tab's export button. */
 export async function dumpDatabase(projectId: string): Promise<Blob> {
+  if (remote) return remote.dumpDatabase(projectId);
   return run(projectId, async (db) => (await db.dumpDataDir("gzip")) as Blob);
 }
 
 /** Closes a project's database now (before deleting or replacing its files). */
 export async function closeProject(projectId: string) {
+  if (remote) return remote.closeProject(projectId);
   const existing = open.get(projectId);
   if (!existing) return;
   open.delete(projectId);
@@ -136,6 +145,7 @@ export async function closeProject(projectId: string) {
 
 /** Copies a project's whole database into another project's (used by "duplicate"). */
 export async function cloneDatabase(fromProjectId: string, toProjectId: string) {
+  if (remote) return remote.cloneDatabase(fromProjectId, toProjectId);
   const dump = await dumpDatabase(fromProjectId);
   await closeProject(toProjectId);
   const dir = paths.projectDb(toProjectId);
@@ -146,6 +156,7 @@ export async function cloneDatabase(fromProjectId: string, toProjectId: string) 
 }
 
 export async function closeAll() {
+  if (remote) return remote.closeAll();
   for (const [id, p] of open) {
     open.delete(id);
     const e = await p.catch(() => null);
@@ -157,4 +168,6 @@ export async function closeAll() {
   }
 }
 
-export const isAwake = (projectId: string) => open.has(projectId);
+export async function isAwake(projectId: string) {
+  return remote ? remote.isAwake(projectId) : open.has(projectId);
+}
