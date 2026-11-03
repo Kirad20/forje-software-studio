@@ -1,9 +1,8 @@
 ---
 name: frontend-design
-description: Anthropic's design-lead process: ground the design in the subject, avoid templated defaults, plan tokens and layout, then build and self-critique
+description: Guidance for distinctive, intentional visual design when building new UI or reshaping an existing one. Helps with aesthetic direction, typography, and making choices that don't read as templated defaults.
+license: Complete terms in LICENSE.txt
 ---
-> Forja note: this text comes from Anthropic's frontend-design skill (github.com/anthropics/skills) (Apache-2.0; see NOTICE.md and the LICENSE next to it). The Forja manual's rules win over anything here: tokens in base.css, screens built from @forja/ui, CSS Modules for layout, no inline visual styles, no new npm packages outside the catalog.
-
 
 # Frontend Design
 

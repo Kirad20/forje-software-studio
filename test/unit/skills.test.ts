@@ -1,10 +1,10 @@
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { BUILDER_SYSTEM_PROMPT } from "../../server/builder/prompt.js";
 import { ROLE_PROMPTS, ROLE_TOOLS } from "../../server/builder/roles.js";
 import { BUILTIN_SKILLS } from "../../server/builder/skillLibrary.js";
-import { SKILLS_DIR, allSkills, findSkill, parseSkill, projectSkills, skillIndex } from "../../server/builder/skills.js";
+import { SKILLS_DIR, allSkills, findSkill, parseSkill, projectSkills, renderSkill, skillIndex } from "../../server/builder/skills.js";
 import { builderTools } from "../../server/builder/tools.js";
 import { buildClient } from "../../server/runtime/bundler.js";
 import { KIT_CATALOG } from "../../server/runtime/catalog.js";
@@ -57,29 +57,42 @@ describe("skills", () => {
     expect(ROLE_PROMPTS.qa).toMatch(/web-design-guidelines/);
   });
 
-  it("ships the open-source design skills with their licenses, notice and parts", () => {
+  it("ships the open-source skills as published, with license, notice and parts", () => {
     const root = path.resolve("server/builder/skills");
     const notice = readFileSync(path.join(root, "NOTICE.md"), "utf8");
     for (const name of OPEN_SOURCE) {
-      expect(existsSync(path.join(root, name, "LICENSE")), `${name} LICENSE`).toBe(true);
+      expect(existsSync(path.join(root, name, "LICENSE")) || existsSync(path.join(root, name, "LICENSE.txt")), `${name} license`).toBe(true);
       expect(notice, name).toContain("`" + name + "/`");
-      expect(findSkill({}, name)!.body, name).toContain("> Forja note:");
+      expect(findSkill({}, name)!.origin, name).toBeDefined();
     }
-    expect(Object.keys(findSkill({}, "impeccable")!.parts!)).toEqual(expect.arrayContaining(["craft-floor", "critique", "audit", "polish"]));
-    expect(Object.keys(findSkill({}, "hallmark")!.parts!)).toContain("gates");
-    expect(Object.keys(findSkill({}, "taste-skill")!.parts!)).toEqual(expect.arrayContaining(["copy", "tells", "critique"]));
-    expect(Object.keys(findSkill({}, "ui-ux-pro-max")!.parts!)).toContain("quick-reference");
-    expect(skillIndex()).toMatch(/- impeccable: .*\[parts: .*craft-floor/);
+    // The upstream files are there with their scripts and data, untouched.
+    for (const f of ["impeccable/scripts/impeccable", "impeccable/reference/critique.md", "hallmark/scripts/sloplint.mjs", "taste-skill/scripts/inspect.mjs", "ui-ux-pro-max/scripts/search.py", "ui-ux-pro-max/data/styles.csv", "web-design-guidelines/command.md"]) {
+      expect(existsSync(path.join(root, f)), f).toBe(true);
+    }
+    expect(readFileSync(path.join(root, "frontend-design/SKILL.md"), "utf8")).toMatch(/^---\nname: frontend-design\n/);
+    expect(Object.keys(findSkill({}, "impeccable")!.parts!)).toEqual(expect.arrayContaining(["reference/craft-floor", "reference/critique", "reference/audit", "reference/polish"]));
+    expect(Object.keys(findSkill({}, "hallmark")!.parts!)).toContain("references/gates");
+    expect(Object.keys(findSkill({}, "taste-skill")!.parts!)).toEqual(expect.arrayContaining(["references/copy", "references/tells", "references/critique"]));
+    expect(Object.keys(findSkill({}, "ui-ux-pro-max")!.parts!)).toContain("references/quick-reference");
+    expect(Object.keys(findSkill({}, "web-design-guidelines")!.parts!)).toContain("command");
+    expect(skillIndex()).toMatch(/- impeccable: .*\[\d+ parts\]/);
   });
 
-  it("puts the Forja note on every copied part and keeps their scripts and launchers out", () => {
+  it("serves a copied skill with the Forja note, lists its parts and returns a part by path", () => {
     for (const name of OPEN_SOURCE) {
-      const skill = findSkill({}, name)!;
-      for (const [part, text] of Object.entries(skill.parts ?? {})) expect(text.startsWith("> Forja note:"), `${name}/${part}`).toBe(true);
-      for (const text of [skill.body, ...Object.values(skill.parts ?? {})]) expect(text, name).not.toMatch(/curl |wget |\| *(ba)?sh|Invoke-Expression/);
+      const text = renderSkill(findSkill({}, name)!);
+      expect(text, name).toContain("> Forja note: this skill is copied unmodified from");
+      expect(text, name).toContain("no shell");
     }
-    const files = readdirSync(path.resolve("server/builder/skills"), { recursive: true }).map(String);
-    expect(files.filter((f) => /\.(mjs|js|py|sh|cmd|ps1|exe|csv)$/.test(f))).toEqual([]);
+    const listing = renderSkill(findSkill({}, "impeccable")!);
+    expect(listing).toMatch(/- reference\/ .*critique/);
+    const part = renderSkill(findSkill({}, "impeccable")!, "reference/critique");
+    expect(part).toContain("# Skill: impeccable / reference/critique");
+    expect(renderSkill(findSkill({}, "impeccable")!, " Reference/Critique.md ")).toBe(part);
+    expect(() => renderSkill(findSkill({}, "impeccable")!, "nada")).toThrow(/Sus partes:[\s\S]*reference\//);
+    expect(() => renderSkill(findSkill({}, "forms")!, "x")).toThrow(/No tiene partes/);
+    // Our own skills are served without a note.
+    expect(renderSkill(findSkill({}, "forms")!)).not.toContain("Forja note");
   });
 
   it("only offers palettes that pass the contrast the skill itself asks for, in light and dark", () => {

@@ -1,5 +1,6 @@
 import { BUILDER_SYSTEM_PROMPT } from "../builder/prompt.js";
 import { BUILTIN_SKILLS } from "../builder/skillLibrary.js";
+import { renderSkill } from "../builder/skills.js";
 
 /**
  * Topic guides for external MCP agents, cut from the builder's manual so there is one

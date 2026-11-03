@@ -78,9 +78,9 @@ describe("organization skills", () => {
     expect(await tool.run({ name: "facturas" }, ctx)).toContain("Usa siempre el RFC del cliente.");
     expect(await tool.run({ name: "jobs" }, ctx)).toContain("jobs/<name>.ts");
     const withParts = await tool.run({ name: "impeccable" }, ctx);
-    expect(withParts).toContain("craft-floor");
-    expect(await tool.run({ name: "impeccable", part: "craft-floor" }, ctx)).toContain("> Forja note:");
-    await expect(tool.run({ name: "impeccable", part: "nada" }, ctx)).rejects.toThrow(/Sus partes:.*craft-floor/);
+    expect(withParts).toContain("reference/");
+    expect(await tool.run({ name: "impeccable", part: "reference/craft-floor" }, ctx)).toContain("> Forja note:");
+    await expect(tool.run({ name: "impeccable", part: "nada" }, ctx)).rejects.toThrow(/Sus partes:[\s\S]*craft-floor/);
     await expect(tool.run({ name: "forms", part: "x" }, ctx)).rejects.toThrow(/No tiene partes/);
     await expect(tool.run({ name: "nada" }, ctx)).rejects.toThrow(/Las que hay:.*facturas/);
   });

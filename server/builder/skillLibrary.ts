@@ -14,8 +14,10 @@ export interface Skill {
   /** One line shown in every prompt: it decides whether the agent loads the skill. */
   description: string;
   body: string;
-  /** Extra reference files, loaded one at a time (load_skill with part). Only the skills copied from open-source projects have them. */
+  /** Extra reference files by relative path without .md (for example "reference/critique"), loaded one at a time with load_skill and part. Only the skills copied from open-source projects have them. */
   parts?: Record<string, string>;
+  /** Set on skills copied from open-source projects: where they come from and under which license. */
+  origin?: { source: string; license: string };
 }
 
 const AUTHORED_SKILLS: Skill[] = [
@@ -365,7 +367,7 @@ Style the table in a CSS Module with tokens; wrap it in an overflow-x: auto cont
 4. Content first: write the real copy, the real labels and a few realistic sample rows before styling. A layout that only works with lorem ipsum does not work.
 5. Hierarchy: one primary action per screen, one h1, a clear second level. If two things shout, one of them is wrong.
 Then build with the kit: tokens in base.css, screens composed from @forja/ui, your own CSS Modules only for layout. Verify at 375 px and desktop, in light and dark, and run check_standards.
-Before you finish, load the skill "impeccable" (part "critique") and judge the result the way a reviewer would.`,
+Before you finish, load the skill "impeccable" (part "reference/critique") and judge the result the way a reviewer would.`,
   },
   {
     name: "design-system",
@@ -397,32 +399,72 @@ Put the light values in :root and the dark ones in @media (prefers-color-scheme:
 ];
 
 /**
- * Skills copied from open-source projects live as folders next to this file: skills/<name>/SKILL.md
- * (front matter name and description), optional parts/<part>.md, and the LICENSE they came with.
- * See skills/NOTICE.md for the sources, licenses and what Forja changed.
+ * Skills copied from open-source projects live as folders next to this file, exactly as
+ * published (SKILL.md, references, scripts, data, assets) plus the LICENSE they came with.
+ * Nothing in them is edited: Forja only reads their text (SKILL.md and every .md file become
+ * "parts" an agent can load) and prepends a note when it serves them (see skills.ts). The
+ * scripts and data stay on disk untouched; the agents have no shell to run them.
+ * See skills/NOTICE.md for the sources and licenses.
  */
 const VENDORED = fileURLToPath(new URL("./skills/", import.meta.url));
 
+/** One line for the index (the upstream descriptions are paragraphs) and where each skill comes from. */
+const VENDORED_INFO: Record<string, { description: string; source: string; license: string }> = {
+  "frontend-design": {
+    description: "Anthropic's design-lead process: ground the design in the subject, avoid templated defaults, plan tokens and layout, build, self-critique",
+    source: "Anthropic, github.com/anthropics/skills (skills/frontend-design)",
+    license: "Apache-2.0",
+  },
+  impeccable: {
+    description: "Design, critique, audit and polish an interface: craft floor, UX review, layout, type, color, motion, copy and hardening",
+    source: "Paul Bakaus, github.com/pbakaus/impeccable (plugin/skills/impeccable)",
+    license: "Apache-2.0",
+  },
+  hallmark: {
+    description: "Make new UI look designed, not generated: a hard floor against model defaults, one idea per screen, a sweep before handing back",
+    source: "github.com/Nutlope/hallmark (skills/hallmark)",
+    license: "MIT",
+  },
+  "taste-skill": {
+    description: "Art direction against the generic look: find the idea in the subject, write the argument and the copy, keep a strict no-ornament house style",
+    source: "Leonxlnx, github.com/Leonxlnx/taste-skill (skills/taste-skill)",
+    license: "MIT",
+  },
+  "ui-ux-pro-max": {
+    description: "UI/UX design intelligence: ten priority categories of rules, style, palette and font choice, UX guidelines, design dials",
+    source: "Next Level Builder, github.com/nextlevelbuilder/ui-ux-pro-max-skill (.claude/skills/ui-ux-pro-max)",
+    license: "MIT",
+  },
+  "web-design-guidelines": {
+    description: "Audit UI for accessibility, focus, forms, animation, typography, performance and UX with Vercel's Web Interface Guidelines",
+    source: "Vercel Labs, github.com/vercel-labs/web-interface-guidelines",
+    license: "MIT",
+  },
+};
+
 const unix = (text: string) => text.replace(/\r\n/g, "\n");
+const SKIPPED_DIRS = /(^|\/)(node_modules|\.git|evals|tests?)(\/|$)/;
+const NOT_PARTS = /(^|\/)(SKILL|LICENSE|NOTICE)(\.\w+)?$/i;
 
 function readVendored(): Skill[] {
   if (!existsSync(VENDORED)) return [];
   const out: Skill[] = [];
   for (const dir of readdirSync(VENDORED, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name).sort()) {
-    const file = `${VENDORED}${dir}/SKILL.md`;
-    if (!existsSync(file)) continue;
-    const text = unix(readFileSync(file, "utf8"));
+    const root = `${VENDORED}${dir}/`;
+    if (!existsSync(`${root}SKILL.md`)) continue;
+    const text = unix(readFileSync(`${root}SKILL.md`, "utf8"));
     const m = /^---\n([\s\S]*?)\n---\n([\s\S]*)$/.exec(text);
-    const meta = (key: string) => new RegExp(`^${key}:\s*(.+)$`, "m").exec(m?.[1] ?? "")?.[1]?.trim();
-    const description = meta("description");
+    const info = VENDORED_INFO[dir];
+    const description = info?.description ?? /^description:\s*(.+)$/m.exec(m?.[1] ?? "")?.[1]?.trim();
     const body = (m ? m[2]! : text).trim();
     if (!description || !body) continue;
     const parts: Record<string, string> = {};
-    const partsDir = `${VENDORED}${dir}/parts/`;
-    if (existsSync(partsDir)) {
-      for (const f of readdirSync(partsDir).filter((f) => f.endsWith(".md")).sort()) parts[f.slice(0, -3)] = unix(readFileSync(partsDir + f, "utf8")).trim();
-    }
-    out.push({ name: meta("name") ?? dir, description, body, ...(Object.keys(parts).length ? { parts } : {}) });
+    const found = readdirSync(root, { recursive: true })
+      .map((f) => String(f).replace(/\\/g, "/"))
+      .filter((f) => f.endsWith(".md") && !NOT_PARTS.test(f) && !SKIPPED_DIRS.test(f))
+      .sort();
+    for (const f of found) parts[f.slice(0, -3)] = unix(readFileSync(root + f, "utf8")).trim();
+    out.push({ name: dir, description, body, ...(Object.keys(parts).length ? { parts } : {}), ...(info ? { origin: { source: info.source, license: info.license } } : {}) });
   }
   return out;
 }

@@ -21,7 +21,7 @@ import { previewOrigin, previewUrl } from "../runtime/urls.js";
 import { findSymbol, projectMap, relatedFiles } from "./index.js";
 import { rewriteImports } from "./rename.js";
 import { enabledOrgSkills } from "../platform/orgSkills.js";
-import { allSkills, findSkill } from "./skills.js";
+import { allSkills, findSkill, renderSkill } from "./skills.js";
 import { standardsScan } from "./standards.js";
 
 export { previewUrl };
@@ -509,7 +509,7 @@ export const builderTools: BuilderTool[] = [
     input_schema: obj(
       {
         name: str("Nombre de la skill, tal como aparece en el índice"),
-        part: str("Solo para las skills que listan partes en el índice ([parts: …]): la parte que quieres leer. Sin ella recibes la skill y la lista de sus partes."),
+        part: str("Solo para las skills con partes (el índice dice cuántas): la ruta de la parte que quieres leer, por ejemplo reference/critique. Sin ella recibes la skill y la lista de sus partes."),
       },
       ["name"],
     ),
@@ -518,13 +518,7 @@ export const builderTools: BuilderTool[] = [
       const org = await enabledOrgSkills((await projects.getProject(ctx.projectId))?.orgId);
       const skill = findSkill(files, i.name, org);
       if (!skill) throw new Error(`No hay ninguna skill llamada "${i.name}". Las que hay: ${allSkills(files, org).map((s) => s.name).join(", ")}.`);
-      const part = i.part?.trim().toLowerCase();
-      if (part) {
-        const text = skill.parts?.[part];
-        if (text === undefined) throw new Error(`La skill ${skill.name} no tiene la parte "${part}". ${skill.parts ? `Sus partes: ${Object.keys(skill.parts).join(", ")}.` : "No tiene partes."}`);
-        return `# Skill: ${skill.name} / ${part}\n\n${text}`;
-      }
-      return `# Skill: ${skill.name}\n${skill.description}\n\n${skill.body}`;
+      return renderSkill(skill, i.part);
     },
   },
   {

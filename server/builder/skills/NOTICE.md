@@ -1,19 +1,29 @@
 # Third-party notices
 
-The folders next to this file contain design skills copied from open-source projects, used under
-their original licenses (each folder keeps its LICENSE). The text is kept as published; Forja adds
-a short note at the top of each file saying what does not apply here (their scripts, launchers and
-network tools are not included), and, for some skills, an authored SKILL.md that summarizes the
-upstream one and points to the copied reference files ("parts"). Only text was copied: no scripts,
-binaries or data files.
+The folders next to this file are skills copied from open-source projects, exactly as published
+(SKILL.md, references, scripts, data and assets), under their original licenses. **No file from
+upstream was modified.** Each folder keeps its LICENSE (for those whose license file lives at the
+repository root, Forja added a copy named `LICENSE`, and for Impeccable also its `NOTICE.md`).
 
-| Folder | Source | License | Changes by Forja |
+Forja only reads their text. SKILL.md and every other `.md` file become "parts" an agent can load
+with `load_skill`, and Forja prepends a note when it serves them saying that its agents have no
+shell, so the scripts, launchers and network tools they mention are not available. The scripts and
+data stay on disk untouched and are never executed by Forja.
+
+| Folder | Source | Commit | License |
 |---|---|---|---|
-| `frontend-design/` | Anthropic, `anthropics/skills`, skill `frontend-design` | Apache-2.0 | Forja note added at the top; front matter rewritten |
-| `impeccable/` | Paul Bakaus, `pbakaus/impeccable` (SKILL.md and `reference/`) | Apache-2.0 | Forja note added at the top of every file; SKILL.md condensed (principles, how to design and modes kept; setup, launcher and command plumbing replaced by a parts table); iOS/Android references not included |
-| `hallmark/` | Together AI, `Nutlope/hallmark` (SKILL.md and `references/`) | MIT | Forja note added; The Floor kept without the Hallmark stamp and node linter rules; the flow rewritten for Forja's tools; theme, genre and macrostructure data not included |
-| `taste-skill/` | Leonxlnx, `Leonxlnx/taste-skill` (SKILL.md and `references/`) | MIT | Forja note added; the thinking steps, house rules and laws kept; the draw, inspect, assets and scenes steps removed; large references (motion, imagery, app-screens, scenes, research) not included |
-| `ui-ux-pro-max/` | Next Level Builder, `nextlevelbuilder/ui-ux-pro-max-skill` | MIT | Forja note added; search-tool instructions replaced by the tables and a Forja workflow; the style, palette and font databases are not included |
-| `web-design-guidelines/` | Vercel Labs, `vercel-labs/web-interface-guidelines` (`command.md`) | MIT | Forja note added; the rules are a fixed snapshot instead of being fetched at review time |
+| `frontend-design/` | Anthropic, [anthropics/skills](https://github.com/anthropics/skills), `skills/frontend-design` | `ca45fc4` | Apache-2.0 |
+| `impeccable/` | Paul Bakaus, [pbakaus/impeccable](https://github.com/pbakaus/impeccable), `plugin/skills/impeccable` | `9fadc41` | Apache-2.0 |
+| `hallmark/` | [Nutlope/hallmark](https://github.com/Nutlope/hallmark), `skills/hallmark` | `4f6a46c` | MIT |
+| `taste-skill/` | Leonxlnx, [Leonxlnx/taste-skill](https://github.com/Leonxlnx/taste-skill), `skills/taste-skill` | `12af471` | MIT |
+| `ui-ux-pro-max/` | Next Level Builder, [nextlevelbuilder/ui-ux-pro-max-skill](https://github.com/nextlevelbuilder/ui-ux-pro-max-skill), `.claude/skills/ui-ux-pro-max` | `713eef5` | MIT |
+| `web-design-guidelines/` | Vercel Labs, [vercel-labs/web-interface-guidelines](https://github.com/vercel-labs/web-interface-guidelines) (repository root) | `434b7f9` | MIT |
 
-Apache-2.0 files were modified as described above; the original license text is in each folder.
+Two things to know:
+
+- `web-design-guidelines/SKILL.md` is written by Forja. Vercel's own `web-design-guidelines` skill
+  (in `vercel-labs/agent-skills`) has no license file and only tells the agent to fetch the rules
+  from a URL, so it was not copied; the rules come from the MIT-licensed guidelines repository.
+- `impeccable/scripts/impeccable` is Impeccable's launcher. When someone runs it, it downloads a
+  native binary from the project's GitHub releases and checks it against `engine-checksums.txt`.
+  Forja never runs it; it is here only because the skill is copied whole.
