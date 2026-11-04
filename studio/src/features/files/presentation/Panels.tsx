@@ -3,6 +3,7 @@ import { api } from "../application/controller.js";
 import { bytes, timeAgo } from "../../../shared/presentation/format.js";
 import type { Project } from "../../../shared/contracts/index.js";
 import { Refresh } from "../../../shared/Icons.js";
+import { Select } from "../../../shared/ui.js";
 
 export function useLoad<T>(path: string, deps: unknown[] = []) {
   const [data, setData] = useState<T | null>(null);
@@ -545,11 +546,8 @@ export function LogsPanel({ projectId, lines }: { projectId: string; lines: { at
       {error && <div className="error-box" role="alert">{error}</div>}
       <div className="panel-filters">
         <input type="search" aria-label="Buscar registros" placeholder="Buscar mensaje o fuente…" value={query} onChange={(e) => setQuery(e.target.value)} />
-        <select aria-label="Entorno de los registros" value={env} onChange={(e) => setEnv(e.target.value)}>
-         <option value="all">Todos los entornos</option>
-         <option value="preview">Vista previa</option>
-         <option value="published">Publicada</option>
-        </select>
+        <Select label="Entorno de los registros" value={env} onValueChange={setEnv}
+          options={[{ value: "all", label: "Todos los entornos" }, { value: "preview", label: "Vista previa" }, { value: "published", label: "Publicada" }]} />
         <label className="row" style={{ color: "var(--text)" }}>
           <input type="checkbox" style={{ width: "auto" }} checked={errorsOnly} onChange={(e) => setErrorsOnly(e.target.checked)} />
           Solo errores

@@ -489,7 +489,8 @@ async function main() {
       await sandbox.getByRole("cell", { name: "member@example.test", exact: true }).waitFor();
       await screenshot(sandbox, "builder-users-desktop");
       await nav.getByRole("button", { name: "Registros", exact: true }).click();
-      await sandbox.getByLabel("Entorno de los registros").selectOption("published");
+      await sandbox.getByRole("button", { name: /^Entorno de los registros:/ }).click();
+      await sandbox.getByRole("option", { name: "Publicada", exact: true }).click();
       await sandbox.getByLabel("Solo errores").check();
       await sandbox.locator(".log-line").filter({ hasText: "No se pudo enviar resumen" }).waitFor();
       assert(await sandbox.locator(".log-line").filter({ hasText: "Vista previa lista" }).count() === 0, "no se filtró el entorno");
@@ -528,6 +529,208 @@ async function main() {
     await page.waitForURL(/\/admin/);
     await page.getByRole("heading", { name: "Administración" }).waitFor();
     await page.getByRole("navigation", { name: "Secciones de administración" }).waitFor();
+  });
+
+  await step("admin: ajustes buscables, cambios reversibles y guardado persistente", async () => {
+    await page.goto("/admin/general");
+    const search = page.getByRole("textbox", { name: "Buscar ajustes" });
+    await search.fill("freeCredits");
+    const credits = page.getByLabel("Créditos iniciales por cuenta", { exact: true });
+    const original = await credits.inputValue();
+    const save = page.getByRole("button", { name: "Guardar cambios", exact: true });
+    await credits.fill(String(Number(original) + 1));
+    assert(await save.isEnabled(), "el ajuste no marcó cambios pendientes");
+    await credits.fill(original);
+    assert(await save.isDisabled(), "volver al valor original no limpió el borrador");
+    await credits.fill(String(Number(original) + 7));
+    await save.click();
+    await page.getByRole("status").filter({ hasText: "Guardado: 1 ajuste." }).waitFor();
+    await page.reload();
+    await page.getByRole("textbox", { name: "Buscar ajustes" }).fill("freeCredits");
+    assert(await page.getByLabel("Créditos iniciales por cuenta", { exact: true }).inputValue() === String(Number(original) + 7), "no persistió el ajuste");
+    await page.getByRole("button", { name: "Restablecer", exact: true }).click();
+    await page.getByRole("status").filter({ hasText: "Valor por defecto restablecido." }).waitFor();
+    await page.getByRole("textbox", { name: "Buscar ajustes" }).fill("ajuste-que-no-existe");
+    await page.getByText("No hay ajustes con estos filtros.", { exact: false }).waitFor();
+    await page.getByRole("button", { name: "Limpiar filtros", exact: true }).click();
+    await page.getByRole("textbox", { name: "Buscar ajustes" }).fill("models.allow");
+    const patterns = page.getByLabel("Lista blanca de modelos de la plataforma", { exact: true });
+    const originalPatterns = await patterns.inputValue();
+    await patterns.fill(`${originalPatterns}\n`);
+    await patterns.press("End");
+    await patterns.pressSequentially("ux-test:*");
+    assert((await patterns.inputValue()).endsWith("\nux-test:*"), "no se pudo escribir una nueva línea en la lista");
+    await page.getByRole("button", { name: "Descartar", exact: true }).click();
+  });
+
+  await step("admin: select filtra sin acentos, navega por teclado y restaura el foco", async () => {
+    await page.goto("/admin/general");
+    const trigger = page.getByRole("button", { name: /^Grupo de ajustes:/ });
+    await trigger.click();
+    const search = page.getByRole("combobox", { name: "Buscar en Grupo de ajustes" });
+    await search.fill("creditos");
+    assert(await page.getByRole("option").count() === 1, "la búsqueda no filtró por Créditos sin acento");
+    await search.press("Enter");
+    await page.getByText("Créditos iniciales por cuenta", { exact: true }).waitFor();
+    await page.waitForFunction(() => document.activeElement?.getAttribute("aria-label")?.startsWith("Grupo de ajustes:"));
+    assert(await trigger.evaluate((el) => document.activeElement === el), "no volvió el foco al selector");
+    await trigger.press("ArrowDown");
+    await page.getByRole("combobox", { name: "Buscar en Grupo de ajustes" }).fill("sin-opcion");
+    await page.getByRole("status").filter({ hasText: "No hay opciones" }).waitFor();
+    await page.getByRole("combobox", { name: "Buscar en Grupo de ajustes" }).press("Escape");
+    await page.waitForFunction(() => document.activeElement?.getAttribute("aria-label")?.startsWith("Grupo de ajustes:"));
+    assert(await trigger.evaluate((el) => document.activeElement === el), "Escape no devolvió el foco");
+    await trigger.click();
+    const reopened = page.getByRole("combobox", { name: "Buscar en Grupo de ajustes" });
+    assert(await reopened.inputValue() === "", "la búsqueda anterior no se limpió");
+    await reopened.press("Home");
+    await reopened.press("ArrowDown");
+    await reopened.press("Enter");
+    assert(await page.getByRole("listbox").count() === 0, "Enter no cerró la lista");
+    await trigger.click();
+    await page.getByRole("combobox", { name: "Buscar en Grupo de ajustes" }).press("Tab");
+    await page.getByRole("listbox").waitFor({ state: "hidden" });
+    await page.waitForFunction(() => document.activeElement?.matches('input[type="checkbox"]'));
+    assert(await page.getByLabel("Solo modificados").evaluate((el) => document.activeElement === el), "Tab no continuó al siguiente control");
+  });
+
+  await step("admin: edición completa de modelos conserva errores y persiste cambios", async () => {
+    await page.goto("/admin/models");
+    await page.getByRole("button", { name: "Editar Fuerte", exact: true }).click();
+    let dialog = page.getByRole("dialog", { name: "Editar modelo" });
+    await dialog.getByLabel("Nombre visible").fill("Modelo editado");
+    await dialog.getByLabel("Contexto (tokens)", { exact: true }).fill("64000");
+    await dialog.getByLabel("Lectura de caché ($/MTok)", { exact: true }).fill("0.07");
+    await dialog.getByLabel("Herramientas", { exact: true }).uncheck();
+    await page.route("**/api/admin/models/item/**", async (route) => {
+      if (route.request().method() === "PATCH") await route.fulfill({ status: 400, json: { error: "No se pudo guardar el modelo de prueba" } });
+      else await route.continue();
+    });
+    await dialog.getByRole("button", { name: "Guardar cambios" }).click();
+    await dialog.getByRole("alert").filter({ hasText: "No se pudo guardar" }).waitFor();
+    assert(await dialog.getByLabel("Nombre visible").inputValue() === "Modelo editado", "se perdió el borrador tras el error");
+    await page.unroute("**/api/admin/models/item/**");
+    await dialog.getByRole("button", { name: "Guardar cambios" }).click();
+    await dialog.waitFor({ state: "hidden" });
+    await page.reload();
+    await page.getByRole("button", { name: "Editar Modelo editado", exact: true }).click();
+    dialog = page.getByRole("dialog", { name: "Editar modelo" });
+    assert(await dialog.getByLabel("Contexto (tokens)", { exact: true }).inputValue() === "64000", "no persistió el contexto");
+    assert(await dialog.getByLabel("Lectura de caché ($/MTok)", { exact: true }).inputValue() === "0.07", "no persistió el precio de caché");
+    assert(!await dialog.getByLabel("Herramientas", { exact: true }).isChecked(), "no persistieron las capacidades");
+    await dialog.getByLabel("Nombre visible").fill("No guardar");
+    await dialog.getByRole("button", { name: "Cancelar", exact: true }).click();
+    await page.getByRole("button", { name: "Editar Modelo editado", exact: true }).waitFor();
+    await screenshot(page, "admin-models");
+  });
+
+  await step("admin: crear, editar y borrar proveedores sin exponer cabeceras", async () => {
+    await page.goto("/admin/providers");
+    await page.getByRole("button", { name: "+ Añadir proveedor", exact: true }).click();
+    const form = page.locator("form").filter({ hasText: "Nuevo proveedor compatible con OpenAI" });
+    await form.getByLabel("Identificador", { exact: true }).fill("ux-local");
+    await form.getByLabel("Nombre visible", { exact: true }).fill("Servidor local");
+    await form.getByLabel("URL base", { exact: true }).fill(`http://127.0.0.1:${llm.port}/v1`);
+    await form.getByRole("button", { name: "Añadir", exact: true }).click();
+    let card = page.locator("section").filter({ has: page.locator("strong", { hasText: /^Servidor local$/ }) });
+    await card.getByRole("button", { name: "Editar proveedor", exact: true }).click();
+    let dialog = page.getByRole("dialog", { name: "Editar proveedor" });
+    await dialog.getByLabel("Nombre visible", { exact: true }).fill("Ollama del equipo");
+    await dialog.getByLabel("Reemplazar cabeceras personalizadas").check();
+    await dialog.getByLabel("Cabeceras (JSON)", { exact: true }).fill('{"x-team-token":"test-private-header"}');
+    await dialog.getByRole("button", { name: "Guardar cambios" }).click();
+    await dialog.waitFor({ state: "hidden" });
+    await page.reload();
+    card = page.locator("section").filter({ has: page.locator("strong", { hasText: /^Ollama del equipo$/ }) });
+    await card.getByText("Cabeceras configuradas: x-team-token").waitFor();
+    assert(!await page.getByText("test-private-header", { exact: false }).count(), "se expuso el valor de una cabecera");
+    await card.getByRole("button", { name: "Editar proveedor", exact: true }).click();
+    dialog = page.getByRole("dialog", { name: "Editar proveedor" });
+    await dialog.getByLabel("Nombre visible", { exact: true }).fill("Ollama renombrado");
+    await dialog.getByRole("button", { name: "Guardar cambios" }).click();
+    await dialog.waitFor({ state: "hidden" });
+    card = page.locator("section").filter({ has: page.locator("strong", { hasText: /^Ollama renombrado$/ }) });
+    await card.getByText("Cabeceras configuradas: x-team-token").waitFor();
+    await page.route("**/api/admin/providers/ux-local", async (route) => {
+      if (route.request().method() === "PATCH") await route.fulfill({ status: 400, json: { error: "Clave rechazada por la prueba" } });
+      else await route.continue();
+    });
+    const keyInput = card.getByLabel(/^Clave de API de /);
+    await keyInput.fill("test-replacement");
+    await card.getByRole("button", { name: "Guardar", exact: true }).click();
+    await page.getByRole("alert").filter({ hasText: "Clave rechazada" }).waitFor();
+    assert(await keyInput.inputValue() === "test-replacement", "se borró la clave cuando falló el guardado");
+    await page.unroute("**/api/admin/providers/ux-local");
+    await card.getByRole("button", { name: "Editar proveedor", exact: true }).click();
+    dialog = page.getByRole("dialog", { name: "Editar proveedor" });
+    await dialog.getByLabel("Reemplazar cabeceras personalizadas").check();
+    await dialog.getByLabel("Cabeceras (JSON)", { exact: true }).fill('{"bad":42}');
+    await dialog.getByRole("button", { name: "Guardar cambios" }).click();
+    await dialog.getByRole("alert").filter({ hasText: "Cabeceras no válidas" }).waitFor();
+    await dialog.getByRole("button", { name: "Cancelar", exact: true }).click();
+    page.once("dialog", (d) => d.accept());
+    await card.getByRole("button", { name: "Borrar", exact: true }).click();
+    await card.waitFor({ state: "hidden" });
+  });
+
+  await step("admin: filtros de usuarios y errores de edición mantienen el rol protegido", async () => {
+    await page.goto("/admin/users");
+    const search = page.getByRole("textbox", { name: "Buscar usuarios" });
+    await search.fill("usuario-inexistente");
+    await page.getByText("No hay cuentas con estos filtros.", { exact: false }).waitFor();
+    await page.getByRole("button", { name: "Limpiar filtros", exact: true }).click();
+    await page.getByRole("button", { name: `Rol de ${ADMIN.email}: Administración`, exact: true }).click();
+    page.once("dialog", (d) => d.accept());
+    await page.getByRole("option", { name: "Usuario", exact: true }).click();
+    await page.getByRole("alert").waitFor();
+    await page.getByRole("button", { name: `Rol de ${ADMIN.email}: Administración`, exact: true }).waitFor();
+  });
+
+  await step("admin: listas largas paginadas, creación de modelo y vista móvil", async () => {
+    await page.goto("/admin/models");
+    await page.getByRole("button", { name: "+ Añadir modelo propio", exact: true }).click();
+    await page.getByRole("button", { name: /^Proveedor del nuevo modelo:/ }).click();
+    await page.getByRole("option", { name: "openai", exact: true }).click();
+    const picker = page.getByRole("button", { name: /^Modelo del proveedor:/ });
+    await picker.click();
+    await page.getByRole("combobox", { name: "Buscar en Modelo del proveedor" }).fill("flaky");
+    await page.getByRole("combobox", { name: "Buscar en Modelo del proveedor" }).press("Enter");
+    const form = page.locator("form").filter({ hasText: "Modelo propio" });
+    assert(await form.getByLabel("Nombre en la API", { exact: true }).inputValue() === "fake-flaky", "el selector no rellenó el nombre API");
+    await form.getByLabel("Nombre visible", { exact: true }).fill("Modelo agregado");
+    await form.getByRole("button", { name: "Añadir", exact: true }).click();
+    await page.getByRole("button", { name: "Editar Modelo agregado", exact: true }).waitFor();
+    const response = await page.request.get("/api/admin/models");
+    const catalog = await response.json();
+    assert(catalog.models.some((m) => m.model === "fake-flaky" && m.label === "Modelo agregado"), "el modelo nuevo no persistió");
+    await page.route("**/api/admin/models", async (route) => {
+      if (route.request().method() !== "GET") return route.continue();
+      await route.fulfill({ json: { ...catalog, models: Array.from({ length: 28 }, (_, i) => ({
+        ...catalog.models.find((m) => m.provider === "openai"), id: `openai:page-${i}`, model: `page-${i}`, label: `Paginado ${i}`, available: true, allowed: true,
+      })) } });
+    });
+    await page.reload();
+    await page.getByRole("button", { name: "Editar Paginado 0", exact: true }).waitFor();
+    assert(await page.getByRole("button", { name: /^Editar Paginado / }).count() === 25, "no se limitó la página de modelos");
+    await page.getByRole("button", { name: "Siguiente", exact: true }).click();
+    assert(await page.getByRole("button", { name: /^Editar Paginado / }).count() === 3, "faltan modelos de la segunda página");
+    await page.getByRole("textbox", { name: "Buscar modelo", exact: true }).fill("Paginado 0");
+    await page.getByRole("button", { name: "Editar Paginado 0", exact: true }).waitFor();
+    await page.unroute("**/api/admin/models");
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto("/admin/models");
+    await page.getByRole("button", { name: "Editar Modelo agregado", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: "Editar modelo" });
+    const bounds = await dialog.boundingBox();
+    assert(bounds && bounds.x >= 0 && bounds.x + bounds.width <= 391, "el editor se sale de la pantalla móvil");
+    await dialog.getByRole("button", { name: /^Calidad:/ }).click();
+    const list = page.getByRole("listbox", { name: "Calidad" });
+    const listBounds = await list.boundingBox();
+    assert(listBounds && listBounds.x >= 0 && listBounds.x + listBounds.width <= 391, "el selector se sale de la pantalla móvil");
+    await page.getByRole("combobox", { name: "Buscar en Calidad" }).press("Escape");
+    await dialog.getByRole("button", { name: "Cancelar", exact: true }).click();
+    await screenshot(page, "admin-mobile");
+    await page.setViewportSize({ width: 1280, height: 800 });
   });
 
   await step("login: una sesión nueva entra con correo y contraseña", async () => {

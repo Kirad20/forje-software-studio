@@ -61,4 +61,15 @@ describe("model routing application", () => {
       .toMatchObject({ intent: "style", complexity: 1, needsVision: true, source: "heuristic" });
     expect(ports.invoke).not.toHaveBeenCalled();
   });
+  it("allows vision-only judges on fallback without relaxing the QA role default", async () => {
+    const { ports, router } = setup();
+    ports.allowedModels.mockResolvedValue([{ ...b, tools: false }]);
+    ports.invoke.mockRejectedValueOnce(new ModelCallError("overloaded", true));
+    const result = await router.callModel(scope, "qa", { ...features, needsVision: true, needsTools: false },
+      { messages: [] }, { pinned: a });
+    expect(result.model.id).toBe("b");
+    await expect(router.pick(scope, "qa", { ...features, needsVision: true })).rejects.toThrow("No hay ningún modelo");
+    ports.allowedModels.mockResolvedValue([{ ...b, tools: false, vision: false }]);
+    await expect(router.pick(scope, "qa", { ...features, needsVision: true, needsTools: false })).rejects.toThrow("No hay ningún modelo");
+  });
 });

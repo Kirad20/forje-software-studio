@@ -166,4 +166,7 @@ describe("default judge", () => {
     expect(defaultJudge([m("a", { tier: 2 }), m("b", { tier: 3 })])?.id).toBe("b");
     expect(defaultJudge([m("blind", { vision: false })])).toBeUndefined();
   });
+  it("accepts a vision-only model without tool calling", () => {
+    expect(defaultJudge([m("qwen2.5vl", { tools: false })])?.id).toBe("qwen2.5vl");
+  });
 });

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
+export { Select } from "./Select.js";
 
 /** Closes on outside click and Escape. */
 export function useDismiss<T extends HTMLElement>(open: boolean, close: () => void) {
@@ -45,8 +46,8 @@ export function MenuItem(props: { onClick: () => void; children: ReactNode; dang
   );
 }
 
-export function Switch({ on, onChange, label }: { on: boolean; onChange: (v: boolean) => void; label?: string }) {
-  return <button role="switch" aria-checked={on} aria-label={label} className={`switch ${on ? "on" : ""}`} onClick={() => onChange(!on)} />;
+export function Switch({ on, onChange, label, disabled }: { on: boolean; onChange: (v: boolean) => void; label?: string; disabled?: boolean }) {
+  return <button type="button" role="switch" aria-checked={on} aria-label={label} disabled={disabled} className={`switch ${on ? "on" : ""}`} onClick={() => onChange(!on)} />;
 }
 
 export function Modal({ onClose, children, className }: { onClose: () => void; children: ReactNode; className?: string }) {

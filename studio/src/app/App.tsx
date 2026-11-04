@@ -1,9 +1,8 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { lazy, Suspense, useEffect, useState, type ReactNode } from "react";
 import { Account as AccountView, Login } from "../features/identity/index.js";
 import { Logo } from "../shared/Icons.js";
 import { Menu, MenuItem } from "../shared/ui.js";
 import { Dashboard, ProjectView } from "../features/projects/index.js";
-import { Admin } from "../features/administration/index.js";
 import { Integrations } from "../features/integrations/index.js";
 import { Plan } from "../features/billing/index.js";
 import { go, usePath } from "./router.js";
@@ -12,6 +11,8 @@ import { identityController } from "../features/identity/index.js";
 import type { Me } from "../shared/contracts/index.js";
 
 export type { Me } from "../shared/contracts/index.js";
+
+const Admin = lazy(() => import("../features/administration/index.js").then((module) => ({ default: module.Admin })));
 
 export function App() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
@@ -38,7 +39,9 @@ export function App() {
       ) : section === "integrations" ? (
         <Integrations />
       ) : section === "admin" && me.platformRole === "admin" ? (
-        <Admin tab={path.split("?")[0]!.split("/")[2] ?? ""} />
+        <Suspense fallback={<div className="empty" role="status">Cargando administración…</div>}>
+          <Admin tab={path.split("?")[0]!.split("/")[2] ?? ""} />
+        </Suspense>
       ) : section === "evals" && me.platformRole === "admin" ? (
         // The evals page moved into the admin panel.
         <Redirect to="/admin/evals" />

@@ -22,6 +22,7 @@ export interface PickInput {
   complexity: number;
   domains: Domain[] | string[];
   needsVision: boolean;
+  needsTools?: boolean;
 }
 export interface Candidate {
   id: string;

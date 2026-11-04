@@ -87,7 +87,7 @@ export class AdmissionState {
 
 export const admission = new AdmissionState();
 
-interface JudgeModel { id: string; vision: boolean; tools: boolean }
+interface JudgeModel { id: string; vision: boolean }
 export interface RunConfiguration {
   cases: string[];
   repeats: number;
@@ -126,11 +126,11 @@ export async function startEvaluation<M extends JudgeModel>(
       let judge: M | null = null;
       if (req.judge !== false) {
         judge = req.judgeModel
-          ? allowed.find((m) => m.id === req.judgeModel && m.vision && m.tools) ?? null
+          ? allowed.find((m) => m.id === req.judgeModel && m.vision) ?? null
           : ports.defaultJudge(allowed) ?? null;
         if (!judge) throw new EvalError(400, req.judgeModel
-          ? "Ese modelo no puede hacer de juez (necesita visión y herramientas)."
-          : "Ningún modelo permitido ve imágenes: desactiva el juez o permite uno con visión.");
+          ? "Ese modelo no puede hacer de juez: debe estar permitido y tener Imágenes activado en Administración → Modelos."
+          : "Ningún modelo permitido tiene Imágenes activado. Revisa esa capacidad en Administración → Modelos y los permisos en Cuenta → Modelos, o desactiva el juez.");
       }
       const budgetUsd = runBudget(req.budgetUsd, limits, await ports.spent());
       if (run.abort.signal.aborted) throw new EvalError(409, "El servidor se está apagando.");
