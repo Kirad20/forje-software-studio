@@ -1,0 +1,30 @@
+.evals { gap: 20px; min-width: 0; }
+.evals h2, .evals h3, .evals p { margin: 0; }
+.evals-heading { align-items: flex-start; gap: 16px; }
+.evals-heading h2 { margin: 6px 0 8px; font-size: clamp(20px, 3vw, 28px); letter-spacing: -.03em; }
+.evals-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.evals-metric { display: flex; flex-direction: column; gap: 7px; padding: 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-2); min-width: 0; overflow-wrap: anywhere; }
+.evals-metric strong { font-size: 23px; letter-spacing: -.03em; }
+.evals-panel { padding: 20px; gap: 16px; min-width: 0; }
+.evals-form { border: 0; padding: 0; margin: 0; display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 24px; min-width: 0; }
+.evals-form > * { min-width: 0; }
+.evals-wrap { flex-wrap: wrap; gap: 8px; }
+.evals-cases { display: grid; gap: 8px; max-height: 420px; overflow-y: auto; padding: 2px; }
+.evals-case { display: flex; gap: 10px; align-items: center; padding: 12px; border: 1px solid var(--border); border-radius: 10px; cursor: pointer; color: var(--text); }
+.evals-case.selected { background: var(--surface-2); border-color: var(--accent); }
+.evals-case code { display: block; margin-top: 4px; overflow-wrap: anywhere; }
+.evals-config > .row { gap: 12px; }
+.evals-config label { min-width: 0; }
+.evals-launch { border-top: 1px solid var(--border); padding-top: 16px; }
+.evals-active { padding: 16px; flex-wrap: wrap; }
+.evals-table { overflow-x: auto; }
+.evals-table table { min-width: 580px; }
+.evals progress { display: block; width: 100px; height: 5px; margin-top: 6px; accent-color: var(--accent); }
+.evals-result { border: 1px solid var(--border); border-radius: 10px; padding: 12px; }
+.evals-result summary { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; cursor: pointer; }
+.evals-result summary > span:first-child { flex: 1; min-width: 140px; }
+.evals-result > .stack { margin-top: 14px; }
+.evals pre { white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; }
+.evals .error-box, .evals .small { overflow-wrap: anywhere; }
+@media (max-width: 1000px) { .evals-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } .evals-form { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 480px) { .evals-panel { padding: 12px; } .evals-heading { flex-wrap: wrap; } .evals-metric { padding: 10px; } .evals-metric strong { font-size: 19px; } }

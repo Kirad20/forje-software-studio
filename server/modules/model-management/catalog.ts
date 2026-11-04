@@ -26,6 +26,7 @@ export const platformAllows: ReturnType<typeof createCatalogService>["platformAl
 export const availableModels: ReturnType<typeof createCatalogService>["availableModels"] = (...args) => catalog().availableModels(...args);
 export const listCatalog: ReturnType<typeof createCatalogService>["listCatalog"] = (...args) => catalog().listCatalog(...args);
 export const allowedModels: ReturnType<typeof createCatalogService>["allowedModels"] = (...args) => catalog().allowedModels(...args);
+export const modelReadiness: ReturnType<typeof createCatalogService>["modelReadiness"] = (...args) => catalog().modelReadiness(...args);
 export const saveModel: ReturnType<typeof createCatalogService>["saveModel"] = (...args) => catalog().saveModel(...args);
 export const deleteModel: ReturnType<typeof createCatalogService>["deleteModel"] = (...args) => catalog().deleteModel(...args);
 export const setAccountModels: ReturnType<typeof createCatalogService>["setAccountModels"] = (...args) => catalog().setAccountModels(...args);
