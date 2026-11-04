@@ -266,6 +266,23 @@ async function main() {
       await sleep(500);
     }
     assert(primary === "#16a34a", `la vista previa no refleja el color del chat (--primary=${JSON.stringify(primary)}, src=${src})`);
+    const manifestLink = frame.locator('link[rel="manifest"]');
+    assert(await manifestLink.getAttribute("crossorigin") === "use-credentials", "el manifest privado no solicita credenciales");
+    const appPage = await page.context().newPage();
+    try {
+      await appPage.goto(src);
+      const cdp = await page.context().newCDPSession(appPage);
+      const manifestResponse = appPage.waitForResponse((r) => new URL(r.url()).pathname === "/manifest.webmanifest");
+      const appManifest = await cdp.send("Page.getAppManifest");
+      const manifest = await manifestResponse;
+      assert(manifest.ok() && !appManifest.errors.length, `el navegador no pudo cargar el manifest privado: ${manifest.status()} ${JSON.stringify(appManifest.errors)}`);
+      assert((await manifest.request().allHeaders()).cookie?.includes("forja_share="), "la petición del manifest no envió la cookie del enlace privado");
+      const denied = await appPage.evaluate(async () => (await fetch("/manifest.webmanifest", { credentials: "omit" })).status);
+      assert(denied === 403, "el manifest privado se expuso sin la cookie del enlace");
+      await cdp.detach();
+    } finally {
+      await appPage.close();
+    }
   });
 
   await step("proyecto: recargar /p/<id> conserva la ruta y la vista del proyecto", async () => {
