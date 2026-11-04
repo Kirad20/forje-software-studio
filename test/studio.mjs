@@ -641,6 +641,109 @@ async function main() {
     await screenshot(page, "admin-models");
   });
 
+  await step("admin: diagnóstico de permisos y selección explícita del juez visual", async () => {
+    const account = await (await page.request.get("/api/models")).json();
+    const visual = account.models.find(m => m.vision);
+    assert(visual, "falta el modelo visual de prueba");
+    await page.request.put("/api/models/account", { data: { enabled: account.models.filter(m => m.id !== visual.id && m.enabled).map(m => m.id) } });
+    try {
+      await page.goto("/admin/models");
+      const permit = page.getByRole("button", { name: `Permitir ${visual.label} en mi cuenta`, exact: true });
+      await permit.waitFor();
+      await page.getByText("No permitido en tu cuenta", { exact: false }).first().waitFor();
+      await permit.click();
+      await permit.waitFor({ state: "hidden" });
+      const updated = await (await page.request.get("/api/models")).json();
+      assert(updated.models.find(m => m.id === visual.id)?.enabled, "la acción no permitió el juez en la cuenta");
+      const cfg = { enabled: true, limits: { maxRunUsd: 2, maxDailyUsd: 5, concurrency: 1, maxJobs: 60, maxRepeats: 5 },
+        spentLast24hUsd: 0, browser: true, activeRunId: null, cases: [{ id: "case", size: "small", title: "Caso de prueba" }],
+        models: [], modelDiagnostics: [{ ...visual, tools: true, blockers: ["No permitido en tu cuenta"] }] };
+      await page.route("**/api/admin/evals/config", route => route.fulfill({ json: cfg }));
+      await page.route("**/api/admin/evals/runs", route => route.fulfill({ json: { runs: [] } }));
+      await page.goto("/admin/evals");
+      await page.getByRole("alert").filter({ hasText: "No permitido en tu cuenta" }).waitFor();
+      assert(await page.getByRole("button", { name: /^Ejecutar / }).isDisabled(), "evals permite iniciar sin un juez disponible");
+      cfg.models = [visual];
+      cfg.modelDiagnostics[0].blockers = [];
+      await page.getByRole("button", { name: "Volver a comprobar", exact: true }).click();
+      await page.getByRole("alert").waitFor({ state: "hidden" });
+      await page.getByRole("button", { name: /^Modelo juez de diseño:/ }).click();
+      await page.getByRole("option").filter({ hasText: visual.id }).click();
+      assert(await page.getByRole("button", { name: /^Ejecutar / }).isEnabled(), "no se habilitó la ejecución tras corregir permisos");
+      let posted;
+      await page.unroute("**/api/admin/evals/runs");
+      await page.route("**/api/admin/evals/runs", async route => {
+        if (route.request().method() === "POST") {
+          posted = route.request().postDataJSON();
+          await route.fulfill({ status: 400, json: { error: "Ejecución interceptada sin gasto" } });
+        } else await route.fulfill({ json: { runs: [] } });
+      });
+      await page.getByRole("button", { name: /^Ejecutar / }).click();
+      await page.getByText("Ejecución interceptada sin gasto").waitFor();
+      assert(posted.judgeModel === visual.id, "no se envió el juez elegido");
+    } finally {
+      await page.request.put("/api/models/account", { data: { enabled: account.customized ? account.models.filter(m => m.enabled).map(m => m.id) : null } });
+      await page.unroute("**/api/admin/evals/config");
+      await page.unroute("**/api/admin/evals/runs");
+    }
+  });
+
+  await step("admin: evals moderno filtra casos y resultados, muestra errores y se adapta al móvil", async () => {
+    const cases = [{ id: "small-case", size: "small", title: "Caso pequeño" }, { id: "large-case", size: "large", title: "Caso grande" }];
+    const cfg = { enabled: true, limits: { maxRunUsd: 2, maxDailyUsd: 5, concurrency: 1, maxJobs: 2, maxRepeats: 5 },
+      spentLast24hUsd: 1, browser: true, activeRunId: null, cases, models: [{ id: "vision", label: "Modelo visual", tier: 4, vision: true }] };
+    const run = { id: "ux-run", status: "done", createdAt: "2026-11-04T12:00:00Z", budgetUsd: 2, spentUsd: 0.5, error: null, total: 2, done: 2, active: false };
+    const agg = { runs: 2, passRate: 0.5, score: { mean: 50, min: 0, max: 100, stdev: 50 }, judge: null, usd: 0.5, meanSeconds: 12, gateRounds: 1 };
+    const good = { caseId: "small-case", repeat: 1, status: "done", usd: 0.2, durationMs: 1000,
+      score: { total: 100, compile: 25, types: 20, runtime: 25, judge: null, hygiene: 10 },
+      turn: { models: ["vision"], steps: 2, toolErrors: 0 }, checks: { compile: { ok: true }, types: { ok: true }, preview: [] }, design: { judge: null } };
+    const detail = { ...run, config: { cases: cases.map(c => c.id), repeats: 1, models: ["vision"], judge: false },
+      summary: { overall: agg, byCase: { "small-case": agg }, bySize: {} },
+      results: [good, { ...good, caseId: "large-case", status: "failed", error: "Compilación fallida de prueba", score: { ...good.score, total: 0 }, checks: { compile: { ok: false }, types: null, preview: [] } }] };
+    let failDetail = true;
+    await page.route("**/api/admin/evals/config", route => route.fulfill({ json: cfg }));
+    await page.route("**/api/admin/evals/runs", route => route.fulfill({ json: { runs: [run] } }));
+    await page.route("**/api/admin/evals/runs/ux-run", route => failDetail
+      ? route.fulfill({ status: 500, json: { error: "No se pudieron cargar resultados" } }) : route.fulfill({ json: detail }));
+    await page.route("**/api/admin/evals/runs/ux-run/export?*", route => route.fulfill({ status: 500, json: { error: "Exportación rechazada" } }));
+    try {
+      await page.goto("/admin/evals");
+      await page.getByRole("heading", { name: "Evalúa, compara y encuentra fallos" }).waitFor();
+      assert(await page.getByRole("button", { name: /^Ejecutar / }).isDisabled(), "no se respetó el máximo de ejecuciones");
+      await page.getByRole("button", { name: "Ninguno", exact: true }).click();
+      await page.getByRole("button", { name: "Actualizar", exact: true }).click();
+      await page.getByText("Selecciona al menos un caso.", { exact: true }).waitFor();
+      assert(await page.getByRole("checkbox", { name: /Caso pequeño/ }).isChecked() === false, "actualizar volvió a seleccionar los casos descartados");
+      await page.getByRole("button", { name: "Pequeños", exact: true }).click();
+      assert(await page.getByRole("button", { name: /^Ejecutar / }).isEnabled(), "la selección rápida no ajustó las ejecuciones");
+      await page.getByRole("button", { name: "Ver resultados", exact: true }).click();
+      await page.getByRole("alert").filter({ hasText: "No se pudieron cargar resultados" }).waitFor();
+      failDetail = false;
+      await page.getByRole("button", { name: "Reintentar resultados", exact: true }).click();
+      await page.getByRole("heading", { name: "Detalle de cada repetición" }).waitFor();
+      await page.getByRole("checkbox", { name: "Solo con problemas", exact: true }).check();
+      assert(await page.locator(".evals-result").count() === 1, "no se filtraron las repeticiones con problemas");
+      await page.locator(".evals-result summary").click();
+      await page.getByText("Compilación fallida de prueba", { exact: true }).waitFor();
+      await page.getByRole("searchbox", { name: "Buscar resultados" }).fill("inexistente");
+      await page.getByText("No hay resultados con estos filtros.", { exact: true }).waitFor();
+      await page.getByRole("searchbox", { name: "Buscar resultados" }).fill("");
+      await page.getByRole("button", { name: "JSON", exact: true }).click();
+      await page.getByRole("alert").filter({ hasText: "Exportación rechazada" }).waitFor();
+      await page.setViewportSize({ width: 390, height: 844 });
+      await page.locator(".evals").waitFor();
+      assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), "evals desborda el ancho móvil");
+      await page.getByRole("heading", { name: "Evalúa, compara y encuentra fallos" }).scrollIntoViewIfNeeded();
+      await screenshot(page, "evals-mobile");
+    } finally {
+      await page.setViewportSize({ width: 1280, height: 800 });
+      await page.unroute("**/api/admin/evals/config");
+      await page.unroute("**/api/admin/evals/runs");
+      await page.unroute("**/api/admin/evals/runs/ux-run");
+      await page.unroute("**/api/admin/evals/runs/ux-run/export?*");
+    }
+  });
+
   await step("admin: crear, editar y borrar proveedores sin exponer cabeceras", async () => {
     await page.goto("/admin/providers");
     await page.getByRole("button", { name: "+ Añadir proveedor", exact: true }).click();

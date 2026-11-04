@@ -95,13 +95,17 @@ export function createAdminApi({ identity, settings, models }: AdminApiModules) 
 
   modelRoutes.get("/models", async (c) =>
     c.json({
-      models: await models.catalog.listCatalog(),
+      models: await models.catalog.modelReadiness({ accountId: me(c) }),
       openrouter: { configured: !!models.providers.providerSecret("openrouter"), lastSync: await models.sync.lastSync() },
     }),
   );
   modelRoutes.post("/models", async (c) => {
     const id = await models.catalog.saveModel(await body<ModelInput>(c), me(c), { create: true });
     return c.json({ id }, 201);
+  });
+  modelRoutes.post("/models/permit/*", async (c) => {
+    await models.catalog.permitAccountModel(me(c), modelIdOf(c.req.path, "/models/permit/"));
+    return c.json({ ok: true });
   });
   modelRoutes.post("/models/sync", async (c) => {
     if (!models.providers.providerSecret("openrouter")) return c.json({ error: "Configura y activa OpenRouter para sincronizar su catálogo." }, 400);
