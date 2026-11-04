@@ -461,8 +461,8 @@ async function runTeam(s: TurnState, opts: { given?: Plan; planOnly?: boolean } 
           content: [{ type: "text", text: [s.context, `## Petición del dueño\n${s.request}`, isNewApp(s) ? FIRST_BUILD : "", map, "El mapa del proyecto ya está arriba: no llames a project_map. Planifica y llama a submit_plan."].filter(Boolean).join("\n\n") }, ...s.images],
         },
       ],
-      // In Plan mode nothing is written until the owner approves.
-      tools: [...tools(planOnly ? ROLE_TOOLS.planner.filter((n) => !/write|edit/.test(n)) : ROLE_TOOLS.planner), submitPlan],
+      // Planner writes are restricted to static/__dev/ through PLANNER_FILES.
+      tools: [...tools(ROLE_TOOLS.planner), submitPlan],
       ctx: plannerCtx,
       requiredTool: "submit_plan",
       routing: { complexity: s.features.complexity, domains: s.features.domains, needsVision: s.features.needsVision },
@@ -511,6 +511,10 @@ async function runTeam(s: TurnState, opts: { given?: Plan; planOnly?: boolean } 
     const current = await readAllFiles(s.project.id);
     const preload = selectContext(current, `${t.goal}\n${finalPlan.contract}`, t.files, 30_000);
     const ctx: ToolContext = { account: s.account, projectId: s.project.id, author: "builder", owned: t.files };
+    const projectDocs = ["static/__dev/design.md", "static/__dev/architecture.md"]
+      .map((path) => current[path] && `## ${path}\n${current[path]}`)
+      .filter((doc): doc is string => Boolean(doc))
+      .join("\n\n");
     const shared = [finalPlan.contract && `# Contrato compartido (ya está escrito en ${CONTRACT_FILE}: impórtalo, no lo copies ni lo cambies)\n${finalPlan.contract}`, `# Plan del equipo\n${overview}`, `# Petición original del dueño\n${s.request}`].filter(Boolean).join("\n\n");
     const own = [
       `# Tu tarea (${t.role}, id ${t.id})\n${t.goal}`,
@@ -518,6 +522,8 @@ async function runTeam(s: TurnState, opts: { given?: Plan; planOnly?: boolean } 
       criteriaOf(t) && `# Se dará por hecho cuando\n${criteriaOf(t)}`,
       extra,
       isNewApp(s) && !extra && t.role !== "backend" ? FIRST_BUILD : "",
+      `# Documentación del proyecto\nConsulta y respeta el diseño y la arquitectura vigentes. Antes de cambiar decisiones de UI o estructura, lee los documentos completos con read_files. El planificador es responsable de actualizar estas notas compartidas.`,
+      projectDocs && `# Notas vigentes\n${projectDocs}`,
       projectMap(current, await describeSchema(s.project.id, true)),
       preloadSection(current, preload),
     ]
