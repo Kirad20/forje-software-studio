@@ -424,8 +424,12 @@ async function main() {
       await lane.getByRole("button", { name: /Ver detalles/ }).click();
       await lane.getByRole("button", { name: /Ver error/ }).click();
       assert(await lane.locator(".step-diagnostic .step-output").innerText() === diagnostic, "no se ve la salida completa del error en vivo");
+      await context.grantPermissions(["clipboard-read", "clipboard-write"], { origin: base });
+      await sandbox.bringToFront();
       await lane.getByRole("button", { name: "Copiar detalle", exact: true }).click();
       await lane.getByRole("button", { name: "Copiado", exact: true }).waitFor();
+      const copiedDiagnostic = await sandbox.evaluate(() => navigator.clipboard.readText());
+      assert(copiedDiagnostic.replace(/\r\n/g, "\n") === `execute_sql · select * from orders\n${diagnostic}`, `el portapapeles no contiene el diagnóstico: ${JSON.stringify(copiedDiagnostic)}`);
       await lane.getByText("Error del agente · Ver detalle").click();
       await lane.getByText("El proveedor se desconectó después del error de SQL.", { exact: true }).waitFor();
       releaseHistory();
