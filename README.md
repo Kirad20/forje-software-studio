@@ -43,6 +43,12 @@ Producción en Coolify, con dominio, HTTPS y subdominios comodín para las apps:
 
 Desarrollo con recarga: `npm run dev` (servidor en :4100 + studio Vite en :5173). Sin SMTP, el código de acceso al studio aparece en la consola del servidor.
 
+**PWA del Studio.** `npm run build` genera el manifest, los iconos y un service worker versionado. Sirve la aplicación por HTTPS (localhost también permite probarla): Chrome/Edge ofrecen «Instalar Forja» cuando el navegador la considera instalable; en iOS se usa Safari → Compartir → Añadir a pantalla de inicio. No necesita claves ni servicios externos y el worker no se registra en desarrollo. El servidor revalida HTML, manifest y worker; los assets con hash son inmutables. Conserva esa política en el proxy/CDN.
+
+Solo se precachean recursos estáticos públicos y una pantalla offline. Nunca se cachean respuestas de `/api`, sesiones, proyectos, imágenes privadas ni apps publicadas. Sin conexión no se pueden editar proyectos o ejecutar agentes; mantén abiertas las pestañas con cambios pendientes. Las actualizaciones no recargan automáticamente: se avisa para guardar el trabajo y luego actualizar. El alcance de esta PWA es Forja, no las aplicaciones construidas por sus usuarios.
+
+Validación: `npm run build` y `npm run test:pwa` prueban con Chromium la instalabilidad, los iconos, el modo offline, la exclusión de datos privados, las actualizaciones con varias pestañas y la limpieza de cachés. `npm run test:studio` verifica también las cabeceras del servidor real. El worker conserva como máximo la versión actual y una anterior para los chunks de pestañas abiertas; tras varios despliegues, una pestaña antigua puede requerir recarga y mostrará un aviso.
+
 **Primer arranque (sin usuario por defecto).** Una instalación nueva no tiene cuentas ni contraseñas conocidas: el servidor imprime en su log un token de un solo uso (o usa `FORJA_BOOTSTRAP_TOKEN`, mínimo 16 caracteres) y con él se crea la primera cuenta de administración en la pantalla de configuración. Al existir una cuenta, el token deja de servir. Después se entra con correo + contraseña, o con un código por correo (que también crea cuentas nuevas). Quién puede crear cuenta se decide en Administración → General: abierto (por defecto), solo invitados o cerrado.
 
 **Administración.** Las cuentas con rol de administración de la plataforma ven «Administración» en el menú (`/admin`). Todo lo que antes eran variables de entorno se cambia ahí, sin reiniciar:

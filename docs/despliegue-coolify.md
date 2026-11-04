@@ -31,6 +31,12 @@ Los procesos se comunican por APIs internas autenticadas, dentro de la red priva
 4. Una clave de al menos un proveedor de modelos (Anthropic, OpenRouter u OpenAI-compatible). Se
    pone en el studio tras el primer acceso, no en variables de entorno.
 
+El Studio incluye una PWA instalable. Mantén HTTPS y sirve `/sw.js`, `/manifest.webmanifest`,
+`/offline.html` y `/icons/*` desde `forja`, sin redirecciones a login ni caché forzada en el proxy.
+HTML, manifest y worker deben revalidarse (`Cache-Control: no-cache`); solo `/assets/*`, con
+nombres versionados, usa caché inmutable. No habilites una regla de «cachear todo» para `/api`.
+La instalación offline no almacena datos privados ni permite ejecutar agentes sin conexión.
+
 ## 1. Certificado comodín (una vez por servidor)
 
 Let's Encrypt solo emite `*.forja.tudominio.com` con el **DNS challenge**: el HTTP challenge

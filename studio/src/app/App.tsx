@@ -29,7 +29,11 @@ export function App() {
   if (me === null) return <Login onDone={refreshMe} />;
 
   const project = /^\/p\/([^/?]+)/.exec(path);
-  if (project) return <ProjectView key={project[1]} id={project[1]!} me={me} onCredits={refreshMe} userMenu={UserMenu} />;
+  if (project) return (
+    <Suspense fallback={<div className="empty" role="status">Cargando proyecto…</div>}>
+      <ProjectView key={project[1]} id={project[1]!} me={me} onCredits={refreshMe} userMenu={UserMenu} />
+    </Suspense>
+  );
 
   const section = path.split("?")[0]!.split("/")[1] ?? "";
   return (
