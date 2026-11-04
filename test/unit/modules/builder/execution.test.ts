@@ -43,6 +43,25 @@ describe("agent execution through ports", () => {
     expect(f.ports.callModel.mock.calls[1]![0].messages[2].content.at(-1).type).toBe("image");
     expect(f.events.filter(e => e.type === "tool_end").every(e => e.taskId === "task")).toBe(true);
     expect(f.ports.countAction).toHaveBeenCalledTimes(2);
+    expect(result.steps.find(s => s.tool === "missing")).toMatchObject({ ok: false, output: "Error: Herramienta no disponible para este agente: missing" });
+  });
+
+  it("keeps a bounded diagnostic for failed tools without persisting successful tool contents in task steps", async () => {
+    const f = fixture([response([
+      { type: "tool_use", id: "1", name: "broken", input: {} },
+      { type: "tool_use", id: "2", name: "read", input: {} },
+    ])]);
+    f.spec.maxSteps = 1;
+    f.spec.tools.push(
+      { name: "broken", description: "", input_schema: {}, run: async () => { throw new Error("database unavailable\n" + "x".repeat(3000)); } },
+      { name: "read", description: "", input_schema: {}, run: async () => "successful contents" },
+    );
+    const result = await f.useCase.execute(f.spec);
+    const failed = result.steps.find(s => s.tool === "broken")!;
+    expect(failed.output).toHaveLength(2000);
+    expect(failed.output).toMatch(/^Error: database unavailable\n/);
+    expect(result.steps.find(s => s.tool === "read")).not.toHaveProperty("output");
+    expect(f.events.find(e => e.id === "1" && e.type === "tool_end").output).toBe(failed.output);
   });
 
   it("reminds a missing required tool once and grants a further step", async () => {

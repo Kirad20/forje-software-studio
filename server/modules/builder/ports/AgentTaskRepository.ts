@@ -11,7 +11,7 @@ export interface AgentTask {
 export interface TaskCompletion {
   status: "done" | "failed";
   summary: string;
-  steps: { tool: string; summary: string; ok: boolean }[];
+  steps: { tool: string; summary: string; ok: boolean; output?: string }[];
   inputTokens: number;
   outputTokens: number;
   cacheReadTokens: number;

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Check, Cross } from "../../../shared/Icons.js";
+import { ToolStep } from "./ToolStep.js";
 
 export interface LaneStep {
   id: string;
@@ -107,23 +108,19 @@ function LaneCard({ lane }: { lane: Lane }) {
         </details>
       )}
       {lane.steps.length > 0 && (
-        <button className="ghost sm lane-toggle" onClick={() => setOpen((o) => !o)}>
+        <button className="ghost sm lane-toggle" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
           {open ? "▾" : "▸"} {lane.steps.length} paso{lane.steps.length === 1 ? "" : "s"}
-          {errors > 0 && <span style={{ color: "var(--err)" }}> · {errors} con error</span>}
+          {errors > 0 && <span style={{ color: "var(--err)" }}> · {errors} con error · Ver detalles</span>}
         </button>
       )}
       {open && (
         <div className="steps" style={{ margin: "2px 0 4px" }}>
           {lane.steps.map((s) => (
-            <div key={s.id} className={`step ${s.state === "err" ? "err" : ""}`} title={s.output?.slice(0, 400)}>
-              {s.state === "running" ? <span className="spinner" style={{ width: 10, height: 10 }} /> : s.state === "ok" ? <Check /> : <Cross />}
-              <span>{STEP_LABEL[s.name] ?? s.name}</span>
-              {s.summary && <span className="what">{s.summary}</span>}
-            </div>
+            <ToolStep key={s.id} step={s} label={STEP_LABEL[s.name] ?? s.name} />
           ))}
         </div>
       )}
-      {lane.note && lane.status !== "running" && <div className="small lane-note">{lane.note.slice(0, 280)}</div>}
+      {lane.note && lane.status !== "running" && (lane.status === "failed" ? <details className="lane-failure"><summary>Error del agente · Ver detalle</summary><pre className="step-output">{lane.note}</pre></details> : <div className="small lane-note">{lane.note.slice(0, 280)}</div>)}
       {(lane.usd !== undefined || lane.tokens !== undefined) && lane.status !== "pending" && (
         <div className="small muted">
           {lane.tokens ? `${tokens(lane.tokens)} tokens` : ""}

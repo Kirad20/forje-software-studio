@@ -810,15 +810,15 @@
     "semantic_hash": ""
   },
   "server/modules/builder/application/RunAgentUseCase.ts": {
-    "mtime": 1793800981.4572117,
-    "seen": 1793802431.5457344,
-    "ast_hash": "0610eaf1ce464f63ffb1920861cc38e2",
+    "mtime": 1793813868.369057,
+    "seen": 1793814224.4839253,
+    "ast_hash": "7ca9651c90335de33b5e7a769f59aa4d",
     "semantic_hash": ""
   },
   "server/modules/builder/application/RunTaskLaneUseCase.ts": {
-    "mtime": 1793800981.4582205,
-    "seen": 1793802431.5457344,
-    "ast_hash": "70e8be74a1df7aacaeb35122ca5735f3",
+    "mtime": 1793813907.3994498,
+    "seen": 1793814224.4839253,
+    "ast_hash": "942fec0e15b30af3f3b8deac51042b06",
     "semantic_hash": ""
   },
   "server/modules/builder/application/ScheduleTasksUseCase.ts": {
@@ -828,9 +828,9 @@
     "semantic_hash": ""
   },
   "server/modules/builder/application/TaskLifecycleUseCase.ts": {
-    "mtime": 1793800981.4612224,
-    "seen": 1793802431.5457344,
-    "ast_hash": "a8b2b5e5f74b766da2576c9fa606fc1e",
+    "mtime": 1793813906.8498209,
+    "seen": 1793814224.4839253,
+    "ast_hash": "a24c46372212e399a9a54a09ad6e0687",
     "semantic_hash": ""
   },
   "server/modules/builder/application/TeamBuildUseCase.ts": {
@@ -840,9 +840,9 @@
     "semantic_hash": ""
   },
   "server/modules/builder/domain/AgentExecution.ts": {
-    "mtime": 1793800981.464991,
-    "seen": 1793802431.5457344,
-    "ast_hash": "eb93852623f1dba2e23fdb2699d8a290",
+    "mtime": 1793813866.5098333,
+    "seen": 1793814224.4839253,
+    "ast_hash": "ac80be7170844714692669af83f250a0",
     "semantic_hash": ""
   },
   "server/modules/builder/domain/BuilderWorkflow.ts": {
@@ -876,9 +876,9 @@
     "semantic_hash": ""
   },
   "server/modules/builder/infrastructure/BuilderTurnAdapter.ts": {
-    "mtime": 1793810685.2998936,
-    "seen": 1793810698.1655996,
-    "ast_hash": "b693a7a9792de04928f02f344c049aa6",
+    "mtime": 1793813907.923065,
+    "seen": 1793814224.4928567,
+    "ast_hash": "164034c1c7d422da195657418b17c52a",
     "semantic_hash": ""
   },
   "server/modules/builder/infrastructure/FinishGateAdapter.ts": {
@@ -906,9 +906,9 @@
     "semantic_hash": ""
   },
   "server/modules/builder/ports/AgentTaskRepository.ts": {
-    "mtime": 1793800981.6205544,
-    "seen": 1793802431.5457344,
-    "ast_hash": "4159c00feb1131d2a937f6229c16b9cf",
+    "mtime": 1793813867.21421,
+    "seen": 1793814224.5029738,
+    "ast_hash": "a8c5b699836b5a247f927b0c8a9da448",
     "semantic_hash": ""
   },
   "server/modules/builder/ports/BuilderWorkflowPorts.ts": {
@@ -936,9 +936,9 @@
     "semantic_hash": ""
   },
   "server/modules/builder/ports/TaskLanePorts.ts": {
-    "mtime": 1793800981.6351964,
-    "seen": 1793802431.5457344,
-    "ast_hash": "acf6cbe52820cf1b7293b1b05b542617",
+    "mtime": 1793813906.3439279,
+    "seen": 1793814224.5060782,
+    "ast_hash": "7bae0f99ce552b719977e2a34ad2197d",
     "semantic_hash": ""
   },
   "server/modules/builder/ports/TeamBuildPorts.ts": {
@@ -1152,15 +1152,15 @@
     "semantic_hash": ""
   },
   "test/unit/modules/builder/execution.test.ts": {
-    "mtime": 1793800981.5202248,
-    "seen": 1793802431.5467346,
-    "ast_hash": "6bbd2043b0315266c9679f21ee411942",
+    "mtime": 1793813948.2812939,
+    "seen": 1793814224.6782107,
+    "ast_hash": "b4aed5b11382b771ad910bfd892f87ed",
     "semantic_hash": ""
   },
   "test/unit/modules/builder/lane.test.ts": {
-    "mtime": 1793800981.5225835,
-    "seen": 1793802431.5467346,
-    "ast_hash": "c816d72d7447dab1c121782d0901314e",
+    "mtime": 1793813948.976367,
+    "seen": 1793814224.6782107,
+    "ast_hash": "f23352e2ad3af25030969e14ad8d015f",
     "semantic_hash": ""
   },
   "test/unit/modules/builder/taskLifecycle.test.ts": {
@@ -1716,15 +1716,15 @@
     "semantic_hash": ""
   },
   "studio/src/features/builder/presentation/AgentLanes.tsx": {
-    "mtime": 1793800981.716797,
-    "seen": 1793802431.5457344,
-    "ast_hash": "1b677176f75c985fb7dd4a93d2eeef29",
+    "mtime": 1793813865.4051998,
+    "seen": 1793814224.6233506,
+    "ast_hash": "95d1cb4f598ad0394689e40289a97715",
     "semantic_hash": ""
   },
   "studio/src/features/builder/presentation/Chat.tsx": {
-    "mtime": 1793800981.7191978,
-    "seen": 1793802431.5457344,
-    "ast_hash": "9e185f70e1f0b131344883e745bc7312",
+    "mtime": 1793814084.8002982,
+    "seen": 1793814224.6233506,
+    "ast_hash": "2add41e7d363c1e33eddda33aef907e4",
     "semantic_hash": ""
   },
   "studio/src/features/builder/presentation/Skills.tsx": {
@@ -1758,9 +1758,9 @@
     "semantic_hash": ""
   },
   "studio/src/features/files/presentation/Panels.tsx": {
-    "mtime": 1793802143.988809,
-    "seen": 1793802431.5457344,
-    "ast_hash": "b7fc4acc79a940638fc0dc7d61f236a0",
+    "mtime": 1793812813.867797,
+    "seen": 1793812838.8670967,
+    "ast_hash": "10a4f78c14aa648be1bf96e2d3fa736c",
     "semantic_hash": ""
   },
   "studio/src/features/identity/presentation/Account.tsx": {
@@ -1818,9 +1818,9 @@
     "semantic_hash": ""
   },
   "studio/src/features/projects/presentation/ProjectView.tsx": {
-    "mtime": 1793800981.5845048,
-    "seen": 1793802431.5457344,
-    "ast_hash": "3e56fd6938f9b74840d6cd0aaf51c023",
+    "mtime": 1793813526.0120342,
+    "seen": 1793813551.7667227,
+    "ast_hash": "cf1ad50cec2b05026b434c5bf6cfd0e0",
     "semantic_hash": ""
   },
   "studio/src/features/projects/presentation/Workspace.tsx": {
@@ -3288,9 +3288,9 @@
     "semantic_hash": ""
   },
   "test/studio.mjs": {
-    "mtime": 1793800981.6735375,
-    "seen": 1793802431.5457344,
-    "ast_hash": "2856afa2156a54b62c5bd01b5ce91585",
+    "mtime": 1793814186.337489,
+    "seen": 1793814224.6580954,
+    "ast_hash": "6a25e8e2996d034c4b8c7beeae816050",
     "semantic_hash": ""
   },
   "test/unit/modules/settings/coreComposition.test.ts": {
@@ -3396,9 +3396,9 @@
     "semantic_hash": ""
   },
   "server/modules/builder/ports/AgentTaskQueries.ts": {
-    "mtime": 1793800981.6180358,
-    "seen": 1793802431.5457344,
-    "ast_hash": "a796a81e07998293ee1daeb26b5beb36",
+    "mtime": 1793813867.789302,
+    "seen": 1793814224.5029738,
+    "ast_hash": "f7a8989570bf4eb2c37db60276c8ffd5",
     "semantic_hash": ""
   },
   "test/unit/modules/model-management/routerAdmin.test.ts": {
@@ -3585,6 +3585,12 @@
     "mtime": 1793811215.4097931,
     "seen": 1793811229.9559982,
     "ast_hash": "929b805a79e5172cb338ee5425adef86",
+    "semantic_hash": ""
+  },
+  "studio/src/features/builder/presentation/ToolStep.tsx": {
+    "mtime": 1793813947.7239993,
+    "seen": 1793814224.6233506,
+    "ast_hash": "f644c10806f8bfb6b1958e6dbd6abde6",
     "semantic_hash": ""
   },
   "package-lock.json": {

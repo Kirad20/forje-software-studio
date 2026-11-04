@@ -105,6 +105,7 @@ async function stopServer(child) {
 }
 
 async function step(name, fn) {
+  if (process.env.STUDIO_TEST_FILTER && !new RegExp(process.env.STUDIO_TEST_FILTER).test(name)) return;
   try {
     await fn();
     passed++;
@@ -117,6 +118,10 @@ async function step(name, fn) {
 
 function assert(cond, message) {
   if (!cond) throw new Error(message);
+}
+
+async function screenshot(page, name) {
+  if (process.env.STUDIO_SCREENSHOT_DIR) await page.screenshot({ path: path.join(process.env.STUDIO_SCREENSHOT_DIR, `${name}.png`), animations: "disabled" });
 }
 
 async function main() {
@@ -195,6 +200,8 @@ async function main() {
     await page.getByRole("button", { name: "Servicios", exact: true }).click();
     const nav = page.getByRole("navigation", { name: "Herramientas del proyecto" });
     await nav.waitFor();
+    await page.getByRole("heading", { name: "Todo para darle vida a tu app" }).waitFor();
+    assert(await page.locator(".tool-card").count() === 14, "la vista general no muestra las 14 herramientas");
     for (const name of ["Datos", "Usuarios", "IA", "Integraciones", "Analítica", "SEO", "Docs", "Tareas", "Archivos", "Correo", "Pagos", "Registros", "Seguridad", "Código"]) {
       await nav.getByRole("button", { name, exact: true }).waitFor();
     }
@@ -209,7 +216,7 @@ async function main() {
     await nav.getByRole("button", { name: "Usuarios", exact: true }).waitFor();
     assert(!(await nav.getByRole("button", { name: "Pagos", exact: true }).count()), "la búsqueda no normalizó términos acentuados");
     await search.fill("sin coincidencias");
-    await nav.getByText("No hay herramientas que coincidan.").waitFor();
+    await nav.getByText("No hay coincidencias.").waitFor();
     await search.clear();
     await page.getByRole("button", { name: "Volver a la vista previa" }).click();
   });
@@ -269,6 +276,227 @@ async function main() {
     await page.getByRole("button", { name: "Menú de Forja" }).click();
     await page.getByRole("button", { name: "Oscuro" }).or(page.locator('button[title="Oscuro"]')).first().waitFor();
     await page.keyboard.press("Escape");
+  });
+
+  await step("constructor: borradores, modos y recuperación del historial no envían cambios sin confirmar", async () => {
+    const sandbox = await context.newPage();
+    const errors = [];
+    sandbox.on("pageerror", (e) => errors.push(e.message));
+    let posts = 0;
+    let failHistory = true;
+    let submitted = null;
+    let messages = [];
+    await sandbox.route("**/api/projects/*/chat", async (route) => {
+      if (route.request().method() === "POST") {
+        posts++;
+        submitted = route.request().postDataJSON();
+        messages = [
+          { role: "user", content: [{ type: "text", text: submitted.message }] },
+          { role: "assistant", content: [{ type: "text", text: "Esta es la explicación solicitada." }] },
+        ];
+        return route.fulfill({ contentType: "text/event-stream", body: 'data: {"type":"text","text":"Esta es la explicación solicitada."}\n\ndata: {"type":"done"}\n\n' });
+      }
+      return route.fulfill({ status: failHistory ? 503 : 200, json: failHistory ? { error: "Historial temporalmente no disponible" } : { messages, building: false } });
+    });
+    try {
+      await sandbox.goto(projectUrl);
+      await sandbox.getByText("No pudimos cargar la conversación").waitFor();
+      assert(await sandbox.getByRole("button", { name: "Enviar mensaje" }).isDisabled(), "se puede enviar sin cargar el historial");
+      failHistory = false;
+      await sandbox.getByRole("button", { name: "Reintentar", exact: true }).click();
+      await sandbox.getByRole("button", { name: /Planear un cambio/ }).waitFor();
+      await screenshot(sandbox, "builder-chat-desktop");
+      await sandbox.getByRole("button", { name: /Planear un cambio/ }).click();
+      const modes = sandbox.getByRole("group", { name: "Modo del chat" });
+      assert(await modes.getByRole("button", { name: "Plan", exact: true }).getAttribute("aria-pressed") === "true", "el punto de partida no activó Plan");
+      assert((await sandbox.getByLabel("Mensaje para el constructor").inputValue()).includes("sin implementarlo"), "no se preparó el borrador");
+      await sandbox.getByLabel("Mensaje para el constructor").clear();
+      await sandbox.getByRole("button", { name: /Entender mi app/ }).click();
+      assert(await modes.getByRole("button", { name: "Chat", exact: true }).getAttribute("aria-pressed") === "true", "la explicación no usa el modo de solo lectura");
+      await sandbox.keyboard.press("Alt+p");
+      assert(await modes.getByRole("button", { name: "Plan", exact: true }).getAttribute("aria-pressed") === "true", "el atajo de modo dejó de funcionar");
+      await sandbox.getByLabel("Mensaje para el constructor").fill("Mi petición original.");
+      await sandbox.reload();
+      await sandbox.getByRole("button", { name: /Planear un cambio/ }).waitFor();
+      assert(await sandbox.getByLabel("Mensaje para el constructor").inputValue() === "Mi petición original.", "el borrador no sobrevivió a la recarga");
+      await sandbox.getByRole("button", { name: "Servicios", exact: true }).click();
+      await screenshot(sandbox, "builder-tools-desktop");
+      await sandbox.getByRole("button", { name: "Añadir Pagos a favoritos", exact: true }).click();
+      await sandbox.reload();
+      await sandbox.getByRole("button", { name: "Servicios", exact: true }).click();
+      assert(await sandbox.getByRole("button", { name: "Quitar Pagos de favoritos", exact: true }).getAttribute("aria-pressed") === "true", "el favorito no sobrevivió a la recarga");
+      assert((await sandbox.locator(".tool-card strong").first().innerText()).includes("Pagos"), "el favorito no aparece primero");
+      await sandbox.locator(".tool-card").filter({ hasText: "Pagos" }).click();
+      await sandbox.getByRole("heading", { name: "Pagos", exact: true }).first().waitFor();
+      await sandbox.getByRole("button", { name: /Pedir ayuda al constructor/ }).click();
+      assert((await sandbox.getByLabel("Mensaje para el constructor").inputValue()).startsWith("Mi petición original."), "la ayuda sobrescribió el borrador existente");
+      assert((await sandbox.getByLabel("Mensaje para el constructor").inputValue()).includes("pagos"), "la ayuda no incluye contexto del panel");
+      assert(posts === 0, "una sugerencia envió un turno sin confirmación");
+      await sandbox.setViewportSize({ width: 320, height: 844 });
+      await sandbox.getByRole("button", { name: "Servicios", exact: true }).click();
+      await sandbox.getByRole("button", { name: /Pedir ayuda al constructor/ }).click();
+      assert(await sandbox.getByLabel("Mensaje para el constructor").isVisible(), "la ayuda del panel no abrió el chat móvil");
+      await screenshot(sandbox, "builder-chat-mobile");
+      await sandbox.getByRole("button", { name: "Seleccionar elemento", exact: true }).click();
+      assert(await sandbox.locator('iframe[title="Vista previa"]').isVisible(), "el selector no muestra la vista previa móvil");
+      assert(await sandbox.evaluate(() => document.documentElement.scrollWidth) <= 321, "el nuevo constructor desborda en móvil");
+      await sandbox.getByRole("navigation", { name: "Espacio de trabajo" }).getByRole("button", { name: /Chat/ }).click();
+      await modes.getByRole("button", { name: "Chat", exact: true }).click();
+      await sandbox.getByLabel("Mensaje para el constructor").fill("Explícame la app");
+      let finishUpload;
+      let markUploadStarted;
+      const uploadStarted = new Promise((resolve) => { markUploadStarted = resolve; });
+      await sandbox.route("**/api/projects/*/attachments", async (route) => {
+        await new Promise((resolve) => { finishUpload = resolve; markUploadStarted(); });
+        await route.fulfill({ json: { path: "static/uploads/ux-notes.txt" } });
+      });
+      await sandbox.locator('input[type="file"]').setInputFiles({ name: "notes.txt", mimeType: "text/plain", buffer: Buffer.from("Contexto de prueba") });
+      await sandbox.getByText("Subiendo…", { exact: true }).waitFor();
+      assert(await sandbox.getByRole("button", { name: "Enviar mensaje" }).isDisabled(), "el envío no espera al adjunto");
+      await sandbox.getByLabel("Mensaje para el constructor").press("Enter");
+      assert(posts === 0, "Enter envió un mensaje antes de terminar el adjunto");
+      await uploadStarted;
+      finishUpload();
+      await sandbox.getByText("Subiendo…", { exact: true }).waitFor({ state: "detached" });
+      await sandbox.getByRole("button", { name: "Enviar mensaje" }).click();
+      await sandbox.getByRole("button", { name: "Detener", exact: true }).waitFor({ state: "detached" });
+      await sandbox.getByText("Esta es la explicación solicitada.", { exact: true }).waitFor();
+      assert(posts === 1 && submitted.mode === "chat" && submitted.attachments[0] === "static/uploads/ux-notes.txt", "el envío no respetó modo o adjunto");
+      assert(await sandbox.evaluate((id) => localStorage.getItem(`forja:draft:${id}`), projectUrl.split("/").pop()) === null, "el borrador enviado sigue guardado");
+      assert(errors.length === 0, `errores de JS en recuperación: ${errors.join(" | ")}`);
+    } finally {
+      await sandbox.close();
+    }
+  });
+
+  await step("constructor: los errores de herramientas se pueden abrir, copiar y consultar tras recargar", async () => {
+    const sandbox = await context.newPage();
+    const errors = [];
+    sandbox.on("pageerror", (e) => errors.push(e.message));
+    const diagnostic = 'Error: relation "orders" does not exist\nSQL: select * from orders\nDetalle: crea la tabla antes de consultar.';
+    let completed = false;
+    let releaseHistory;
+    const historyReleased = new Promise((resolve) => { releaseHistory = resolve; });
+    let finishStream;
+    const streamFinished = new Promise((resolve) => { finishStream = resolve; });
+    const tasks = () => completed ? [{
+      id: "ux-turn:fast", turnId: "ux-turn", role: "fast", goal: "", model: null, status: "failed",
+      summary: "El proveedor se desconectó después del error de SQL.",
+      steps: [{ tool: "execute_sql", summary: "select * from orders", ok: false, output: diagnostic }],
+      dependsOn: [], inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, usd: 0, startedAt: null,
+    }] : [];
+    const messages = () => completed ? [
+      { role: "user", turnId: "ux-turn", content: [{ type: "text", text: "Consulta los pedidos" }] },
+      { role: "assistant", turnId: "ux-turn", content: [{ type: "text", text: "La consulta falló." }] },
+      { role: "assistant", turnId: "ux-legacy", content: [{ type: "text", text: "Ejecución antigua." }] },
+      { role: "user", turnId: "ux-no-reply", content: [{ type: "text", text: "Turno sin respuesta final" }] },
+      { role: "assistant", turnId: "ux-plain", content: [{ type: "tool_use", id: "plain-1", name: "edit_file", input: { path: "pages/home.tsx" } }] },
+      { role: "user", turnId: "ux-plain", content: [{ type: "tool_result", tool_use_id: "plain-1", content: "Error: no se encontró el texto a reemplazar", is_error: true }] },
+    ] : [];
+    await sandbox.route("**/api/projects/*/chat", async (route) => {
+      if (route.request().method() === "GET") {
+        if (completed) await historyReleased;
+        return route.fulfill({ json: { messages: messages(), tasks: [...tasks(), ...(completed ? [{
+        id: "ux-legacy:ui", turnId: "ux-legacy", role: "ui", goal: "Construir", model: null, status: "done", summary: null,
+        steps: [{ tool: "check_build", summary: "", ok: false }], dependsOn: [], startedAt: null,
+      }, {
+        id: "ux-no-reply:backend", turnId: "ux-no-reply", role: "backend", goal: "Sin respuesta final", model: null, status: "failed", summary: "Proveedor no disponible.",
+        steps: [{ tool: "read_files", summary: "missing.ts", ok: false, output: "Error: missing.ts no existe" }], dependsOn: [], startedAt: null,
+      }] : [])], building: false } });
+      }
+      const events = [
+        { type: "task_start", taskId: "fast", role: "fast" },
+        { type: "tool_start", taskId: "fast", id: "sql-1", name: "execute_sql", summary: "select * from orders" },
+        { type: "tool_end", taskId: "fast", id: "sql-1", ok: false, output: diagnostic },
+        { type: "task_end", taskId: "fast", ok: false, summary: "El proveedor se desconectó después del error de SQL." },
+      ];
+      await route.fulfill({ contentType: "text/event-stream", body: events.map((e) => `data: ${JSON.stringify(e)}\n\n`).join("") });
+      completed = true;
+      finishStream();
+    });
+    try {
+      await sandbox.goto(projectUrl);
+      await sandbox.getByRole("button", { name: /Crear una función/ }).waitFor();
+      await sandbox.getByLabel("Mensaje para el constructor").fill("Consulta los pedidos");
+      await sandbox.getByRole("button", { name: "Enviar mensaje" }).click();
+      await streamFinished;
+      const lane = sandbox.locator(".lane").filter({ hasText: "Constructor" });
+      await lane.getByRole("button", { name: /Ver detalles/ }).click();
+      await lane.getByRole("button", { name: /Ver error/ }).click();
+      assert(await lane.locator(".step-diagnostic .step-output").innerText() === diagnostic, "no se ve la salida completa del error en vivo");
+      await lane.getByRole("button", { name: "Copiar detalle", exact: true }).click();
+      await lane.getByRole("button", { name: "Copiado", exact: true }).waitFor();
+      await lane.getByText("Error del agente · Ver detalle").click();
+      await lane.getByText("El proveedor se desconectó después del error de SQL.", { exact: true }).waitFor();
+      releaseHistory();
+      await sandbox.getByText("La consulta falló.", { exact: true }).waitFor();
+      await sandbox.reload();
+      const restored = sandbox.locator(".lane").filter({ hasText: "Constructor" });
+      await restored.getByRole("button", { name: /Ver detalles/ }).click();
+      await restored.getByRole("button", { name: /Ver error/ }).click();
+      assert(await restored.locator(".step-diagnostic .step-output").innerText() === diagnostic, "el error desapareció al recargar");
+      const legacy = sandbox.locator(".lane").filter({ hasText: "Interfaz" });
+      await legacy.getByRole("button", { name: /Ver detalles/ }).click();
+      await legacy.getByRole("button", { name: /Ver error/ }).click();
+      await legacy.getByText("Este registro no contiene la salida de la herramienta.", { exact: false }).waitFor();
+      const noReply = sandbox.locator(".lane").filter({ hasText: "Backend" });
+      await noReply.getByRole("button", { name: /Ver detalles/ }).click();
+      await noReply.getByRole("button", { name: /Ver error/ }).click();
+      assert(await noReply.locator(".step-diagnostic .step-output").innerText() === "Error: missing.ts no existe", "se ocultó el diagnóstico del turno sin respuesta final");
+      const standalone = sandbox.locator(".chat-log > .steps");
+      await standalone.getByRole("button", { name: /Ver error/ }).click();
+      assert(await standalone.locator(".step-output").innerText() === "Error: no se encontró el texto a reemplazar", "el historial sin agentes no muestra el diagnóstico");
+      await sandbox.setViewportSize({ width: 320, height: 844 });
+      await sandbox.getByRole("navigation", { name: "Espacio de trabajo" }).getByRole("button", { name: /Chat/ }).click();
+      await restored.locator(".step-diagnostic .step-output").waitFor();
+      await restored.locator(".step-diagnostic .step-output").scrollIntoViewIfNeeded();
+      assert(await sandbox.evaluate(() => document.documentElement.scrollWidth) <= 321, "el diagnóstico desborda en móvil");
+      await screenshot(sandbox, "builder-tool-error-mobile");
+      assert(errors.length === 0, `errores de JS en diagnóstico: ${errors.join(" | ")}`);
+    } finally {
+      releaseHistory();
+      await sandbox.close();
+    }
+  });
+
+  await step("paneles: buscar usuarios y filtrar registros muestra resultados y vacíos útiles", async () => {
+    const sandbox = await context.newPage();
+    await sandbox.route("**/api/projects/*/users", (route) => route.fulfill({ json: { users: [
+      { id: "ux-admin", email: "admin@example.test", name: "Admin", role: "admin", hasPassword: true, createdAt: new Date().toISOString() },
+      { id: "ux-member", email: "member@example.test", name: "Invitado", role: "user", hasPassword: false, createdAt: new Date().toISOString() },
+    ] } }));
+    await sandbox.route("**/api/projects/*/logs", (route) => route.fulfill({ json: { logs: [
+      { at: new Date().toISOString(), env: "preview", level: "info", source: "http", message: "Vista previa lista" },
+      { at: new Date().toISOString(), env: "published", level: "error", source: "job", message: "No se pudo enviar resumen" },
+    ] } }));
+    try {
+      await sandbox.goto(projectUrl);
+      await sandbox.getByRole("button", { name: "Servicios", exact: true }).click();
+      const nav = sandbox.getByRole("navigation", { name: "Herramientas del proyecto" });
+      await nav.getByRole("button", { name: "Usuarios", exact: true }).click();
+      await sandbox.getByRole("searchbox", { name: "Buscar usuarios" }).fill("admin");
+      await sandbox.getByRole("cell", { name: "admin@example.test", exact: true }).waitFor();
+      assert(await sandbox.getByRole("cell", { name: "member@example.test", exact: true }).count() === 0, "no se filtraron los usuarios");
+      await sandbox.getByRole("searchbox", { name: "Buscar usuarios" }).fill("inexistente");
+      await sandbox.getByText("No hay usuarios que coincidan", { exact: true }).waitFor();
+      await sandbox.getByRole("button", { name: "Limpiar búsqueda", exact: true }).click();
+      await sandbox.getByRole("cell", { name: "member@example.test", exact: true }).waitFor();
+      await screenshot(sandbox, "builder-users-desktop");
+      await nav.getByRole("button", { name: "Registros", exact: true }).click();
+      await sandbox.getByLabel("Entorno de los registros").selectOption("published");
+      await sandbox.getByLabel("Solo errores").check();
+      await sandbox.locator(".log-line").filter({ hasText: "No se pudo enviar resumen" }).waitFor();
+      assert(await sandbox.locator(".log-line").filter({ hasText: "Vista previa lista" }).count() === 0, "no se filtró el entorno");
+      await sandbox.getByRole("searchbox", { name: "Buscar registros" }).fill("inexistente");
+      await sandbox.getByText("No hay registros con estos filtros").waitFor();
+      await sandbox.getByRole("button", { name: "Limpiar filtros" }).click();
+      await sandbox.locator(".log-line").filter({ hasText: "Vista previa lista" }).waitFor();
+      await sandbox.setViewportSize({ width: 390, height: 844 });
+      assert(await sandbox.evaluate(() => document.documentElement.scrollWidth) <= 391, "los filtros de registros desbordan en móvil");
+      await screenshot(sandbox, "builder-logs-mobile");
+    } finally {
+      await sandbox.close();
+    }
   });
 
   await step("tema: elegir Oscuro persiste tras recargar", async () => {

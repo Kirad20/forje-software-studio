@@ -72,7 +72,7 @@ export interface AgentExecutionResult<M extends ExecutionModel = ExecutionModel>
   usage: Usage;
   usd: number;
   credits: number;
-  steps: { tool: string; summary: string; ok: boolean }[];
+  steps: { tool: string; summary: string; ok: boolean; output?: string }[];
   buildOk: boolean | null;
   testsOk: boolean | null;
   toolErrors: number;

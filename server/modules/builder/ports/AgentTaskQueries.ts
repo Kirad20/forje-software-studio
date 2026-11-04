@@ -7,7 +7,7 @@ export interface AgentTaskView {
   model: string | null;
   status: "pending" | "running" | "done" | "failed";
   summary: string | null;
-  steps: { tool: string; summary: string; ok: boolean }[];
+  steps: { tool: string; summary: string; ok: boolean; output?: string }[];
   files: string[];
   dependsOn: string[];
   doneWhen: string[];
