@@ -316,6 +316,7 @@ async function main() {
       await sandbox.keyboard.press("Alt+p");
       assert(await modes.getByRole("button", { name: "Plan", exact: true }).getAttribute("aria-pressed") === "true", "el atajo de modo dejó de funcionar");
       await sandbox.getByLabel("Mensaje para el constructor").fill("Mi petición original.");
+      await sandbox.waitForFunction((id) => localStorage.getItem(`forja:draft:${id}`) === "Mi petición original.", projectUrl.split("/").pop());
       await sandbox.reload();
       await sandbox.getByRole("button", { name: /Planear un cambio/ }).waitFor();
       assert(await sandbox.getByLabel("Mensaje para el constructor").inputValue() === "Mi petición original.", "el borrador no sobrevivió a la recarga");
@@ -329,6 +330,7 @@ async function main() {
       await sandbox.locator(".tool-card").filter({ hasText: "Pagos" }).click();
       await sandbox.getByRole("heading", { name: "Pagos", exact: true }).first().waitFor();
       await sandbox.getByRole("button", { name: /Pedir ayuda al constructor/ }).click();
+      await sandbox.waitForFunction(() => document.querySelector('[aria-label="Mensaje para el constructor"]')?.value.includes("pagos"));
       assert((await sandbox.getByLabel("Mensaje para el constructor").inputValue()).startsWith("Mi petición original."), "la ayuda sobrescribió el borrador existente");
       assert((await sandbox.getByLabel("Mensaje para el constructor").inputValue()).includes("pagos"), "la ayuda no incluye contexto del panel");
       assert(posts === 0, "una sugerencia envió un turno sin confirmación");
