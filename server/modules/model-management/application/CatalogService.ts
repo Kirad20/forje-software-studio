@@ -20,6 +20,28 @@ export function createCatalogService(repository: CatalogRepository) {
     }
     return models;
   }
+  async function modelReadiness(scope: ModelScope) {
+    const customized = await repository.accountCustomized(scope.accountId);
+    const account = customized ? new Set(await repository.accountModels(scope.accountId)) : null;
+    const project = scope.projectId ? new Set(await repository.projectModels(scope.projectId)) : null;
+    return (await listCatalog()).map(m => ({
+      ...m,
+      blockers: [
+        !m.enabled ? "Modelo desactivado" : "",
+        m.enabled && !m.available ? "Proveedor no disponible" : "",
+        !m.allowed ? "Bloqueado por la lista de la plataforma" : "",
+        account && !account.has(m.id) ? "No permitido en tu cuenta" : "",
+        project?.size && !project.has(m.id) ? "No permitido en este proyecto" : "",
+      ].filter((reason): reason is string => typeof reason === "string" && !!reason),
+    }));
+  }
+  async function permitAccountModel(accountId: string, modelId: string) {
+    const model = (await listCatalog()).find(m => m.id === modelId);
+    if (!model?.available || !model.allowed) throw new ModelError("El modelo debe estar activo, tener un proveedor disponible y estar permitido por la plataforma.");
+    if (await repository.accountCustomized(accountId)) {
+      await repository.replaceAccountModels(accountId, [...new Set([...await repository.accountModels(accountId), modelId])]);
+    }
+  }
   async function saveModel(input: ModelInput, actorId: string | null, opts: { create?: boolean } = {}) {
     const { id, model, changes } = validateModelInput(input);
     const existing = await repository.find(id);
@@ -49,5 +71,5 @@ export function createCatalogService(repository: CatalogRepository) {
   const setProjectModels = (id: string, ids: string[]) => repository.replaceProjectModels(id, [...new Set(ids)]);
   const creditsForUsd = (usd: number) => creditsAtRate(usd, repository.policy().creditsPerUsd);
   const accountCustomized = (accountId: string) => repository.accountCustomized(accountId);
-  return { platformAllows, availableModels, listCatalog, allowedModels, saveModel, deleteModel, setAccountModels, setProjectModels, creditsForUsd, accountCustomized };
+  return { platformAllows, availableModels, listCatalog, allowedModels, modelReadiness, permitAccountModel, saveModel, deleteModel, setAccountModels, setProjectModels, creditsForUsd, accountCustomized };
 }

@@ -4,7 +4,7 @@ import path from "node:path";
 import { config, ROOT_DIR } from "../../../shared/config.js";
 import { newId } from "../../../shared/crypto.js";
 import { sessionCookie, testSession, endSession } from "../../app-services/auth.js";
-import { allowedModels, creditsForUsd, setAccountModels, type ModelInfo } from "../../model-management/catalog.js";
+import { allowedModels, modelReadiness, creditsForUsd, setAccountModels, type ModelInfo } from "../../model-management/catalog.js";
 import type { Account } from "../../identity/index.js";
 import { one, q } from "../../../shared/database/index.js";
 import type { Project } from "../../projects/index.js";
@@ -81,6 +81,9 @@ export async function evalConfig(admin: Account) {
     browser: config.browser.enabled,
     evalSetVersion: EVAL_SET_VERSION,
     activeRunId: activeRunId(),
+    modelDiagnostics: config.evals.enabled
+      ? (await modelReadiness({ accountId: admin.id })).map(({ id, label, vision, tools, blockers }) => ({ id, label, vision, tools, blockers }))
+      : [],
     cases: EVAL_CASES.map(({ id, size, title, prompt, routes }) => ({ id, size, title, prompt, routes })),
     models: config.evals.enabled
       ? (await allowedModels({ accountId: admin.id })).map((m) => ({ id: m.id, label: m.label, tier: m.tier, vision: m.vision, inPrice: m.inPrice, outPrice: m.outPrice }))

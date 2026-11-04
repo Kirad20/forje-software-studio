@@ -23,6 +23,7 @@ interface CatalogModel {
   enabled: boolean;
   available: boolean;
   allowed: boolean;
+  blockers?: string[];
 }
 
 interface Probe {
@@ -94,6 +95,22 @@ export function Models() {
   return (
     <div className="stack" style={{ gap: 16 }}>
       <AddModel existing={new Set(data.models.map((m) => m.id))} onAdded={load} />
+      <section className="card stack" style={{ padding: 16 }}>
+        <strong>Preparación para construir y evaluar</strong>
+        <p className="small muted" style={{ margin: 0 }}>Activo en la plataforma no significa permitido en tu cuenta. Evals usa tus permisos; el juez necesita Imágenes, no Herramientas. Activa solo capacidades que el modelo realmente soporta.</p>
+        <div className="small muted">{data.models.filter(m => m.enabled && m.vision && !m.blockers?.length).length} jueces visuales permitidos · {data.models.filter(m => m.enabled && m.tools && !m.blockers?.length).length} modelos con herramientas permitidos. Diagnóstico de los modelos de esta página.</div>
+        {shown.slice(currentPage * SHOWN, (currentPage + 1) * SHOWN).map(m => <div className="row" key={m.id} style={{ flexWrap: "wrap" }}>
+          <span className="grow">{m.label} <code className="small muted">{m.id}</code></span>
+          <span className={`pill ${m.blockers?.length ? "warn" : "ok"}`}>{m.blockers?.length ? m.blockers.join(" · ") : m.vision ? "Listo para juez visual" : m.tools ? "Listo para construir · sin visión" : "Solo texto"}</span>
+          {m.available && m.allowed && m.blockers?.includes("No permitido en tu cuenta") && <button disabled={pending !== null} onClick={async () => {
+            setPending(m.id); setError("");
+            try {
+              await api(`/admin/models/permit/${enc(m.id)}`, { body: {} });
+              await load();
+            } catch (e) { setError((e as Error).message); } finally { setPending(null); }
+          }}>Permitir {m.label} en mi cuenta</button>}
+        </div>)}
+      </section>
 
       <section className="card stack" style={{ padding: 16, gap: 10 }}>
         <div className="row" style={{ flexWrap: "wrap" }}>
