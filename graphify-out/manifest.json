@@ -330,9 +330,9 @@
     "semantic_hash": ""
   },
   "server/modules/builder/index.ts": {
-    "mtime": 1793800981.4807515,
-    "seen": 1793802431.5457344,
-    "ast_hash": "e20fab76bc48a08cf5cf063b0d4de82e",
+    "mtime": 1793809691.982231,
+    "seen": 1793809716.2558925,
+    "ast_hash": "6f0ec202db186c43bc471f6d94e82ab4",
     "semantic_hash": ""
   },
   "server/modules/builder/infrastructure/StaticToolRegistryAdapter.ts": {
@@ -852,9 +852,9 @@
     "semantic_hash": ""
   },
   "server/modules/builder/domain/FinishGatePolicy.ts": {
-    "mtime": 1793800981.471613,
-    "seen": 1793802431.5457344,
-    "ast_hash": "2559eed7140142edfdb6311618c491c2",
+    "mtime": 1793810773.460593,
+    "seen": 1793810787.3974414,
+    "ast_hash": "c6d9052dbf3e0de9e83a52bbfa81f196",
     "semantic_hash": ""
   },
   "server/modules/builder/domain/OrchestrationPolicy.ts": {
@@ -864,21 +864,21 @@
     "semantic_hash": ""
   },
   "server/modules/builder/infrastructure/AgentExecutionAdapter.ts": {
-    "mtime": 1793800981.4822698,
-    "seen": 1793802431.5457344,
-    "ast_hash": "71a5503375b9409810bff30a203a0a0b",
+    "mtime": 1793809795.6390686,
+    "seen": 1793809820.082173,
+    "ast_hash": "5abf84042352585cf5b14856feb55e09",
     "semantic_hash": ""
   },
   "server/modules/builder/infrastructure/BuilderToolsAdapter.ts": {
-    "mtime": 1793800981.4852698,
-    "seen": 1793802431.5457344,
-    "ast_hash": "83f871ed10b4ff1fda39e04d1d048369",
+    "mtime": 1793811106.4809399,
+    "seen": 1793811120.618213,
+    "ast_hash": "65112d24b4c937a62aece20b14526055",
     "semantic_hash": ""
   },
   "server/modules/builder/infrastructure/BuilderTurnAdapter.ts": {
-    "mtime": 1793802234.2136245,
-    "seen": 1793802431.5457344,
-    "ast_hash": "4ff7e311bfdcb15e96f56634f31caa78",
+    "mtime": 1793810685.2998936,
+    "seen": 1793810698.1655996,
+    "ast_hash": "b693a7a9792de04928f02f344c049aa6",
     "semantic_hash": ""
   },
   "server/modules/builder/infrastructure/FinishGateAdapter.ts": {
@@ -1134,9 +1134,9 @@
     "semantic_hash": ""
   },
   "test/unit/agentCompact.test.ts": {
-    "mtime": 1793800981.6756692,
-    "seen": 1793802431.5457344,
-    "ast_hash": "c6554842ce9262450cb099cca22a60a7",
+    "mtime": 1793809980.979278,
+    "seen": 1793810003.1427383,
+    "ast_hash": "b177f53f901e1199b89716cda645c6d6",
     "semantic_hash": ""
   },
   "test/unit/architecture.test.ts": {
@@ -1374,9 +1374,9 @@
     "semantic_hash": ""
   },
   "server/bootstrap/mcp/guides.ts": {
-    "mtime": 1793800981.4612224,
-    "seen": 1793802431.5457344,
-    "ast_hash": "7a58902f7935e89a6bf97fbe48ad1eed",
+    "mtime": 1793809982.5018528,
+    "seen": 1793810003.001812,
+    "ast_hash": "7045ba9fda770234bae9630879114163",
     "semantic_hash": ""
   },
   "server/bootstrap/mcp/jobs.ts": {
@@ -1518,9 +1518,9 @@
     "semantic_hash": ""
   },
   "server/modules/builder/infrastructure/prompt.ts": {
-    "mtime": 1793806521.635389,
-    "seen": 1793806544.1332402,
-    "ast_hash": "8ed26e58c3c3bf5dd5450d50ae7359f0",
+    "mtime": 1793809794.0375228,
+    "seen": 1793809820.0871837,
+    "ast_hash": "deef353d5e7e3457cd564181a7c4c643",
     "semantic_hash": ""
   },
   "server/modules/builder/infrastructure/rename.ts": {
@@ -1530,9 +1530,9 @@
     "semantic_hash": ""
   },
   "server/modules/builder/infrastructure/roles.ts": {
-    "mtime": 1793802130.6693509,
-    "seen": 1793802431.5457344,
-    "ast_hash": "5be64640401d8d5125ccd10ac7bf9608",
+    "mtime": 1793809838.7636418,
+    "seen": 1793809860.378884,
+    "ast_hash": "2ff679ac5eeb341a9c864d91b86301b7",
     "semantic_hash": ""
   },
   "server/modules/builder/infrastructure/securityReview.ts": {
@@ -1578,9 +1578,9 @@
     "semantic_hash": ""
   },
   "server/modules/evaluations/infrastructure/playground.ts": {
-    "mtime": 1793800981.5332744,
-    "seen": 1793802431.5457344,
-    "ast_hash": "683d4ef69e5f4ebc0018810aeb714e87",
+    "mtime": 1793809693.5378625,
+    "seen": 1793809716.2934651,
+    "ast_hash": "53629508e21fdd6b6222794760319144",
     "semantic_hash": ""
   },
   "server/modules/evaluations/infrastructure/runner.ts": {
@@ -2322,9 +2322,9 @@
     "semantic_hash": ""
   },
   "test/unit/modules/builder/composition.test.ts": {
-    "mtime": 1793800981.5147245,
-    "seen": 1793802431.5467346,
-    "ast_hash": "7a659d8a6673a2a9a1ca9018479ebdee",
+    "mtime": 1793809981.7228172,
+    "seen": 1793810003.1512158,
+    "ast_hash": "dbb1dab5c1982cd146c027635aafacd1",
     "semantic_hash": ""
   },
   "studio/src/shared/presentation/theme.ts": {
@@ -2556,9 +2556,9 @@
     "semantic_hash": ""
   },
   "server/modules/evaluations/ports/builder.ts": {
-    "mtime": 1793800981.5500195,
-    "seen": 1793802431.5457344,
-    "ast_hash": "fc57d3481ff0874fc41f2c360fce6903",
+    "mtime": 1793809692.7823997,
+    "seen": 1793809716.2934651,
+    "ast_hash": "427507830239de6d215dec0df368ba14",
     "semantic_hash": ""
   },
   "server/modules/identity/contracts.ts": {
@@ -3156,9 +3156,9 @@
     "semantic_hash": ""
   },
   "test/unit/modules/evaluations/bindings.test.ts": {
-    "mtime": 1793800981.5587344,
-    "seen": 1793802431.5467346,
-    "ast_hash": "6cc9d0a379b8a4c394f189c4674df225",
+    "mtime": 1793809694.376523,
+    "seen": 1793809716.438159,
+    "ast_hash": "3a26328e51d173537f9c39f9354e808e",
     "semantic_hash": ""
   },
   "test/unit/modules/app-services/authRepository.test.ts": {
@@ -3561,6 +3561,30 @@
     "mtime": 1793800981.7082062,
     "seen": 1793802431.5467346,
     "ast_hash": "c668ee57f19d8227167e118a19c2cf53",
+    "semantic_hash": ""
+  },
+  "server/modules/builder/domain/AgentSqlPolicy.ts": {
+    "mtime": 1793810891.8832037,
+    "seen": 1793810906.3117762,
+    "ast_hash": "9f310b3614d646375321a35d9a8fee8a",
+    "semantic_hash": ""
+  },
+  "server/modules/builder/domain/MemoryProvenance.ts": {
+    "mtime": 1793810930.9127927,
+    "seen": 1793810949.9765162,
+    "ast_hash": "7bf9bc05880d334530c74447584833d5",
+    "semantic_hash": ""
+  },
+  "test/unit/modules/builder/hardening.test.ts": {
+    "mtime": 1793811215.8684962,
+    "seen": 1793811230.0228026,
+    "ast_hash": "4b83f91911df0fe570ff016bf41d248a",
+    "semantic_hash": ""
+  },
+  "server/modules/builder/domain/OwnerActionPolicy.ts": {
+    "mtime": 1793811215.4097931,
+    "seen": 1793811229.9559982,
+    "ast_hash": "929b805a79e5172cb338ee5425adef86",
     "semantic_hash": ""
   },
   "package-lock.json": {

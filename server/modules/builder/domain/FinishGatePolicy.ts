@@ -11,6 +11,9 @@ export interface Ownership {
   owned?: string[];
 }
 export const problemKey = (p: BuildProblem) => `${p.file}\0${p.text}`;
+export const isSafeProjectPath = (file: string) =>
+  !!file && !file.startsWith("/") && !file.includes("\\") && !file.includes(":") && !file.includes("\0") &&
+  file.split("/").every(part => !!part && part !== "." && part !== "..");
 export const ownsFile = (ctx: Ownership, file: string | undefined) =>
   !ctx.owned || (!!file && ctx.owned.some(o => file === o || (o.endsWith("/") && file.startsWith(o))));
 export function newBuildProblems<P extends BuildProblem>(baseline: Set<string>, now: P[], ctx: Ownership): P[] {

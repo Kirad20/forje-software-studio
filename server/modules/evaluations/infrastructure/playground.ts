@@ -53,8 +53,8 @@ type InternalRun = PlaygroundView & { abort: AbortController; adminId: string; l
 const runs = new Map<string, InternalRun>();
 
 const toolsFor = (role: PlaygroundRole): BuilderTool[] => {
-  const { builderTools, FAST_EXCLUDED_TOOLS, ROLE_TOOLS, toolByName } = evaluationBuilder();
-  return role === "fast" ? builderTools.filter((t) => !FAST_EXCLUDED_TOOLS.includes(t.name)) : ROLE_TOOLS[role].map((n) => toolByName.get(n)).filter((t): t is BuilderTool => !!t);
+  const { ROLE_TOOLS, toolByName } = evaluationBuilder();
+  return ROLE_TOOLS[role].map((n) => toolByName.get(n)).filter((t): t is BuilderTool => !!t);
 };
 
 export function playgroundRoles() {
