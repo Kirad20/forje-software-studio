@@ -86,10 +86,9 @@ export interface EvaluationBuilderPort {
   runAgent(spec: EvaluationAgentSpec): Promise<AgentResult>;
   createFinishGate(projectId: string, ctx: ToolContext): Promise<{ check(): Promise<string | null> }>;
   projectMap(files: Record<string, string>, schema?: Record<string, { name: string; type: string }[]>): string;
-  FAST_EXCLUDED_TOOLS: string[];
   MAX_STEPS: Record<PlaygroundRole, number>;
   ROLE_PROMPTS: Record<PlaygroundRole, string>;
-  ROLE_TOOLS: Record<Exclude<PlaygroundRole, "fast">, string[]>;
+  ROLE_TOOLS: Record<PlaygroundRole, string[]>;
   builderTools: BuilderTool[];
   toolByName: Map<string, BuilderTool>;
   readonly langfuse: {

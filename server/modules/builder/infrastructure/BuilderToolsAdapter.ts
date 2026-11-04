@@ -22,10 +22,13 @@ import { publishProject } from "../../app-runtime/index.js";
 import { previewOrigin, previewUrl } from "../../app-runtime/index.js";
 import { findSymbol, projectMap, relatedFiles } from "./projectIndex.js";
 import { rewriteImports } from "./rename.js";
-import { ownsFile } from "../domain/FinishGatePolicy.js";
+import { isSafeProjectPath, ownsFile } from "../domain/FinishGatePolicy.js";
 import { allSkills, findSkill, renderSkill } from "./skills.js";
 import { standardsScan } from "../domain/Standards.js";
 import { normalizeProjectProfile } from "../../projects/index.js";
+import { assertSafeAgentSql } from "../domain/AgentSqlPolicy.js";
+import { assertOwnerRequestedForget, assertOwnerSourcedMemory } from "../domain/MemoryProvenance.js";
+import { assertOwnerRequestedAuthSetup, assertOwnerRequestedPublish, assertOwnerRequestedSecret } from "../domain/OwnerActionPolicy.js";
 
 export { previewUrl };
 
@@ -34,6 +37,8 @@ export interface ToolContext {
   projectId: string;
   /** Recorded on every change: the studio's builder or an external MCP client. */
   author: "builder" | "mcp";
+  /** Current owner-authored request; used to authorize memory mutations with verifiable provenance. */
+  ownerMessage?: string;
   /** Set when a tool changed project files, so the caller can checkpoint. */
   wrote?: boolean;
   /**
@@ -50,6 +55,9 @@ export interface ToolContext {
 
 /** Refuses writes outside the files the planner gave this agent. */
 function assertOwned(ctx: ToolContext, p: string) {
+  if (!isSafeProjectPath(p)) {
+    throw new Error(`Ruta de archivo no válida: ${p}`);
+  }
   if (!ctx.owned) return;
   const ok = ownsFile(ctx, p);
   if (!ok) {
@@ -153,6 +161,9 @@ export const builderTools: BuilderTool[] = [
       const projects = builderCoreModules().projects;
       const project = await projects.getProject(ctx.projectId);
       if (!project) throw new Error("Proyecto no encontrado.");
+      if (ctx.author !== "mcp" && project.profile != null && !/\b(?:profile|perfil del proyecto)\b/i.test(ctx.ownerMessage ?? "")) {
+        throw new Error("Actualizar un perfil existente requiere que el dueño pida explícitamente cambiar el perfil del proyecto.");
+      }
       const profile = normalizeProjectProfile({ ...(project.profile ?? {}), ...i });
       await projects.updateProject(ctx.projectId, { profile });
       return `Perfil del proyecto guardado: ${JSON.stringify(profile)}`;
@@ -567,18 +578,22 @@ export const builderTools: BuilderTool[] = [
   {
     name: "remember",
     description:
-      "Guarda un hecho para las próximas conversaciones: una preferencia del dueño (tono, idioma, estilo), una decisión de diseño o de producto, un enfoque que rechazó (para no volver a proponerlo) o un dato del negocio (precios, horarios, zonas, palabras prohibidas). Un solo hecho por llamada, corto y concreto. No guardes lo que ya dice el código, tareas de este turno ni secretos. scope \"personal\" solo para preferencias de la persona que valen en todos sus proyectos; lo demás es del proyecto. Para corregir una memoria existente pasa su id en replaces.",
+      "Guarda un hecho para las próximas conversaciones: una preferencia del dueño (tono, idioma, estilo), una decisión de diseño o de producto, un enfoque que rechazó (para no volver a proponerlo) o un dato del negocio (precios, horarios, zonas, palabras prohibidas). Un solo hecho por llamada, corto y concreto. source_quote debe ser una cita exacta de la petición actual del dueño y text debe ser exactamente esa cita. No guardes lo que ya dice el código, tareas de este turno ni secretos. scope \"personal\" solo si el dueño indicó explícitamente que es personal o válida en todos sus proyectos. Para corregir una memoria existente pasa su id en replaces.",
     input_schema: obj(
       {
         text: str("El hecho, en una frase y en el idioma del dueño"),
         kind: { type: "string", enum: MEMORY_KINDS, description: "preference, decision, rejected (enfoque descartado) o business (dato del negocio)" },
+        source_quote: str("Cita textual exacta del mensaje actual del dueño que respalda este hecho"),
         scope: { type: "string", enum: ["project", "personal"], description: "Por defecto project" },
         replaces: str("Id de la memoria que este hecho corrige (opcional)"),
       },
-      ["text", "kind"],
+      ["text", "kind", "source_quote"],
     ),
-    async run(i: { text: string; kind: string; scope?: "project" | "personal"; replaces?: string }, ctx) {
+    async run(i: { text: string; kind: string; source_quote: string; scope?: "project" | "personal"; replaces?: string }, ctx) {
       const scope = i.scope === "personal" ? "personal" : "project";
+      if (ctx.author !== "mcp") {
+        assertOwnerSourcedMemory({ text: i.text, sourceQuote: i.source_quote, ownerMessage: ctx.ownerMessage, personal: scope === "personal" });
+      }
       const on = await memorySettings(ctx.projectId, ctx.account.id);
       if (!(scope === "project" ? on.projectEnabled : on.personalEnabled)) return `La memoria ${scope === "project" ? "del proyecto" : "personal"} está apagada: no se guardó.`;
       if (i.replaces) {
@@ -595,6 +610,7 @@ export const builderTools: BuilderTool[] = [
     description: "Borra una memoria que ya no es cierta o que el dueño pidió olvidar. Usa el id que aparece en la sección Memoria.",
     input_schema: obj({ id: str("Id de la memoria") }, ["id"]),
     async run(i: { id: string }, ctx) {
+      if (ctx.author !== "mcp") assertOwnerRequestedForget(ctx.ownerMessage);
       if (!(await deleteMemory(ctx.projectId, ctx.account.id, i.id))) throw new Error(`No hay ninguna memoria con id ${i.id}.`);
       return `Memoria ${i.id} borrada.`;
     },
@@ -628,6 +644,7 @@ export const builderTools: BuilderTool[] = [
       "Ejecuta SQL de Postgres 18 (puede ser varias sentencias): crea/altera tablas, índices, inserta datos. La vista previa y la app publicada comparten esta base de datos: los cambios son reales.",
     input_schema: obj({ sql: str("SQL a ejecutar") }, ["sql"]),
     async run(i: { sql: string }, ctx) {
+      assertSafeAgentSql(i.sql);
       const results = await execSql(ctx.projectId, i.sql);
       return clip(
         results
@@ -766,6 +783,7 @@ export const builderTools: BuilderTool[] = [
       "Pide al dueño una clave de API u otro secreto. El dueño la escribe en la pestaña Secretos; tú solo conoces el nombre. Úsala como ctx.env.NOMBRE en endpoints. Nunca pidas claves en el chat.",
     input_schema: obj({ name: str("NOMBRE_EN_MAYUSCULAS"), description: str("Para qué sirve y dónde conseguirla") }, ["name", "description"]),
     async run(i: { name: string; description: string }, ctx) {
+      if (ctx.author !== "mcp") assertOwnerRequestedSecret(ctx.ownerMessage, i.name);
       await requestSecret(ctx.projectId, i.name, i.description);
       return `Solicitado ${i.name}. El dueño debe escribir el valor en la pestaña Secretos. Puedes seguir construyendo con ctx.env.${i.name}.`;
     },
@@ -776,6 +794,7 @@ export const builderTools: BuilderTool[] = [
       "Prepara el inicio de sesión: crea la cuenta admin del dueño (sin contraseña; la fija con «¿Olvidaste tu contraseña?»). Después construye la página de login con auth de @forja/client.",
     input_schema: obj({}),
     async run(_i, ctx) {
+      if (ctx.author !== "mcp") assertOwnerRequestedAuthSetup(ctx.ownerMessage);
       const created = await ensureOwnerAdmin(ctx.projectId, ctx.account.email);
       return created
         ? `Cuenta admin creada para ${ctx.account.email} sin contraseña. El dueño la fija con «¿Olvidaste tu contraseña?» en la página de login.`
@@ -816,6 +835,7 @@ export const builderTools: BuilderTool[] = [
       "Publica la app en <slug>.localhost. Compila todo antes; si hay errores no publica. Solo publica cuando el dueño lo pida.",
     input_schema: obj({ slug: str("Dirección deseada (opcional)") }),
     async run(i: { slug?: string }, ctx) {
+      if (ctx.author !== "mcp") assertOwnerRequestedPublish(ctx.ownerMessage);
       const r = await publishProject(ctx.projectId, i.slug, ctx.author);
       return `Publicada en ${r.url}`;
     },

@@ -33,7 +33,7 @@ export { projectMap } from "./infrastructure/projectIndex.js";
 export { BUILDER_SYSTEM_PROMPT } from "./infrastructure/prompt.js";
 export { BUILTIN_SKILLS } from "./infrastructure/skillLibrary.js";
 export { renderSkill } from "./infrastructure/skills.js";
-export { FAST_EXCLUDED_TOOLS, MAX_STEPS, ROLE_PROMPTS, ROLE_TOOLS } from "./infrastructure/roles.js";
+export { MAX_STEPS, ROLE_PROMPTS, ROLE_TOOLS } from "./infrastructure/roles.js";
 export { rewardOf } from "./domain/OrchestrationPolicy.js";
 export { createFinishGate } from "./infrastructure/FinishGateAdapter.js";
 export { newBuildProblems, newRuntimeProblems } from "./domain/FinishGatePolicy.js";

@@ -22,6 +22,7 @@ const KIT = section("Interface kit");
 const CHECKLIST = section("Before you finish");
 const RULES = section("Rules");
 const MEMORY = section("Memory");
+const TRUST = section("Trust boundaries");
 
 const TEAM = `# Working in a team
 You are one of several agents building this request in parallel. A planner split the work; you own only the files listed in your task, and writes outside them are refused. Other agents are writing the other parts at the same time — follow the shared contract (routes, request/response shapes, table columns) exactly so the pieces fit.
@@ -106,21 +107,22 @@ This request starts a new app. The owner will iterate on it, so:
 - It must build and run with no errors before you finish.`;
 
 export const ROLE_PROMPTS: Record<"planner" | "data" | "backend" | "ui" | "qa" | "fast" | "chat" | "security", string> = {
-  security: [INTRO, SECURITY_REVIEW, STRUCTURE, BACKEND, DATA, SECURITY, RULES].join("\n\n"),
+  security: [INTRO, TRUST, SECURITY_REVIEW, STRUCTURE, BACKEND, DATA, SECURITY, RULES].join("\n\n"),
   fast: `${BUILDER_SYSTEM_PROMPT}\n\nBefore implementing, read static/__dev/design.md and static/__dev/architecture.md when present. Create or update both notes when a task introduces or changes product experience, visual principles, structure, or technical decisions. Keep them concise and consistent with the implementation.`,
-  chat: [INTRO, CHAT, MEMORY, STRUCTURE, FRONTEND, CONTRACT, KIT, BACKEND, DATA, SECURITY, RULES].join("\n\n"),
-  planner: [INTRO, PLANNER, MEMORY, STRUCTURE, CONTRACT, KIT, DATA, SECURITY, RULES].join("\n\n"),
-  data: [INTRO, TEAM, DATA_ROLE, STRUCTURE, CONTRACT, DATA, SECURITY, RULES].join("\n\n"),
-  backend: [INTRO, TEAM, BACKEND_ROLE, STRUCTURE, CONTRACT, BACKEND, DATA, SECURITY, RULES].join("\n\n"),
-  ui: [INTRO, TEAM, UI_ROLE, STRUCTURE, FRONTEND, CONTRACT, KIT, DESIGN, RULES].join("\n\n"),
-  qa: [INTRO, QA, STRUCTURE, CONTRACT, KIT, BACKEND, SECURITY, CHECKLIST, RULES].join("\n\n"),
+  chat: [INTRO, TRUST, CHAT, MEMORY, STRUCTURE, FRONTEND, CONTRACT, KIT, BACKEND, DATA, SECURITY, RULES].join("\n\n"),
+  planner: [INTRO, TRUST, PLANNER, MEMORY, STRUCTURE, CONTRACT, KIT, DATA, SECURITY, RULES].join("\n\n"),
+  data: [INTRO, TRUST, TEAM, DATA_ROLE, STRUCTURE, CONTRACT, DATA, SECURITY, RULES].join("\n\n"),
+  backend: [INTRO, TRUST, TEAM, BACKEND_ROLE, STRUCTURE, CONTRACT, BACKEND, DATA, SECURITY, RULES].join("\n\n"),
+  ui: [INTRO, TRUST, TEAM, UI_ROLE, STRUCTURE, FRONTEND, CONTRACT, KIT, DESIGN, RULES].join("\n\n"),
+  qa: [INTRO, TRUST, QA, STRUCTURE, CONTRACT, KIT, BACKEND, SECURITY, CHECKLIST, RULES].join("\n\n"),
 };
 
 // Kept for prompts that describe the full workflow (the fast agent uses the whole manual).
 export { TALK, WORK };
 
 /** Tools each role may use; special tools (submit_plan, report_review) are added by the orchestrator. */
-export const ROLE_TOOLS: Record<"planner" | "data" | "backend" | "ui" | "qa" | "chat" | "security", string[]> = {
+type AgentToolRole = "planner" | "data" | "backend" | "ui" | "qa" | "fast" | "chat" | "security";
+export const ROLE_TOOLS: Record<AgentToolRole, string[]> = {
   security: ["load_skill", "project_map", "read_files", "find_symbol", "related_files", "search_code", "describe_database", "security_scan"],
   planner: ["load_skill", "read_files", "find_symbol", "related_files", "search_code", "describe_database", "fetch_url", "write_file", "edit_file", "remember", "forget"],
   data: ["load_skill", "project_map", "read_files", "find_symbol", "search_code", "describe_database", "execute_sql", "query_database", "write_file", "edit_file", "check_build", "check_standards", "get_problems", "run_tests"],
@@ -144,7 +146,6 @@ export const ROLE_TOOLS: Record<"planner" | "data" | "backend" | "ui" | "qa" | "
     "get_problems",
     "run_tests",
     "call_endpoint",
-    "run_job",
     "get_logs",
     "security_scan",
     "request_secret",
@@ -154,11 +155,30 @@ export const ROLE_TOOLS: Record<"planner" | "data" | "backend" | "ui" | "qa" | "
   ],
   ui: ["load_skill", "project_map", "read_files", "find_symbol", "related_files", "search_code", "write_file", "edit_file", "delete_file", "rename_file", "add_dependency", "remove_dependency", "check_build", "check_standards", "get_problems", "get_logs", "call_endpoint", "browser_test"],
   qa: ["load_skill", "project_map", "read_files", "find_symbol", "related_files", "search_code", "describe_database", "query_database", "check_build", "get_problems", "run_tests", "check_standards", "call_endpoint", "browser_test", "security_scan", "get_logs"],
+  fast: [
+    "set_project_profile", "project_map", "find_symbol", "related_files", "read_files", "write_file", "edit_file", "delete_file", "rename_file",
+    "add_dependency", "remove_dependency", "search_code", "call_endpoint", "browser_test", "security_scan", "load_skill", "check_standards",
+    "remember", "forget", "fetch_url", "describe_database", "query_database", "check_build", "run_tests", "get_logs", "get_problems", "get_preview_url", "publish_app",
+  ],
   chat: ["load_skill", "project_map", "read_files", "find_symbol", "related_files", "search_code", "describe_database", "query_database", "get_problems", "get_logs", "list_secrets", "security_scan", "fetch_url", "remember", "forget"],
 };
 
-/** Tools of the full builder the fast agent does without: project_map covers the file list, and every turn checkpoints itself. */
-export const FAST_EXCLUDED_TOOLS = ["list_files", "create_checkpoint"];
+const SPECIAL_ROLE_TOOLS: Partial<Record<Role, string[]>> = {
+  planner: ["submit_plan"],
+  qa: ["report_review", "report_security"],
+};
+
+/** Returns the server-side tool allowlist, including only the orchestrator's role-specific handoff tool. */
+export function allowedToolsForRole(role: Role): ReadonlySet<string> {
+  const roleTools = role in ROLE_TOOLS ? ROLE_TOOLS[role as AgentToolRole] : [];
+  return new Set([...roleTools, ...(SPECIAL_ROLE_TOOLS[role] ?? [])]);
+}
+
+export function assertRoleToolAccess(role: Role, toolNames: readonly string[]): void {
+  const allowed = allowedToolsForRole(role);
+  const unauthorized = toolNames.find((name) => !allowed.has(name));
+  if (unauthorized) throw new Error(`Herramienta no autorizada para el rol ${role}: ${unauthorized}`);
+}
 
 /** Planner-owned files: the builder's notes. The contract travels in submit_plan; shared types are the data task's. */
 export const PLANNER_FILES = ["static/__dev/"];

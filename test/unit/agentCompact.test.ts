@@ -12,7 +12,7 @@ vi.mock("../../server/modules/model-management/router.js", () => ({
     calls.push({ role, messages: structuredClone(req.messages) });
     let content: Block[];
     if (role === "summarizer") content = [{ type: "text", text: "RESUMEN: leí varios archivos" }];
-    else if (mainSteps++ < 10) content = [{ type: "tool_use", id: `u${mainSteps}`, name: "t", input: { path: `f${mainSteps}.ts` } }];
+    else if (mainSteps++ < 10) content = [{ type: "tool_use", id: `u${mainSteps}`, name: "read_files", input: { path: `f${mainSteps}.ts` } }];
     else content = [{ type: "text", text: "Listo" }];
     return { model, failed: [], usd: 0, credits: 0, response: { content, usage, stopReason: "end", servedBy: "m" } };
   },
@@ -41,7 +41,7 @@ describe("runAgent context compaction", () => {
       routing: { complexity: 1, domains: [], needsVision: false },
       system: "sys",
       messages: [{ role: "user", content: "Haz la tarea" }],
-      tools: [{ name: "t", description: "", input_schema: {}, run: async () => "y".repeat(10_000) }],
+      tools: [{ name: "read_files", description: "", input_schema: {}, run: async () => "y".repeat(10_000) }],
       ctx: { account: { id: "a" }, projectId: "p", author: "builder" } as never,
       maxSteps: 20,
       signal: new AbortController().signal,

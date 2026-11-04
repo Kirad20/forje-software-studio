@@ -28,14 +28,14 @@ describe("production builder module composition", () => {
     const model = { id: "m", model: "model", vision: true };
     const usage = { input: 1, output: 2, cacheRead: 3, cacheWrite: 4 };
     mocks.callModel.mockResolvedValueOnce({
-      model, failed: [], response: { usage, content: [{ type: "tool_use", id: "1", name: "hello", input: {} }] }, usd: 0.01, credits: 1,
+      model, failed: [], response: { usage, content: [{ type: "tool_use", id: "1", name: "get_problems", input: {} }] }, usd: 0.01, credits: 1,
     }).mockResolvedValueOnce({
       model, failed: [], response: { usage, content: [{ type: "text", text: "done" }] }, usd: 0.02, credits: 2,
     });
     const spec = {
       scope: { accountId: "a", projectId: "p" }, billing: { marker: "billing" }, role: "fast",
       routing: { complexity: 1, domains: [], needsVision: false }, system: "system",
-      messages: [{ role: "user", content: "hello" }], tools: [{ name: "hello", description: "", input_schema: {}, run: async () => "world" }],
+      messages: [{ role: "user", content: "hello" }], tools: [{ name: "get_problems", description: "", input_schema: {}, run: async () => "world" }],
       ctx: { account: { id: "a" }, projectId: "p", author: "builder" },
       maxSteps: 2, signal: new AbortController().signal, emit: vi.fn(), turnId: "turn", persist: { projectId: "p" },
     } as unknown as AgentSpec;
@@ -45,7 +45,7 @@ describe("production builder module composition", () => {
     expect(mocks.callModel.mock.calls[1]![4]).toMatchObject({ billing: spec.billing, pinned: model, log: { turnId: "turn" } });
     expect(mocks.countAction).toHaveBeenCalledWith("a");
     expect(mocks.recordStep).toHaveBeenCalledTimes(2);
-    expect(mocks.recordToolCall).toHaveBeenCalledWith(expect.objectContaining({ tool: "hello", ok: true }));
+    expect(mocks.recordToolCall).toHaveBeenCalledWith(expect.objectContaining({ tool: "get_problems", ok: true }));
     expect(mocks.q.mock.calls.filter(([sql]) => sql.startsWith("insert into chat_messages"))).toHaveLength(3);
   });
 
