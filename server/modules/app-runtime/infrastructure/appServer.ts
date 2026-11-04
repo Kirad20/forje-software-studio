@@ -238,7 +238,7 @@ function iconLinks(t: AppTarget, files: FileMap) {
   const theme = t.project.seo?.themeColor;
   return [
     icon ? `<link rel="icon" href="${t.base}/${icon}"><link rel="apple-touch-icon" href="${t.base}/${icon}">` : "",
-    `<link rel="manifest" href="${t.base}/manifest.webmanifest">`,
+    `<link rel="manifest" href="${t.base}/manifest.webmanifest" crossorigin="use-credentials">`,
     theme && /^#[0-9a-f]{3,8}$/i.test(theme) ? `<meta name="theme-color" content="${theme}">` : "",
   ].join("");
 }

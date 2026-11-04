@@ -138,9 +138,9 @@
     "semantic_hash": ""
   },
   "studio/index.html": {
-    "mtime": 1793828910.694428,
-    "seen": 1793828938.5469797,
-    "ast_hash": "4bcc7eff326234ba120799f42c3ab0ac",
+    "mtime": 1793833581.620522,
+    "seen": 1793833611.456248,
+    "ast_hash": "187e3395ce970cea98e416e1139df786",
     "semantic_hash": ""
   },
   "test/unit/mcp.test.ts": {
@@ -1398,9 +1398,9 @@
     "semantic_hash": ""
   },
   "server/modules/app-runtime/infrastructure/appServer.ts": {
-    "mtime": 1793805570.294726,
-    "seen": 1793805591.847486,
-    "ast_hash": "981d0e4f8409a5213fb9854b00b8be31",
+    "mtime": 1793833581.0867467,
+    "seen": 1793833611.1812055,
+    "ast_hash": "ec5eb2cc10394f6045efd3607aa4b1fc",
     "semantic_hash": ""
   },
   "server/modules/app-runtime/infrastructure/browser.ts": {
@@ -3288,9 +3288,9 @@
     "semantic_hash": ""
   },
   "test/studio.mjs": {
-    "mtime": 1793832743.658625,
-    "seen": 1793832774.093314,
-    "ast_hash": "2227a8acec9588a1d52115ac96c783ff",
+    "mtime": 1793833696.7826762,
+    "seen": 1793833721.785216,
+    "ast_hash": "8601bf19ac638a84f34041ee869df06a",
     "semantic_hash": ""
   },
   "test/unit/modules/settings/coreComposition.test.ts": {
