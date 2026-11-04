@@ -16,6 +16,7 @@ function script(body) {
   const sys = body.messages.find((m) => m.role === "system")?.content ?? "";
   const firstUser = body.messages.find((m) => m.role === "user");
   const userText = typeof firstUser?.content === "string" ? firstUser.content : (firstUser?.content ?? []).map((p) => p.text ?? "").join("\n");
+  const context = Object.assign({}, ...userText.split("\n").filter((line) => line.startsWith("{")).map((line) => JSON.parse(line)));
   const step = body.messages.filter((m) => m.role === "assistant").length;
   const lastTool = [...body.messages].reverse().find((m) => m.role === "tool")?.content ?? "";
 
@@ -25,8 +26,11 @@ function script(body) {
   if (sys.startsWith("Eres un revisor de diseño de producto"))
     return { role: "judge", res: reply('{"scores":{"hierarchy":4,"spacing":3,"color":4,"typography":3.5,"states":3,"responsive":4,"copy":4,"fidelity":3},"issues":["El botón principal no destaca"]}') };
   if (sys.startsWith("Mantienes el resumen")) return { role: "summary", res: reply("El dueño pidió una app de notas.") };
-  if (sys.startsWith("Extraes la memoria")) return { role: "memory", res: reply('Esto es lo que vale la pena recordar:\n[{"kind": "preference", "text": "Al dueño le gusta el verde como color principal"}]') };
-  if (sys.startsWith("Eres Forja. Escribe la respuesta final")) return { role: "final", res: reply("- Hice la app de notas.\n- Prueba /notes en la vista previa.") };
+  if (sys.startsWith("Extraes memoria solo de mensajes escritos por el dueño")) {
+    const quote = "Recuerda que prefiero el verde como color principal.";
+    return { role: "memory", res: reply(JSON.stringify(context.ownerMessages?.includes(quote) ? [{ kind: "preference", text: quote, source_quote: quote }] : [])) };
+  }
+  if (sys.startsWith("Eres Forja.") && sys.includes("Escribe la respuesta final")) return { role: "final", res: reply("- Hice la app de notas.\n- Prueba /notes en la vista previa.") };
 
   if (sys.includes("# Your role: planner")) {
     if (step === 0)
@@ -76,7 +80,7 @@ function script(body) {
     }
     return { role: "qa", res: reply("Revisión terminada.") };
   }
-  const task = /# Tu tarea \((\w+)/.exec(userText)?.[1];
+  const task = context.task?.role ?? /# Tu tarea \((\w+)/.exec(userText)?.[1];
   if (task === "data") {
     if (step === 0)
       return {
@@ -114,8 +118,8 @@ function script(body) {
     return { role: "ui", res: reply("Página /notes lista.") };
   }
   // Asked to remember something: saves it to memory.
-  if (sys.includes("# Chat mode") && userText.includes("Recuerda que")) {
-    if (step === 0) return { role: "chat", res: reply(null, [call("remember", { text: "Los pedidos se cierran a las 20:00", kind: "business" })]) };
+  if (sys.includes("# Chat mode") && context.ownerRequest?.startsWith("Recuerda que")) {
+    if (step === 0) return { role: "chat", res: reply(null, [call("remember", { text: context.ownerRequest, source_quote: context.ownerRequest, kind: "business" })]) };
     return { role: "chat", res: reply("Lo guardé en la memoria del proyecto.") };
   }
   // Chat mode: reads, never writes.
@@ -124,7 +128,7 @@ function script(body) {
     return { role: "chat", res: reply(`Respuesta de chat. ${lastTool.startsWith("Sin problemas") ? "No hay errores ahora." : "Hay errores."}`) };
   }
   // Fix pass after a change that broke the build.
-  if (userText.includes("## La app ya no compila")) {
+  if (context.buildProblems) {
     if (step === 0) return { role: "fix", res: reply(null, [call("write_file", { path: "pages/_index.tsx", content: "export default function Home() { return <h1>Portada</h1>; }\n" })]) };
     return { role: "fix", res: reply("Arreglé la portada.") };
   }
@@ -172,8 +176,7 @@ export function startFakeLlm() {
       // What the agent was handed up front, so tests can check the context it got.
       // Screenshots from browser_test come back as an image part after the tool results.
       const sawImage = body.messages.some((m) => m.role === "user" && Array.isArray(m.content) && m.content.some((p) => p.type === "image_url"));
-      const system = body.messages.find((m) => m.role === "system")?.content ?? "";
-      log.push({ model: body.model, role, at: Date.now(), sawImage, memory: system.includes("# Memoria") && system.includes("pedidos se cierran"), hasMap: text.includes("# Mapa del proyecto"), firstBuild: text.includes("# First version of the app"), preloaded: text.includes("# Archivos relevantes") });
+      log.push({ model: body.model, role, at: Date.now(), sawImage, memory: text.includes("# Memoria") && text.includes("pedidos se cierran"), hasMap: text.includes("# Mapa del proyecto"), firstBuild: text.includes("# First version of the app"), preloaded: text.includes("# Archivos relevantes") });
       // Specialists take a while, so parallel lanes visibly overlap.
       const delay = ["data", "backend", "ui"].includes(role) ? 400 : 30;
       setTimeout(() => {
