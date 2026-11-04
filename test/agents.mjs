@@ -114,7 +114,7 @@ try {
     `/api/projects/${project.id}/chat`,
     {
       message:
-        "Crea una app de notas: una tabla en la base de datos para guardar las notas, un endpoint que las liste para los usuarios registrados con su correo y contraseña, y una página bonita que las muestre con su diseño.",
+        "Recuerda que prefiero el verde como color principal. Crea una app de notas: una tabla en la base de datos para guardar las notas, un endpoint que las liste para los usuarios registrados con su correo y contraseña, y una página bonita que las muestre con su diseño.",
     },
     { stream: true },
   );
@@ -177,7 +177,8 @@ try {
   // Router: decisions logged with scored candidates; learning recorded.
   const router = (await req("GET", `/api/projects/${project.id}/router`)).json;
   ok(router.decisions.length >= 5 && router.decisions.every((d) => d.candidates.length >= 1 && d.reason), "every model choice is logged with its reasons");
-  ok(router.learnt.some((r) => r.models.some((m) => m.uses > 0)), "outcomes update the bandit");
+  const learned = (await req("GET", "/api/admin/router/stats")).json;
+  ok(learned.classes.some((r) => router.decisions.some((d) => d.taskClass === r.taskClass) && r.models.some((m) => m.uses > 0)), "outcomes update the bandit for the routed task classes", JSON.stringify(learned.classes));
   ok(router.spend.length > 0 && router.spend.every((s) => s.usd >= 0), "spend per model and role");
 
   // 2. A small change takes the fast path — and survives a failing model.
@@ -204,7 +205,7 @@ try {
   const remember = await req("POST", `/api/projects/${project.id}/chat`, { message: "Recuerda que los pedidos se cierran a las 20:00", mode: "chat" }, { stream: true });
   ok(remember.some((e) => e.type === "tool_start" && e.name === "remember") && !remember.some((e) => e.type === "error"), "the chat agent saves what it is asked to remember", JSON.stringify(remember.filter((e) => e.type !== "text")));
   const saved = (await req("GET", `/api/projects/${project.id}/memory`)).json;
-  ok(saved.project.some((m) => m.text === "Los pedidos se cierran a las 20:00" && m.kind === "business" && m.source === "agent"), "the fact is in project memory", JSON.stringify(saved));
+  ok(saved.project.some((m) => m.text === "Recuerda que los pedidos se cierran a las 20:00" && m.kind === "business" && m.source === "agent"), "the exact owner quote is in project memory", JSON.stringify(saved));
 
   const callsBefore = llmLog.length;
   const planTurn = await req("POST", `/api/projects/${project.id}/chat`, { message: "Crea una app de notas con tabla en la base de datos, endpoint para usuarios registrados y una página con diseño.", mode: "plan" }, { stream: true });
@@ -246,7 +247,7 @@ try {
     await new Promise((r) => setTimeout(r, 200));
     extracted = (await req("GET", `/api/projects/${project.id}/memory`)).json.project.find((m) => m.source === "summary");
   }
-  ok(extracted?.kind === "preference" && /verde/.test(extracted.text), "facts from older turns are extracted into project memory", JSON.stringify(extracted));
+  ok(extracted?.kind === "preference" && extracted.text === "Recuerda que prefiero el verde como color principal.", "explicit remember quotes from older turns are extracted into project memory", JSON.stringify(extracted));
 
   // The next turn starts from a compact context, not the replayed transcript.
   const lastFast = llmLog.filter((l) => l.role === "fast").length;
