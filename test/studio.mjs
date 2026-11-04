@@ -190,7 +190,7 @@ async function main() {
     await page.waitForURL(/\/p\/[^/?]+/);
     projectUrl = new URL(page.url()).pathname;
     await page.getByLabel("Mensaje para el constructor").waitFor();
-    await page.getByRole("button", { name: "Enviar mensaje" }).waitFor({ state: "attached" });
+    await page.getByRole("button", { name: "Enviar mensaje" }).or(page.getByRole("button", { name: "Detener", exact: true })).waitFor({ state: "attached" });
     await page.getByText("Vista previa").first().waitFor();
     await page.getByText(prompt).first().waitFor();
     await page.locator('[title="Ajustes del proyecto"]').first().waitFor();
@@ -859,6 +859,29 @@ async function main() {
     assert((await security.getAttribute("aria-current")) === "page", "Seguridad no se pudo abrir desde la navegación móvil");
     const bounds = await nav.evaluate((el) => ({ left: el.getBoundingClientRect().left, right: el.getBoundingClientRect().right, scrollWidth: document.documentElement.scrollWidth }));
     assert(bounds.left >= 0 && bounds.right <= 320 && bounds.scrollWidth <= 321, `la navegación móvil de herramientas desborda: ${JSON.stringify(bounds)}`);
+  });
+
+  await step("pwa: servidor publica manifest y worker con cabeceras revalidables", async () => {
+    const worker = await page.request.get("/sw.js");
+    assert(worker.ok(), "no se sirve el service worker");
+    assert(worker.headers()["service-worker-allowed"] === "/", "el alcance del worker no es la raíz");
+    assert(worker.headers()["cache-control"] === "no-cache", "el worker no se revalida");
+    assert(/javascript/.test(worker.headers()["content-type"]), "el worker no tiene MIME JavaScript");
+    const manifest = await page.request.get("/manifest.webmanifest");
+    assert(manifest.ok() && /manifest|json/.test(manifest.headers()["content-type"]), "el manifest no tiene MIME correcto");
+    assert(manifest.headers()["cache-control"] === "no-cache", "el manifest no se revalida");
+    const icon = await page.request.get("/icons/apple-touch-icon.png");
+    assert(icon.ok() && /image\/png/.test(icon.headers()["content-type"]), "falta el icono Apple PNG");
+    const html = await page.request.get("/");
+    assert(html.headers()["cache-control"] === "no-cache", "el HTML no se revalida");
+    const asset = /\/assets\/[^"]+\.js/.exec(await html.text())?.[0];
+    assert(asset, "falta el asset principal");
+    const script = await page.request.get(asset);
+    assert(script.headers()["cache-control"] === "public, max-age=31536000, immutable", "los assets con hash no son inmutables");
+    const missing = await page.request.get("/assets/missing-build.js");
+    assert(missing.status() === 404 && missing.headers()["cache-control"] === "no-cache", "un chunk inexistente se sirve como HTML cacheable");
+    await page.evaluate(() => navigator.serviceWorker.ready);
+    assert(await page.evaluate(() => !!navigator.serviceWorker.controller), "el worker no controla el Studio");
   });
 
   await step("sin errores de JavaScript en la página", async () => {

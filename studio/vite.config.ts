@@ -2,12 +2,13 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
+import { studioPwa } from "./pwa/plugin.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig({
   root: here,
-  plugins: [react()],
+  plugins: [react(), studioPwa(here)],
   build: { outDir: path.resolve(here, "../dist/studio"), emptyOutDir: true },
   server: {
     port: 5173,

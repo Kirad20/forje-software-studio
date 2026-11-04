@@ -122,9 +122,20 @@ app.get("/healthz", (c) => c.json({ ok: true }));
 
 // The built studio (npm run build). In development Vite serves it and proxies /api here.
 if (existsSync(STUDIO_DIST)) {
+  app.use("/*", async (c, next) => {
+    await next();
+    const file = c.req.path;
+    c.header("Cache-Control", file.startsWith("/assets/") && c.res.status === 200
+      ? "public, max-age=31536000, immutable" : "no-cache");
+    if (file === "/sw.js") c.header("Service-Worker-Allowed", "/");
+  });
   app.use("/*", serveStatic({ root: path.relative(process.cwd(), STUDIO_DIST) }));
   // Read per request: a rebuild renames the hashed assets the page points at.
-  app.get("*", (c) => c.html(readFileSync(path.join(STUDIO_DIST, "index.html"), "utf8")));
+  app.get("*", (c) => {
+    if (c.req.path.startsWith("/assets/") || c.req.path.startsWith("/icons/")
+      || ["/sw.js", "/manifest.webmanifest", "/offline.html"].includes(c.req.path)) return c.notFound();
+    return c.html(readFileSync(path.join(STUDIO_DIST, "index.html"), "utf8"));
+  });
 } else {
   app.get("/", (c) => c.html(page("Forja", "El studio corre con Vite en desarrollo: <code>npm run dev</code> y abre http://localhost:5173")));
 }
