@@ -687,10 +687,12 @@ async function main() {
     await dialog.getByRole("button", { name: "Cancelar", exact: true }).click();
     await card.getByRole("button", { name: "Borrar", exact: true }).click();
     let confirmation = page.getByRole("alertdialog", { name: "Confirmar acción" });
+    await page.waitForFunction(() => document.activeElement?.closest('[role="alertdialog"]') && document.activeElement?.textContent === "Cancelar");
     assert(await confirmation.getByRole("button", { name: "Cancelar", exact: true }).evaluate((el) => el === document.activeElement), "la confirmación no enfocó la opción segura");
     await confirmation.getByRole("button", { name: "Cancelar", exact: true }).click();
     await confirmation.waitFor({ state: "hidden" });
     assert(await card.isVisible(), "se borró el proveedor al cancelar");
+    await page.waitForFunction(() => !document.activeElement?.closest('[role="alertdialog"]') && document.activeElement?.textContent === "Borrar");
     assert(await card.getByRole("button", { name: "Borrar", exact: true }).evaluate((el) => el === document.activeElement), "no se restauró el foco tras cancelar");
     await page.route("**/api/admin/providers/ux-local", async (route) => {
       if (route.request().method() === "DELETE") await route.fulfill({ status: 400, json: { error: "No se pudo borrar en la prueba" } });
