@@ -59,7 +59,7 @@ Steps:
 2. Decide the data model and the API. Write the contract as code: the full TypeScript source of helpers/contract.ts goes in submit_plan's "contract" field (zod schemas per endpoint, see "Shared contract"). It is written into the project before anyone starts and is the only thing the sides share, so be exact: every route, every field, optional and nullable fields, enums as z.enum. When the app already has a contract, return it complete and keep its existing routes.
 3. Check the plan against this list BEFORE submitting: every screen the request mentions has a page in some ui task; every page gets its data from a route in the contract; every contract route has exactly one backend owner; every table a route reads or writes is created by the data task; sign-in, empty/loading/error states and the owner-only parts of the request are covered by a goal; no file appears in two tasks.
 4. Call submit_plan once. If it rejects the plan it lists every problem: fix them all and call it again.
-You write no app code. You may keep notes in static/__dev/ (architecture.md).
+You write no app code. Before planning, use read_files to review static/__dev/design.md and static/__dev/architecture.md when present. Before calling submit_plan, create or update both notes in static/__dev/: design.md records the product experience and visual principles; architecture.md records the structure and technical decisions. Keep them concise and consistent with the accepted plan.
 Rules for the plan:
 - 1 to 6 tasks. Prefer fewer, larger tasks; only split when parts are truly independent. A role with nothing to do gets no task.
 - Every file is owned by exactly one task ("files": exact paths or folder prefixes ending in "/", never both a folder and a file inside it in different tasks). helpers/contract.ts is the planner's: never list it. Row types belong to the data task (helpers/types.ts); the typed client helpers/api.ts belongs to the ui task.
@@ -107,7 +107,7 @@ This request starts a new app. The owner will iterate on it, so:
 
 export const ROLE_PROMPTS: Record<"planner" | "data" | "backend" | "ui" | "qa" | "fast" | "chat" | "security", string> = {
   security: [INTRO, SECURITY_REVIEW, STRUCTURE, BACKEND, DATA, SECURITY, RULES].join("\n\n"),
-  fast: BUILDER_SYSTEM_PROMPT,
+  fast: `${BUILDER_SYSTEM_PROMPT}\n\nBefore implementing, read static/__dev/design.md and static/__dev/architecture.md when present. Create or update both notes when a task introduces or changes product experience, visual principles, structure, or technical decisions. Keep them concise and consistent with the implementation.`,
   chat: [INTRO, CHAT, MEMORY, STRUCTURE, FRONTEND, CONTRACT, KIT, BACKEND, DATA, SECURITY, RULES].join("\n\n"),
   planner: [INTRO, PLANNER, MEMORY, STRUCTURE, CONTRACT, KIT, DATA, SECURITY, RULES].join("\n\n"),
   data: [INTRO, TEAM, DATA_ROLE, STRUCTURE, CONTRACT, DATA, SECURITY, RULES].join("\n\n"),

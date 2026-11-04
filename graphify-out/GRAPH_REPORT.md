@@ -1,7 +1,7 @@
-# Graph Report - main  (2026-11-03)
+# Graph Report - anemone  (2026-11-04)
 
 ## Corpus Check
-- 598 files · ~246,990 words
+- 598 files · ~247,423 words
 - Verdict: corpus is large enough that graph structure adds value.
 - Unclassified: 10 file(s) not represented in the graph (top: (none) 6, .css 3, .example 1)
 
@@ -11,7 +11,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `982da6c0`
+- Built from commit: `ea511835`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -113,7 +113,7 @@
 - FileMap
 - Panel de administración del sistema — diseño
 - QueryRepository
-- createProjectRows
+- projectRows.ts
 - BuilderWorkflow.ts
 - AccountLifecycleRepository
 - react
@@ -125,7 +125,7 @@
 - bootstrap/coreModules.ts
 - OrganizationSkillsService.ts
 - OrchestrationPolicy.ts
-- builderServer.ts
+- appRuntimeServer.ts
 - composition.ts
 - ports.ts
 - e2e.mjs
@@ -137,7 +137,7 @@
 - skills.test.ts
 - mcp/jobs.ts
 - { api, auth, storage, ai }
-- settings/index.ts
+- ISettingsStore
 - studio.mjs
 - ProjectDbClient
 - PostgresPlatformSettingsStoreAdapter
@@ -172,15 +172,15 @@
 - JobCron
 - AgentExecutionSpec
 - identity/boundaries.test.ts
-- app-services/auth.ts
+- createAuth
 - architecture.test.ts
 - accounts.ts
 - FinishGateAdapter.ts
 - apiTypes.test.ts
 - createCollaborationModule
-- SettingRegistry.ts
+- settings/index.ts
 - forms.tsx
-- app-services/secrets.ts
+- createSecrets
 - SqlAgentTaskRepository.ts
 - GithubGateway
 - accountLifecycle.ts
@@ -598,7 +598,7 @@ Nodes (31): Global Constraints, Panel de administración + Postgres — plan de 
 Cohesion: 0.13
 Nodes (7): createEmail(), sendEmail(), sendPlatformEmail(), verifiedSender(), EmailPorts, QueryRepository, StoragePorts
 
-### Community 98 - "createProjectRows"
+### Community 98 - "projectRows.ts"
 Cohesion: 0.12
 Nodes (13): @electric-sql/pglite, createProjectData(), createProjectRows(), columnsFor(), createProjectRow(), deleteProjectRows(), listProjectRows(), mask() (+5 more)
 
@@ -642,7 +642,7 @@ Nodes (9): OrganizationSkillsService, canWriteOrganizationSkill(), OrganizationS
 Cohesion: 0.29
 Nodes (8): ReviewAndFixUseCase, Review, reviewFixTasks(), PlanTask, SpecialistRole, FixResult, ReviewAndFixPorts, TeamReviewOutcome
 
-### Community 110 - "builderServer.ts"
+### Community 110 - "appRuntimeServer.ts"
 Cohesion: 0.07
 Nodes (32): @hono/node-server@^2.1.5, @hono/node-server, startAppRuntimeEventRelay(), app, lifecycle, monolith, runtimePorts, wss (+24 more)
 
@@ -686,7 +686,7 @@ Nodes (17): AUTHORED_SKILLS, BUILTIN_SKILLS, readVendored(), Skill, unix(), VEND
 Cohesion: 0.19
 Nodes (9): CallResult, fail(), Job, jobs, jobStatus(), MAX_WAIT_SECONDS, PENDING_SCHEMA, runOrDefer() (+1 more)
 
-### Community 122 - "settings/index.ts"
+### Community 122 - "ISettingsStore"
 Cohesion: 0.19
 Nodes (8): GetPlatformSettingsUseCase, UpdatePlatformSettingsUseCase, SettingDefinitionProps, SettingType, createSettingsModule(), SettingsModuleDependencies, ISettingsRegistry, ISettingsStore
 
@@ -782,7 +782,7 @@ Nodes (5): page(), escapeRe(), FileMap, replaceVisibleText(), TextEditResult
 Cohesion: 0.33
 Nodes (4): RunAgentUseCase, fixture(), model, usage
 
-### Community 157 - "app-services/auth.ts"
+### Community 157 - "createAuth"
 Cohesion: 0.24
 Nodes (12): createAuth(), confirmPasswordReset(), createSession(), ensureOwnerAdmin(), requestPasswordReset(), setTemporaryPassword(), signIn(), signUp() (+4 more)
 
@@ -806,7 +806,7 @@ Nodes (6): apiTypes(), doc(), key(), methodName(), Schema, schemaToTs()
 Cohesion: 0.15
 Nodes (5): MemberQueries, OrganizationQueries, createCollaborationModule(), IOrganizationQueries, fixture()
 
-### Community 279 - "SettingRegistry.ts"
+### Community 279 - "settings/index.ts"
 Cohesion: 0.17
 Nodes (19): encryptHeaders(), PlatformSettingType, SettingGroup, MOVED_ENV, createPlatformSettings(), byKey, Def, defs (+11 more)
 
@@ -814,7 +814,7 @@ Nodes (19): encryptHeaders(), PlatformSettingType, SettingGroup, MOVED_ENV, crea
 Cohesion: 0.46
 Nodes (7): Checkbox, describe(), Field(), FieldProps, Input, Select, Textarea
 
-### Community 288 - "app-services/secrets.ts"
+### Community 288 - "createSecrets"
 Cohesion: 0.18
 Nodes (4): createSecrets(), projectSecretEnv(), secretEnv(), SecretPorts
 
@@ -842,8 +842,8 @@ Nodes (16): CheckAccessUseCase, ProjectIdentity, ClaimInvitesUseCase, InviteMemb
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `vitest` connect `vitest` to `config.ts`, `IntegrationRepository`, `http-client.ts`, `q`, `PostgresProviderRepository.ts`, `infrastructure/routing.ts`, `crypto.ts`, `evaluations/bindings.test.ts`, `ExecutionMetrics`, `memory/application/service.ts`, `RunAgentUseCase.ts`, `ref_node_fs`, `projectIndex.ts`, `model-management/catalog.ts`, `project-observability/events.ts`, `CollaborationModuleDependencies`, `modules/projects/index.ts`, `createModelRouter`, `studioApi.ts`, `SettingDefinition`, `Plan.ts`, `builderService.ts`, `bootstrap/server.ts`, `models.ts`, `projects/application/usecases.ts`, `model-management/router.ts`, `integrations/github.ts`, `package.json`, `Project`, `project-observability/security.ts`, `ProjectDb`, `server/index.ts`, `createIdentityModule`, `deps.ts`, `model-management/index.ts`, `app-runtime/index.ts`, `ApplicationLifecycle`, `GithubAccountRepository`, `IOrganizationRepository`, `policies.test.ts`, `toolOutputs.test.ts`, `AgentExecution.ts`, `domain/score.ts`, `Changes.tsx`, `admission.ts`, `app-services/email.ts`, `BootstrapService`, `modules/identity/index.ts`, `createProjectRows`, `BuilderWorkflow.ts`, `usage/usage.ts`, `modules/builder/index.ts`, `bootstrap/coreModules.ts`, `OrganizationSkillsService.ts`, `builderServer.ts`, `composition.ts`, `ports.ts`, `devDependencies`, `guides.ts`, `RouterAdministration.ts`, `skills.test.ts`, `mcp/jobs.ts`, `settings/index.ts`, `platformRepository.test.ts`, `PlatformSettingsService`, `model-management/router.test.ts`, `BuilderToolsAdapter.ts`, `createHttp`, `http.test.ts`, `Password`, `integrations/boundaries.test.ts`, `AgentExecutionResult`, `TaskQueriesAdapter.ts`, `replaceVisibleText`, `execution.test.ts`, `identity/boundaries.test.ts`, `architecture.test.ts`, `accounts.ts`, `FinishGateAdapter.ts`, `apiTypes.test.ts`, `createCollaborationModule`, `SqlAgentTaskRepository.ts`, `accountLifecycle.ts`, `modules/collaboration/index.ts`?**
-  _High betweenness centrality (0.264) - this node is a cross-community bridge._
+- **Why does `vitest` connect `vitest` to `config.ts`, `IntegrationRepository`, `http-client.ts`, `q`, `PostgresProviderRepository.ts`, `infrastructure/routing.ts`, `crypto.ts`, `evaluations/bindings.test.ts`, `ExecutionMetrics`, `memory/application/service.ts`, `RunAgentUseCase.ts`, `ref_node_fs`, `projectIndex.ts`, `model-management/catalog.ts`, `project-observability/events.ts`, `CollaborationModuleDependencies`, `modules/projects/index.ts`, `createModelRouter`, `studioApi.ts`, `SettingDefinition`, `Plan.ts`, `builderService.ts`, `bootstrap/server.ts`, `models.ts`, `projects/application/usecases.ts`, `model-management/router.ts`, `integrations/github.ts`, `package.json`, `Project`, `project-observability/security.ts`, `ProjectDb`, `server/index.ts`, `createIdentityModule`, `deps.ts`, `model-management/index.ts`, `app-runtime/index.ts`, `ApplicationLifecycle`, `GithubAccountRepository`, `IOrganizationRepository`, `policies.test.ts`, `toolOutputs.test.ts`, `AgentExecution.ts`, `domain/score.ts`, `Changes.tsx`, `admission.ts`, `app-services/email.ts`, `BootstrapService`, `modules/identity/index.ts`, `projectRows.ts`, `BuilderWorkflow.ts`, `usage/usage.ts`, `modules/builder/index.ts`, `bootstrap/coreModules.ts`, `OrganizationSkillsService.ts`, `appRuntimeServer.ts`, `composition.ts`, `ports.ts`, `devDependencies`, `guides.ts`, `RouterAdministration.ts`, `skills.test.ts`, `mcp/jobs.ts`, `ISettingsStore`, `platformRepository.test.ts`, `PlatformSettingsService`, `model-management/router.test.ts`, `BuilderToolsAdapter.ts`, `createHttp`, `http.test.ts`, `Password`, `integrations/boundaries.test.ts`, `AgentExecutionResult`, `TaskQueriesAdapter.ts`, `replaceVisibleText`, `execution.test.ts`, `identity/boundaries.test.ts`, `architecture.test.ts`, `accounts.ts`, `FinishGateAdapter.ts`, `apiTypes.test.ts`, `createCollaborationModule`, `SqlAgentTaskRepository.ts`, `accountLifecycle.ts`, `modules/collaboration/index.ts`?**
+  _High betweenness centrality (0.265) - this node is a cross-community bridge._
 - **Are the 28 inferred relationships involving `createIdentityModule()` (e.g. with `.complete()` and `.init()`) actually correct?**
   _`createIdentityModule()` has 28 INFERRED edges - model-reasoned connections that need verification._
 - **What connects `./dynamic.js`, `./inlineType.js`, `./dynamicTemplate.js` to the rest of the system?**
@@ -855,4 +855,4 @@ _Questions this graph is uniquely positioned to answer:_
 - **Should `infrastructure/runner.ts` be split into smaller, more focused modules?**
   _Cohesion score 0.09548022598870057 - nodes in this community are weakly interconnected._
 - **Why does `q()` connect `q` to `infrastructure/runner.ts`, `config.ts`, `IntegrationRepository`, `PostgresProviderRepository.ts`, `infrastructure/routing.ts`, `BuilderTurnAdapter.ts`, `memory/application/service.ts`, `model-management/catalog.ts`, `CollaborationModuleDependencies`, `infrastructure/repositories.ts`, `model-management/router.ts`, `SqlAgentTaskRepository.ts`, `Account`, `integrations/github.ts`, `Project`, `adminApi.ts`, `project-observability/security.ts`, `model-management/index.ts`, `sha256`, `OrgRole`, `accountLifecycle.ts`, `modules/identity/index.ts`, `modules/builder/index.ts`, `bootstrap/coreModules.ts`, `OrganizationSkillsService.ts`, `RouterAdministration.ts`, `platform.ts`?**
-  _High betweenness centrality (0.047) - this node is a cross-community bridge._
+  _High betweenness centrality (0.048) - this node is a cross-community bridge._

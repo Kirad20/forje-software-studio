@@ -49,6 +49,7 @@ export function CodePanel({ projectId, reloadKey, initialPath = null }: { projec
   const [path, setPath] = useState<string | null>(initialPath);
   const [content, setContent] = useState("");
   const [saved, setSaved] = useState("");
+  const [query, setQuery] = useState("");
   useEffect(() => {
     if (!path) return;
     api<{ content: string }>(`/projects/${projectId}/file?path=${encodeURIComponent(path)}`).then((r) => {
@@ -57,36 +58,95 @@ export function CodePanel({ projectId, reloadKey, initialPath = null }: { projec
     });
   }, [path, projectId, reloadKey]);
   if (!files.data) return <Loading error={files.error} />;
+  const visibleFiles = files.data.files.filter((f) => f.path.toLowerCase().includes(query.trim().toLowerCase()));
+  const fileName = path?.split("/").pop() ?? "";
+  const lineCount = content ? content.split("\n").length : 0;
   return (
-    <div className="two-col">
-      <div className="list">
-        {files.data.files.map((f) => (
-          <button key={f.path} className={f.path === path ? "active" : ""} onClick={() => setPath(f.path)} title={f.path}>
-            {f.path}
-          </button>
-        ))}
-      </div>
-      {path ? (
-        <div style={{ display: "grid", gridTemplateRows: "40px 1fr", minHeight: 0 }}>
-          <div className="row" style={{ padding: "0 12px", borderBottom: "1px solid var(--border)" }}>
-            <code className="grow">{path}</code>
-            {content !== saved && <span className="pill warn">Sin guardar</span>}
-            <button
-              className="primary sm"
-              disabled={content === saved}
-              onClick={async () => {
-                await api(`/projects/${projectId}/file`, { method: "PUT", body: { path, content } });
-                setSaved(content);
-              }}
-            >
-              Guardar
-            </button>
+    <div className="tool-file-panel">
+      <aside className="tool-file-sidebar">
+        <div className="tool-file-sidebar-head">
+          <span className="tool-eyebrow">PROYECTO</span>
+          <div className="tool-file-sidebar-title">
+            <strong>Archivos</strong>
+            <span className="tool-count">{visibleFiles.length}</span>
           </div>
-          <textarea className="code code-editor" spellCheck={false} value={content} onChange={(e) => setContent(e.target.value)} />
+          <input
+            className="tool-file-search"
+            aria-label="Buscar archivos"
+            placeholder="Buscar archivo..."
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
         </div>
-      ) : (
-        <div className="empty">Elige un archivo. Para cambios grandes, pídeselo al constructor.</div>
-      )}
+        <div className="tool-file-list">
+          {visibleFiles.map((f) => {
+            const name = f.path.split("/").pop() ?? f.path;
+            const folder = f.path.slice(0, Math.max(0, f.path.length - name.length)).replace(/\/$/, "");
+            const extension = name.includes(".") ? name.slice(name.lastIndexOf(".") + 1).toUpperCase() : "FILE";
+            return (
+              <button
+                key={f.path}
+                className={`tool-file-button${f.path === path ? " active" : ""}`}
+                onClick={() => setPath(f.path)}
+                title={f.path}
+                aria-current={f.path === path ? "page" : undefined}
+              >
+                <span className="tool-file-extension">{extension}</span>
+                <span className="tool-file-label">
+                  <strong>{name}</strong>
+                  <small>{folder || "raíz"}</small>
+                </span>
+              </button>
+            );
+          })}
+          {visibleFiles.length === 0 && <div className="tool-file-list-empty">No se encontraron archivos.</div>}
+        </div>
+      </aside>
+      <section className="tool-file-workspace">
+        {path ? (
+          <>
+            <header className="tool-file-toolbar">
+              <div className="tool-file-heading">
+                <span className="tool-eyebrow">CÓDIGO DEL PROYECTO</span>
+                <strong>{fileName}</strong>
+                <code>{path}</code>
+              </div>
+              <div className="tool-file-actions">
+                <span className={`tool-save-state${content !== saved ? " dirty" : ""}`} role="status">
+                  {content !== saved ? "Cambios sin guardar" : "Guardado"}
+                </span>
+                <button
+                  className="primary sm"
+                  disabled={content === saved}
+                  onClick={async () => {
+                    await api(`/projects/${projectId}/file`, { method: "PUT", body: { path, content } });
+                    setSaved(content);
+                  }}
+                >
+                  Guardar cambios
+                </button>
+              </div>
+            </header>
+            <div className="tool-editor-meta">
+              <span>EDITOR</span>
+              <span>{lineCount} líneas</span>
+            </div>
+            <textarea
+              className="code code-editor tool-code-editor"
+              aria-label={`Editar ${path}`}
+              spellCheck={false}
+              value={content}
+              onChange={(e) => setContent(e.target.value)}
+            />
+          </>
+        ) : (
+          <div className="tool-file-empty">
+            <span className="tool-empty-mark">&lt;/&gt;</span>
+            <strong>Selecciona un archivo</strong>
+            <p>Busca en los archivos del proyecto y selecciona uno para verlo o editarlo.</p>
+          </div>
+        )}
+      </section>
     </div>
   );
 }

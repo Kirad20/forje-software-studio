@@ -553,35 +553,112 @@ export function DocsPanel({ projectId, reloadKey }: { projectId: string; reloadK
   const files = useLoad<{ files: { path: string; updatedAt: string }[] }>(`/projects/${projectId}/files`, [reloadKey]);
   const [path, setPath] = useState<string | null>(null);
   const [content, setContent] = useState("");
+  const [saved, setSaved] = useState("");
   const docs = (files.data?.files ?? []).filter((f) => f.path.startsWith("static/__dev/"));
   useEffect(() => {
     if (!path && docs[0]) setPath(docs[0].path);
   }, [docs.length]);
   useEffect(() => {
-    if (path) api<{ content: string }>(`/projects/${projectId}/file?path=${encodeURIComponent(path)}`).then((r) => setContent(r.content));
+    if (path) {
+      api<{ content: string }>(`/projects/${projectId}/file?path=${encodeURIComponent(path)}`).then((r) => {
+        setContent(r.content);
+        setSaved(r.content);
+      });
+    }
   }, [path, reloadKey, projectId]);
   if (!files.data) return <Loading error={files.error} />;
+  const fileName = path?.split("/").pop() ?? "";
+  const lineCount = content ? content.split("\n").length : 0;
   return (
-    <div className="two-col" style={{ gridTemplateColumns: "240px 1fr" }}>
-      <div className="list" style={{ padding: 12 }}>
-        <div style={{ fontWeight: 700, fontSize: 15 }}>Planes y docs</div>
-        <div className="small muted" style={{ marginBottom: 10 }}>
-          Notas que el constructor escribe en static/__dev/. No se publican.
+    <div className="tool-file-panel tool-docs-panel">
+      <aside className="tool-file-sidebar">
+        <div className="tool-file-sidebar-head">
+          <span className="tool-eyebrow">CONOCIMIENTO DEL PROYECTO</span>
+          <div className="tool-file-sidebar-title">
+            <strong>Planes y docs</strong>
+            <span className="tool-count">{docs.length}</span>
+          </div>
+          <p className="tool-sidebar-description">Documentación interna que los agentes consultan y mantienen.</p>
         </div>
-        {docs.length === 0 && <div className="small muted">Aún no hay notas.</div>}
-        {docs.map((d) => (
-          <button key={d.path} className={d.path === path ? "active" : ""} onClick={() => setPath(d.path)}>
-            {d.path.replace("static/__dev/", "").replace(/\.md$/, "")}
-          </button>
-        ))}
-      </div>
-      <div style={{ overflow: "auto", padding: "22px 28px" }}>
+        <div className="tool-file-list">
+          {docs.map((d) => {
+            const name = d.path.split("/").pop() ?? d.path;
+            const label = name === "design.md" ? "Diseño" : name === "architecture.md" ? "Arquitectura" : name.replace(/\.md$/, "");
+            const detail = name === "design.md"
+              ? "Experiencia y criterios visuales"
+              : name === "architecture.md"
+                ? "Estructura y decisiones técnicas"
+                : d.path.replace("static/__dev/", "");
+            return (
+              <button
+                key={d.path}
+                className={`tool-file-button${d.path === path ? " active" : ""}`}
+                onClick={() => setPath(d.path)}
+                title={d.path}
+                aria-current={d.path === path ? "page" : undefined}
+              >
+                <span className="tool-doc-mark">MD</span>
+                <span className="tool-file-label">
+                  <strong>{label}</strong>
+                  <small>{detail}</small>
+                </span>
+              </button>
+            );
+          })}
+          {docs.length === 0 && (
+            <div className="tool-docs-empty">
+              <strong>Sin documentación todavía</strong>
+              <span>El agente puede crear design.md y architecture.md al planificar o implementar cambios.</span>
+            </div>
+          )}
+        </div>
+        <div className="tool-sidebar-foot">Se guarda en <code>static/__dev/</code> y no se publica.</div>
+      </aside>
+      <section className="tool-file-workspace tool-doc-workspace">
         {path ? (
-          <pre style={{ whiteSpace: "pre-wrap", fontFamily: "inherit", fontSize: 14, lineHeight: 1.65, margin: 0 }}>{content}</pre>
+          <>
+            <header className="tool-file-toolbar">
+              <div className="tool-file-heading">
+                <span className="tool-eyebrow">DOCUMENTACIÓN INTERNA</span>
+                <strong>{fileName}</strong>
+                <code>{path}</code>
+              </div>
+              <div className="tool-file-actions">
+                <span className={`tool-save-state${content !== saved ? " dirty" : ""}`} role="status">
+                  {content !== saved ? "Cambios sin guardar" : "Guardado"}
+                </span>
+                <button
+                  className="primary sm"
+                  disabled={content === saved}
+                  onClick={async () => {
+                    await api(`/projects/${projectId}/file`, { method: "PUT", body: { path, content } });
+                    setSaved(content);
+                  }}
+                >
+                  Guardar cambios
+                </button>
+              </div>
+            </header>
+            <div className="tool-editor-meta">
+              <span>MARKDOWN</span>
+              <span>{lineCount} líneas</span>
+            </div>
+            <textarea
+              className="code code-editor tool-code-editor tool-doc-editor"
+              aria-label={`Editar ${path}`}
+              spellCheck={false}
+              value={content}
+              onChange={(e) => setContent(e.target.value)}
+            />
+          </>
         ) : (
-          <div className="empty">Pide al constructor «escribe el plan en las notas» y aparecerá aquí.</div>
+          <div className="tool-file-empty">
+            <span className="tool-empty-mark">#</span>
+            <strong>Planes y decisiones, en un solo lugar</strong>
+            <p>Los agentes pueden crear y actualizar el diseño y la arquitectura del proyecto aquí.</p>
+          </div>
         )}
-      </div>
+      </section>
     </div>
   );
 }

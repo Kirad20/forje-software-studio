@@ -211,6 +211,48 @@ table.grid td { max-width: 320px; overflow: hidden; text-overflow: ellipsis; whi
 .list button { width: 100%; justify-content: flex-start; border: 0; background: transparent; height: 30px; font-weight: 400; font-size: 13px; overflow: hidden; text-overflow: ellipsis; }
 .list button.active { background: var(--accent-soft); color: var(--accent); }
 .code-editor { width: 100%; height: 100%; border: 0; border-radius: 0; resize: none; padding: 14px; line-height: 1.55; tab-size: 2; box-shadow: none !important; }
+.tool-file-panel { display: grid; grid-template-columns: minmax(210px, 252px) minmax(0, 1fr); height: 100%; min-height: 0; overflow: hidden; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
+.tool-file-sidebar { display: flex; flex-direction: column; min-width: 0; min-height: 0; border-right: 1px solid var(--border); background: var(--surface-2); }
+.tool-file-sidebar-head { display: grid; gap: 10px; padding: 17px 14px 13px; border-bottom: 1px solid var(--border); }
+.tool-eyebrow { color: var(--muted); font-size: 10px; font-weight: 700; letter-spacing: .1em; }
+.tool-file-sidebar-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 15px; }
+.tool-count { min-width: 23px; padding: 2px 7px; border: 1px solid var(--border); border-radius: 999px; color: var(--muted); font-size: 11px; text-align: center; }
+.tool-file-search { width: 100%; min-width: 0; height: 34px; padding: 0 10px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface); color: var(--text); font-size: 12px; }
+.tool-file-list { flex: 1; min-height: 0; overflow: auto; padding: 8px; }
+.tool-file-button { display: grid; grid-template-columns: 32px minmax(0, 1fr); align-items: center; gap: 9px; width: 100%; min-height: 49px; padding: 7px 8px; border: 1px solid transparent; border-radius: 8px; background: transparent; color: var(--text); text-align: left; cursor: pointer; }
+.tool-file-button:hover { background: var(--surface); }
+.tool-file-button.active { border-color: color-mix(in srgb, var(--accent) 24%, var(--border)); background: var(--accent-soft); color: var(--accent); }
+.tool-file-extension, .tool-doc-mark { display: grid; width: 30px; height: 30px; place-items: center; border: 1px solid var(--border); border-radius: 7px; background: var(--surface); color: var(--muted); font: 700 9px ui-monospace, SFMono-Regular, Consolas, monospace; }
+.tool-doc-mark { color: var(--accent); }
+.tool-file-label { display: grid; min-width: 0; gap: 3px; }
+.tool-file-label strong { overflow: hidden; font-size: 12px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.tool-file-label small { overflow: hidden; color: var(--muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.tool-file-list-empty, .tool-docs-empty { padding: 14px 9px; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.tool-docs-empty { display: grid; gap: 6px; }
+.tool-docs-empty strong { color: var(--text); font-size: 12px; }
+.tool-sidebar-description { margin: -4px 0 0; color: var(--muted); font-size: 11px; line-height: 1.45; }
+.tool-sidebar-foot { padding: 11px 14px; border-top: 1px solid var(--border); color: var(--muted); font-size: 10px; line-height: 1.5; }
+.tool-sidebar-foot code { color: var(--text); font-size: 10px; }
+.tool-file-workspace { display: grid; grid-template-rows: auto auto minmax(0, 1fr); min-width: 0; min-height: 0; background: var(--surface); }
+.tool-file-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 18px; min-width: 0; padding: 13px 17px; border-bottom: 1px solid var(--border); }
+.tool-file-heading { display: grid; min-width: 0; gap: 3px; }
+.tool-file-heading strong { overflow: hidden; font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
+.tool-file-heading code { overflow: hidden; color: var(--muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.tool-file-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; flex-shrink: 0; }
+.tool-save-state { color: var(--muted); font-size: 11px; }
+.tool-save-state.dirty { color: var(--warning, #b7791f); }
+.tool-editor-meta { display: flex; justify-content: space-between; padding: 7px 14px; border-bottom: 1px solid var(--border); background: var(--surface-2); color: var(--muted); font-size: 9px; font-weight: 700; letter-spacing: .08em; }
+.tool-code-editor { min-height: 0; padding: 16px 18px; background: var(--surface); color: var(--text); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; line-height: 1.7; }
+.tool-doc-editor { font-size: 13px; }
+.tool-file-empty { display: grid; align-content: center; justify-items: center; gap: 10px; min-height: 0; padding: 28px; color: var(--muted); text-align: center; }
+.tool-file-empty strong { color: var(--text); font-size: 15px; }
+.tool-file-empty p { max-width: 340px; margin: 0; font-size: 12px; line-height: 1.55; }
+.tool-empty-mark { display: grid; width: 44px; height: 44px; place-items: center; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-2); color: var(--accent); font: 700 15px ui-monospace, SFMono-Regular, Consolas, monospace; }
+@media (max-width: 720px) {
+  .tool-file-panel { grid-template-columns: minmax(145px, 35%) minmax(0, 1fr); }
+  .tool-file-toolbar { align-items: flex-start; flex-direction: column; gap: 9px; }
+  .tool-file-actions { justify-content: space-between; width: 100%; }
+}
 
 .modal-backdrop { position: fixed; inset: 0; background: rgb(0 0 0 / 0.4); display: grid; place-items: center; z-index: 50; padding: 16px; }
 .modal { width: min(480px, 100%); padding: 22px; display: grid; gap: 14px; }
