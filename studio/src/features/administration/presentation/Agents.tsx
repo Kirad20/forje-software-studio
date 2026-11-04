@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../application/controller.js";
+import { Select } from "../../../shared/ui.js";
 
 interface RoleInfo {
   role: string;
@@ -91,23 +92,13 @@ export function Agents() {
         <div className="row" style={{ flexWrap: "wrap" }}>
           <label className="small">
             Rol
-            <select value={role} onChange={(e) => setRole(e.target.value)} style={{ width: 280 }}>
-              {roles.map((r) => (
-                <option key={r.role} value={r.role}>
-                  {ROLE_LABEL[r.role] ?? r.role}
-                </option>
-              ))}
-            </select>
+            <Select label="Rol del agente" value={role} onValueChange={setRole} style={{ width: 280 }}
+              options={roles.map((r) => ({ value: r.role, label: ROLE_LABEL[r.role] ?? r.role }))} />
           </label>
           <label className="small grow">
             Modelo
-            <select value={model} onChange={(e) => setModel(e.target.value)}>
-              {models.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.label} — {m.id}
-                </option>
-              ))}
-            </select>
+            <Select label="Modelo del agente" value={model} onValueChange={setModel}
+              options={models.map((m) => ({ value: m.id, label: m.label, description: m.id }))} />
           </label>
         </div>
         {info && (

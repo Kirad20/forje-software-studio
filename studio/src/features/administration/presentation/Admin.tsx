@@ -33,6 +33,7 @@ export function Admin({ tab }: { tab: string }) {
             key={key}
             href={`/admin/${key}`}
             className={key === current[0] ? "active" : ""}
+            aria-current={key === current[0] ? "page" : undefined}
             onClick={(e) => {
               e.preventDefault();
               go(`/admin/${key}`);

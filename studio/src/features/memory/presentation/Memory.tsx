@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "../application/controller.js";
-import { Switch } from "../../../shared/ui.js";
+import { Select, Switch } from "../../../shared/ui.js";
 
 type Kind = "preference" | "decision" | "rejected" | "business";
 type Scope = "project" | "personal";
@@ -109,13 +109,7 @@ function MemoryList({
       {items.map((m) =>
         editing?.id === m.id ? (
           <div key={m.id} className="row" style={{ gap: 8, flexWrap: "wrap" }}>
-            <select style={{ width: "auto" }} value={editing.kind} onChange={(e) => setEditing({ ...editing, kind: e.target.value as Kind })} aria-label="Tipo">
-              {KINDS.map((k) => (
-                <option key={k.value} value={k.value}>
-                  {k.label}
-                </option>
-              ))}
-            </select>
+            <Select style={{ width: 180 }} label="Tipo" value={editing.kind} onValueChange={(kind) => setEditing({ ...editing, kind })} options={KINDS} />
             <input className="grow" style={{ minWidth: 0, flexBasis: 220 }} value={editing.text} maxLength={300} onChange={(e) => setEditing({ ...editing, text: e.target.value })} aria-label="Texto" />
             <button className="sm primary" disabled={!editing.text.trim()} onClick={async () => (await call(`/${m.id}`, { method: "PATCH", body: { text: editing.text, kind: editing.kind } })) && setEditing(null)}>
               Guardar
@@ -148,13 +142,7 @@ function MemoryList({
           if (await call("", { body: { text, kind, scope } })) setText("");
         }}
       >
-        <select style={{ width: "auto" }} value={kind} onChange={(e) => setKind(e.target.value as Kind)} aria-label={`Tipo de la nueva memoria ${title.toLowerCase()}`}>
-          {KINDS.map((k) => (
-            <option key={k.value} value={k.value}>
-              {k.label}
-            </option>
-          ))}
-        </select>
+        <Select style={{ width: 180 }} label={`Tipo de la nueva memoria ${title.toLowerCase()}`} value={kind} onValueChange={setKind} options={KINDS} />
         <input
           className="grow"
           style={{ minWidth: 0, flexBasis: 220 }}

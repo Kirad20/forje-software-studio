@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../application/controller.js";
 import { Switch } from "../../../shared/ui.js";
+import { EditDialog } from "../../../shared/EditDialog.js";
 
 interface ProviderView {
   id: string;
@@ -35,17 +36,20 @@ export function Providers() {
   const [list, setList] = useState<ProviderView[] | null>(null);
   const [error, setError] = useState("");
   const [adding, setAdding] = useState(false);
+  const [filter, setFilter] = useState("");
   const load = () => api<{ providers: ProviderView[] }>("/admin/providers").then((r) => setList(r.providers));
   useEffect(() => {
-    void load();
+    void load().catch((e) => setError((e as Error).message));
   }, []);
-  if (!list) return <div className="empty"><span className="spinner" /></div>;
+  if (!list) return <div className="empty">{error ? <div role="alert">{error} <button onClick={() => { setError(""); void load().catch((e) => setError((e as Error).message)); }}>Reintentar</button></div> : <span className="spinner" />}</div>;
   const patch = async (id: string, body: Record<string, unknown>) => {
     setError("");
     try {
       setList((await api<{ providers: ProviderView[] }>(`/admin/providers/${id}`, { method: "PATCH", body })).providers);
+      return null;
     } catch (e) {
       setError((e as Error).message);
+      return (e as Error).message;
     }
   };
   return (
@@ -53,26 +57,41 @@ export function Providers() {
       <p className="small muted" style={{ margin: 0 }}>
         Un proveedor se usa cuando está activado y tiene su clave (o su URL). Las claves se guardan cifradas y nunca vuelven al navegador.
       </p>
-      {error && <div className="error-box">{error}</div>}
-      {list.map((p) => (
+      <div className="admin-toolbar">
+        <input aria-label="Buscar proveedores" placeholder="Buscar por nombre, identificador o URL…" value={filter} onChange={(e) => setFilter(e.target.value)} />
+        <button className="primary" disabled={adding} onClick={() => setAdding(true)}>+ Añadir proveedor</button>
+      </div>
+      <div className="small muted">{list.filter((p) => p.available).length} de {list.length} proveedores disponibles</div>
+      {error && <div className="error-box" role="alert">{error}</div>}
+      {list.filter((p) => `${p.label} ${p.id} ${p.baseUrl ?? ""}`.toLowerCase().includes(filter.toLowerCase())).map((p) => (
         <ProviderCard key={p.id} p={p} onPatch={(b) => patch(p.id, b)} onDeleted={(l) => setList(l)} />
       ))}
-      {adding ? (
+      {filter && !list.some((p) => `${p.label} ${p.id} ${p.baseUrl ?? ""}`.toLowerCase().includes(filter.toLowerCase())) && <div className="empty">No hay proveedores con ese filtro. <button onClick={() => setFilter("")}>Limpiar búsqueda</button></div>}
+      {adding && (
         <AddProvider onDone={(l) => (l && setList(l), setAdding(false))} />
-      ) : (
-        <div>
-          <button onClick={() => setAdding(true)}>+ Añadir proveedor compatible con OpenAI</button>
-        </div>
       )}
     </div>
   );
 }
 
-function ProviderCard({ p, onPatch, onDeleted }: { p: ProviderView; onPatch: (b: Record<string, unknown>) => Promise<void>; onDeleted: (l: ProviderView[]) => void }) {
+function ProviderCard({ p, onPatch, onDeleted }: { p: ProviderView; onPatch: (b: Record<string, unknown>) => Promise<string | null>; onDeleted: (l: ProviderView[]) => void }) {
   const [key, setKey] = useState("");
-  const [url, setUrl] = useState(p.baseUrl ?? "");
+  const [editing, setEditing] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [probe, setProbe] = useState<Probe | null>(null);
   const [testing, setTesting] = useState(false);
+  const update = async (body: Record<string, unknown>) => {
+    setBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      const failure = await onPatch(body);
+      if (!failure) { setNotice("Proveedor actualizado."); setProbe(null); }
+      return failure;
+    } finally { setBusy(false); }
+  };
   const test = async () => {
     setTesting(true);
     setProbe(null);
@@ -89,27 +108,26 @@ function ProviderCard({ p, onPatch, onDeleted }: { p: ProviderView; onPatch: (b:
       <div className="row">
         <div className="grow">
           <strong>{p.label}</strong> <code className="small muted">{p.id}</code>
-          <div className="small muted">{KIND_HINT[p.id] ?? "Proveedor compatible con OpenAI."}</div>
+          <div className="small muted">{KIND_HINT[p.id] ?? KIND_HINT[p.kind]}</div>
         </div>
         {p.available ? <span className="pill ok">Disponible</span> : <span className={`pill ${p.enabled ? "warn" : ""}`}>{p.missing}</span>}
-        <Switch on={p.enabled} onChange={(v) => void onPatch({ enabled: v })} label={`Activar ${p.label}`} />
+        <Switch on={p.enabled} disabled={busy || testing} onChange={(v) => void update({ enabled: v })} label={`Activar ${p.label}`} />
       </div>
       <div className="kv" style={{ alignItems: "center" }}>
         <span className="muted">Clave de API</span>
         <div className="row">
           {p.keySet && <code>{p.keyBroken ? "no se puede descifrar" : (p.keyHint ?? "••••")}</code>}
-          <input className="grow" type="password" autoComplete="off" placeholder={p.keySet ? "Reemplazar clave" : p.kind === "openai" && p.id !== "openrouter" ? "Opcional en servidores locales" : "Pega la clave"} value={key} onChange={(e) => setKey(e.target.value)} />
+          <input className="grow" aria-label={`Clave de API de ${p.label}`} disabled={busy} type="password" autoComplete="off" placeholder={p.keySet ? "Reemplazar clave" : p.kind === "openai" && p.id !== "openrouter" ? "Opcional en servidores locales" : "Pega la clave"} value={key} onChange={(e) => setKey(e.target.value)} />
           <button
-            disabled={!key.trim()}
-            onClick={() => {
-              void onPatch({ apiKey: key.trim() });
-              setKey("");
+            disabled={busy || !key.trim()}
+            onClick={async () => {
+              if (!await update({ apiKey: key.trim() })) setKey("");
             }}
           >
             Guardar
           </button>
           {p.keySet && (
-            <button className="danger" onClick={() => void onPatch({ apiKey: null })}>
+            <button disabled={busy} className="danger" onClick={() => { if (confirm(`¿Quitar la clave de ${p.label}?`)) void update({ apiKey: null }); }}>
               Quitar
             </button>
           )}
@@ -118,16 +136,17 @@ function ProviderCard({ p, onPatch, onDeleted }: { p: ProviderView; onPatch: (b:
           <>
             <span className="muted">URL base</span>
             <div className="row">
-              <input className="grow" type="url" placeholder="https://host/v1" value={url} onChange={(e) => setUrl(e.target.value)} />
-              <button disabled={url === (p.baseUrl ?? "") || !url.trim()} onClick={() => void onPatch({ baseUrl: url.trim() })}>
-                Guardar
-              </button>
+              <code style={{ overflowWrap: "anywhere" }}>{p.baseUrl}</code>
             </div>
           </>
         )}
       </div>
+      {p.headerNames.length > 0 && <div className="small muted">Cabeceras configuradas: {p.headerNames.join(", ")}</div>}
+      {error && <div className="error-box" role="alert">{error}</div>}
+      {notice && <div className="small muted" role="status">{notice}</div>}
       <div className="row">
-        <button onClick={() => void test()} disabled={testing || !p.available}>
+        <button onClick={() => setEditing(true)} disabled={busy || testing}>Editar proveedor</button>
+        <button onClick={() => void test()} disabled={busy || testing || !p.available}>
           {testing ? <span className="spinner" /> : "Probar conexión"}
         </button>
         {probe &&
@@ -144,16 +163,77 @@ function ProviderCard({ p, onPatch, onDeleted }: { p: ProviderView; onPatch: (b:
         {!p.builtin && (
           <button
             className="danger"
+            disabled={busy || testing}
             onClick={async () => {
               if (!confirm(`¿Borrar el proveedor «${p.label}» y sus modelos propios?`)) return;
-              onDeleted((await api<{ providers: ProviderView[] }>(`/admin/providers/${p.id}`, { method: "DELETE" })).providers);
+              setBusy(true);
+              setError("");
+              try {
+                onDeleted((await api<{ providers: ProviderView[] }>(`/admin/providers/${p.id}`, { method: "DELETE" })).providers);
+              } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
             }}
           >
             Borrar
           </button>
         )}
       </div>
+      {editing && <ProviderEditor p={p} onClose={() => setEditing(false)} onSave={async (body) => {
+        const failure = await update(body);
+        if (!failure) setEditing(false);
+        return failure;
+      }} />}
     </section>
+  );
+}
+
+function ProviderEditor({ p, onClose, onSave }: {
+  p: ProviderView; onClose: () => void; onSave: (body: Record<string, unknown>) => Promise<string | null>;
+}) {
+  const [label, setLabel] = useState(p.label);
+  const [url, setUrl] = useState(p.baseUrl ?? "");
+  const [replaceHeaders, setReplaceHeaders] = useState(false);
+  const [headers, setHeaders] = useState("{}");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const editableUrl = p.kind === "openai" && p.id !== "openrouter";
+  const dirty = label !== p.label || (editableUrl && url !== (p.baseUrl ?? "")) || replaceHeaders;
+  return (
+    <EditDialog title="Editar proveedor" description={`Identificador: ${p.id}. Las claves y los valores de cabeceras no se muestran por seguridad.`} onClose={onClose} busy={busy}>
+      <form className="stack" onSubmit={async (event) => {
+        event.preventDefault();
+        setError("");
+        const body: Record<string, unknown> = {};
+        if (label !== p.label) body.label = label.trim();
+        if (editableUrl && url !== (p.baseUrl ?? "")) body.baseUrl = url.trim();
+        if (replaceHeaders) {
+          try {
+            const parsed: unknown = JSON.parse(headers);
+            if (!parsed || typeof parsed !== "object" || Array.isArray(parsed) || Object.values(parsed).some((v) => typeof v !== "string")) {
+              throw new Error("Usa un objeto JSON con nombres y valores de texto.");
+            }
+            body.headers = parsed;
+          } catch (e) { setError(`Cabeceras no válidas: ${(e as Error).message}`); return; }
+        }
+        setBusy(true);
+        try {
+          const failure = await onSave(body);
+          if (failure) setError(failure);
+        } finally { setBusy(false); }
+      }}>
+        <fieldset disabled={busy} className="stack">
+          <label>Nombre visible<input required maxLength={80} value={label} onChange={(e) => setLabel(e.target.value)} /></label>
+          {editableUrl && <label>URL base<input required type="url" maxLength={500} placeholder="http://localhost:11434/v1" value={url} onChange={(e) => setUrl(e.target.value)} /></label>}
+          <label className="row small"><input type="checkbox" checked={replaceHeaders} onChange={(e) => setReplaceHeaders(e.target.checked)} style={{ width: "auto" }} />Reemplazar cabeceras personalizadas</label>
+          {replaceHeaders && <>
+            <div className="small muted">Reemplaza todas las cabeceras existentes{p.headerNames.length ? ` (${p.headerNames.join(", ")})` : ""}. Usa {"{}"} para quitarlas; desmarca para conservarlas.</div>
+            <label htmlFor="provider-headers">Cabeceras (JSON)</label>
+            <textarea id="provider-headers" className="code" rows={4} spellCheck={false} value={headers} onChange={(e) => setHeaders(e.target.value)} />
+          </>}
+        </fieldset>
+        {error && <div className="error-box" role="alert">{error}</div>}
+        <div className="row"><button className="primary" disabled={busy || !dirty}>{busy ? "Guardando…" : "Guardar cambios"}</button><button type="button" disabled={busy} onClick={onClose}>Cancelar</button></div>
+      </form>
+    </EditDialog>
   );
 }
 
@@ -163,6 +243,7 @@ function AddProvider({ onDone }: { onDone: (list?: ProviderView[]) => void }) {
   const [baseUrl, setBaseUrl] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
   return (
     <form
       className="card stack"
@@ -170,25 +251,28 @@ function AddProvider({ onDone }: { onDone: (list?: ProviderView[]) => void }) {
       onSubmit={async (e) => {
         e.preventDefault();
         setError("");
+        setBusy(true);
         try {
           const r = await api<{ providers: ProviderView[] }>("/admin/providers", { body: { id, label: label || id, baseUrl, apiKey: apiKey || undefined, enabled: true } });
           onDone(r.providers);
         } catch (x) {
           setError((x as Error).message);
+        } finally {
+          setBusy(false);
         }
       }}
     >
       <strong>Nuevo proveedor compatible con OpenAI</strong>
-      <div className="row" style={{ flexWrap: "wrap" }}>
-        <input required placeholder="id (p. ej. ollama)" pattern="[a-z0-9-]{2,32}" value={id} onChange={(e) => setId(e.target.value.toLowerCase())} style={{ width: 180 }} />
-        <input placeholder="Nombre visible" value={label} onChange={(e) => setLabel(e.target.value)} style={{ width: 200 }} />
-        <input required type="url" className="grow" placeholder="URL base, p. ej. http://localhost:11434/v1" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} />
-        <input type="password" autoComplete="off" placeholder="Clave (opcional)" value={apiKey} onChange={(e) => setApiKey(e.target.value)} style={{ width: 200 }} />
-      </div>
+      <fieldset disabled={busy} className="admin-form-grid">
+        <label>Identificador<input required placeholder="p. ej. ollama" pattern="[a-z0-9-]{2,32}" value={id} onChange={(e) => setId(e.target.value.toLowerCase())} /></label>
+        <label>Nombre visible<input maxLength={80} placeholder="p. ej. Ollama local" value={label} onChange={(e) => setLabel(e.target.value)} /></label>
+        <label>URL base<input required type="url" maxLength={500} placeholder="http://localhost:11434/v1" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} /></label>
+        <label>Clave (opcional)<input type="password" autoComplete="off" value={apiKey} onChange={(e) => setApiKey(e.target.value)} /></label>
+      </fieldset>
       {error && <div className="error-box">{error}</div>}
       <div className="row">
-        <button className="primary">Añadir</button>
-        <button type="button" className="ghost" onClick={() => onDone()}>
+        <button className="primary" disabled={busy}>{busy ? "Añadiendo…" : "Añadir"}</button>
+        <button type="button" className="ghost" disabled={busy} onClick={() => onDone()}>
           Cancelar
         </button>
         <span className="small muted">Después, añade sus modelos en la pestaña Modelos.</span>

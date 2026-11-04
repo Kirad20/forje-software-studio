@@ -6,7 +6,7 @@ import { CreateDialog, TYPE_ICON, type Integration } from "../../integrations/in
 import { browser } from "../../../shared/infrastructure/browser.js";
 import { Refresh } from "../../../shared/Icons.js";
 import { Header, Loading, SecretsPanel, useLoad } from "../../files/index.js";
-import { Menu, MenuItem, Modal, Switch } from "../../../shared/ui.js";
+import { Menu, MenuItem, Modal, Select, Switch } from "../../../shared/ui.js";
 
 const fmt = (v: unknown) => (v === null || v === undefined ? "NULL" : v instanceof Object ? JSON.stringify(v) : String(v));
 
@@ -102,13 +102,8 @@ export function DataPanel({ projectId, projectName, reloadKey }: { projectId: st
                 </>
               )}
             </Menu>
-            <select value={table} onChange={(e) => (setTable(e.target.value), setPage(0))} style={{ width: 220, height: 30, padding: "0 8px" }}>
-              {names.map((n) => (
-                <option key={n} value={n}>
-                  {n}
-                </option>
-              ))}
-            </select>
+            <Select label="Tabla de datos" value={table} onValueChange={(value) => { setTable(value); setPage(0); }}
+              style={{ width: 220 }} options={names.map((n) => ({ value: n, label: n }))} />
             <div className="grow" />
             <input placeholder="Buscar en la tabla…" value={search} onChange={(e) => (setSearch(e.target.value), setPage(0))} style={{ width: 220, height: 30 }} />
             {selected.size > 0 && (

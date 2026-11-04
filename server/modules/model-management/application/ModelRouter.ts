@@ -137,10 +137,11 @@ async function analyzeRequest(scope: ModelScope, text: string, ctx: AnalysisCont
  */
 async function pick(scope: ModelScope, role: Role, f: PickInput, opts: { exclude?: Set<string>; rand?: () => number } = {}): Promise<Pick> {
   const profile = ROLES[role];
+  const needsTools = f.needsTools ?? profile.needsTools;
   const mode = await projectMode(scope.projectId);
   const estIn = profile.estIn * (f.complexity >= 4 ? 1.6 : 1);
   const candidates = (await allowedModels(scope)).filter(
-    (m) => !opts.exclude?.has(m.id) && (!profile.needsTools || m.tools) && (!f.needsVision || m.vision) && m.context >= Math.min(estIn * 2, 128_000),
+    (m) => !opts.exclude?.has(m.id) && (!needsTools || m.tools) && (!f.needsVision || m.vision) && m.context >= Math.min(estIn * 2, 128_000),
   );
   if (!candidates.length) {
     throw new NoModelError(

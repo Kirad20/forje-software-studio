@@ -76,7 +76,7 @@ export async function judgeDesign(scope: ModelScope, billing: Billing, model: Mo
       const res = await callModel(
         scope,
         "qa",
-        { complexity: 3, domains: ["ui"], needsVision: true },
+        { complexity: 3, domains: ["ui"], needsVision: true, needsTools: false },
         { system: JUDGE_SYSTEM, messages: [{ role: "user", content }], maxTokens: 1200, signal },
         { billing, pinned: model },
       );
@@ -96,7 +96,7 @@ export async function judgeDesign(scope: ModelScope, billing: Billing, model: Mo
 
 /** Cheapest model of at least tier 4 that can see images; failing that, the strongest one that can. */
 export function defaultJudge(models: ModelInfo[]): ModelInfo | undefined {
-  const seeing = models.filter((m) => m.vision && m.tools);
+  const seeing = models.filter((m) => m.vision);
   const strong = seeing.filter((m) => m.tier >= 4).sort((a, b) => a.inPrice + a.outPrice - (b.inPrice + b.outPrice));
   return strong[0] ?? [...seeing].sort((a, b) => b.tier - a.tier)[0];
 }

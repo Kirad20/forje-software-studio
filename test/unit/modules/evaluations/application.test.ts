@@ -102,6 +102,30 @@ describe("evaluation admission", () => {
     expect(state.activeRunId()).toBeNull();
     expect(state.playgroundBusy()).toBe(false);
   });
+  it("admits an explicit vision-only judge but rejects blind or disallowed judges", async () => {
+    const model = { id: "qwen2.5vl", vision: true, tools: false };
+    const blind = { id: "qwen2.5-coder:7b", vision: false, tools: true };
+    const state = new AdmissionState();
+    const ports: AdmissionPorts<typeof model> = {
+      newId: () => "r",
+      allowedModels: async () => [model, blind],
+      defaultJudge: () => model,
+      spent: async () => 0,
+      save: vi.fn(async () => {}),
+      launch: vi.fn((run) => { state.release(run); }),
+    };
+    const limits = { enabled: true, maxRunUsd: 5, maxDailyUsd: 10 };
+    const request = { cases: [EVAL_CASES[0].id], judgeModel: model.id };
+    await expect(startEvaluation("admin", request, limits, state, ports)).resolves.toMatchObject({ runId: "r" });
+    expect(ports.launch).toHaveBeenCalledWith(expect.anything(), expect.anything(),
+      { repeats: 1, models: null, judge: model }, 5);
+    for (const judgeModel of [blind.id, "not-allowed"]) {
+      await expect(startEvaluation("admin", { ...request, judgeModel }, limits, state, ports))
+        .rejects.toThrow("debe estar permitido y tener Imágenes activado");
+    }
+    expect(ports.save).toHaveBeenCalledTimes(1);
+    expect(state.activeRunId()).toBeNull();
+  });
 });
 
 function fixture() {
