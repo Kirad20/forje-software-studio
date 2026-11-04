@@ -4,7 +4,7 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprot
 import { builderTools, previewUrl, toolByName, type BuilderServiceClient } from "../../modules/builder/index.js";
 import type { IdentityModule, PublicAccount } from "../../modules/identity/index.js";
 import { memorySection } from "../../modules/memory/memory.js";
-import type { ProjectsModule, Project } from "../../modules/projects/index.js";
+import { normalizeProjectProfile, type ProjectsModule, type Project } from "../../modules/projects/index.js";
 import { countAction } from "../../modules/usage/usage.js";
 import type { CollaborationModule } from "../../modules/collaboration/index.js";
 import { guideList, readGuides } from "./guides.js";
@@ -35,7 +35,7 @@ Un proyecto SOLO admite estas rutas:
 - jobs/<nombre>.ts · static/<archivo> (static/__dev/ = notas, nunca se publican) · base.css
 - package.json solo con add_dependency / remove_dependency
 Una tool devuelve su resultado o "PENDING jobId=…": en ese caso consulta get_job_status(jobId, wait_seconds) hasta tener el resultado.
-Flujo: get_guides("forja-overview") antes del primer cambio y get_guides("design") y get_guides("ui-kit") antes de hacer UI. Luego project_map (o list_files) y lee antes de editar. Datos primero (execute_sql), luego endpoints y páginas. Verifica con check_build, call_endpoint, get_problems y browser_test antes de decir que algo funciona.
+Flujo: primero determina si el dueño habla de un proyecto existente o pide uno nuevo. Si puede ser existente, usa list_projects y trabaja sobre ese proyecto sin cambiar sus metadatos, salvo que el dueño pida explícitamente un cambio. Para un proyecto nuevo, antes de construir o escribir archivos llama create_project con un nombre, descripción e initial_prompt basados solo en lo que el dueño ya dijo, y un perfil estructurado con propósito, audiencia, tipo de app, funciones y restricciones conocidas. Si falta un dato realmente necesario para identificar qué app quiere, haz una sola pregunta breve antes de crearla; no inventes detalles. Si trabajas en un proyecto nuevo creado en el studio y su perfil está pendiente, guárdalo primero con set_project_profile usando solo información disponible. Después sigue con get_guides("forja-overview") antes del primer cambio y get_guides("design") y get_guides("ui-kit") antes de hacer UI. Luego project_map (o list_files) y lee antes de editar. Datos primero (execute_sql), luego endpoints y páginas. Verifica con check_build, call_endpoint, get_problems y browser_test antes de decir que algo funciona.
 Concurrencia: list_files, project_map y read_files devuelven la versión del proyecto; pásala como expected_version en write_file, edit_file, delete_file, rename_file y las dependencias para no pisar cambios del dueño en el studio. Cada escritura devuelve la versión nueva.
 Depuración: get_problems y get_logs antes de suponer la causa.
 Comparte con el usuario el enlace de vista previa (create_project o get_preview_url) desde el primer cambio para que vea la construcción en vivo.
@@ -51,13 +51,24 @@ const extraTools = [
   {
     name: "create_project",
     description:
-      "Crea un proyecto nuevo (con la plantilla inicial) y devuelve su id y el enlace de la vista previa en vivo: compártelo con el usuario tal cual. initial_prompt describe la app (qué hace y para quién) con las palabras del usuario cuando las dio, no un resumen; se guarda como instrucciones del proyecto, que el dueño puede editar en Ajustes y que vuelven en el bloque <project-context>. Un proyecto nuevo solo tiene la plantilla: sigue con get_guides y la primera página en vez de terminar aquí.",
+      "Úsala solo para un proyecto nuevo, antes de construir o escribir archivos. Basa name, description, initial_prompt y profile únicamente en lo que el dueño ya expresó; no inventes detalles. profile admite purpose, audience, appType, coreFeatures y constraints; omite lo desconocido. initial_prompt conserva las palabras del usuario y se guarda como instrucciones del proyecto. Si no hay información suficiente para saber qué app crear, pregunta brevemente antes de llamar esta herramienta. No la uses para proyectos existentes ni cambies sus metadatos. Crea el proyecto (con la plantilla inicial) y devuelve su id y el enlace de la vista previa en vivo: compártelo con el usuario tal cual. Un proyecto nuevo solo tiene la plantilla: sigue con get_guides y la primera página en vez de terminar aquí.",
     inputSchema: {
       type: "object",
       properties: {
         name: { type: "string", description: "Nombre corto del proyecto" },
         initial_prompt: { type: "string", description: "Qué app construir, con las palabras del usuario" },
         description: { type: "string", description: "Descripción de una línea (opcional)" },
+        profile: {
+          type: "object",
+          description: "Datos conocidos del proyecto; omite cualquier campo que el dueño no haya expresado.",
+          properties: {
+            purpose: { type: "string" },
+            audience: { type: "string" },
+            appType: { type: "string" },
+            coreFeatures: { type: "array", items: { type: "string" } },
+            constraints: { type: "array", items: { type: "string" } },
+          },
+        },
       },
       required: ["name"],
     },
@@ -103,6 +114,7 @@ export const TOOL_HINTS: Record<string, Hints> = {
   get_guides: READ,
   get_job_status: READ,
   create_project: WRITE,
+  set_project_profile: WRITE,
   list_files: READ,
   project_map: READ,
   find_symbol: READ,
@@ -160,9 +172,13 @@ const CONTEXT_TOOLS = new Set(["list_files", "project_map"]);
 /** The owner's project instructions, design guidelines and memory, labelled as data. */
 export async function projectContext(project: Project, accountId: string) {
   const memory = await memorySection(project.id, accountId);
+  const profile = project.profile ?? {};
   const parts = [
     `Nombre: ${project.name}`,
     `Descripción: ${project.description || "(ninguna)"}`,
+    project.profile == null
+      ? "## Perfil del proyecto\nPendiente: antes de construir, guarda con set_project_profile únicamente los datos disponibles, sin inventar."
+      : Object.keys(profile).length ? `## Perfil del proyecto\n${JSON.stringify(profile)}` : "",
     project.systemPrompt ? `## Instrucciones del proyecto\n${project.systemPrompt}` : "## Instrucciones del proyecto\n(ninguna)",
     project.designPrompt ? `## Guía de diseño\n${project.designPrompt}` : "",
     memory,
@@ -221,7 +237,10 @@ function buildServer(account: PublicAccount, projects: ProjectsModule, collabora
         case "create_project": {
           const initial = String(args.initial_prompt ?? "").trim();
           const p = await projects.createProject(account.id, String(args.name), String(args.description ?? ""), undefined, account.tokenOrgId ?? undefined);
-          if (initial) await projects.updateProject(p.id, { systemPrompt: initial });
+          await projects.updateProject(p.id, {
+            ...(initial ? { systemPrompt: initial } : {}),
+            profile: normalizeProjectProfile(args.profile),
+          });
           return text(
             [
               `Proyecto creado: ${p.id}`,

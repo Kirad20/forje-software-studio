@@ -38,7 +38,7 @@ export class ProjectsApplication {
   async duplicateProject(ownerId: string, sourceId: string): Promise<ProjectSnapshot> {
     const src = (await this.store.getProject(sourceId))!;
     const copy = await this.createProject(ownerId, `${src.name} (copia)`, src.description, await this.store.readAllFiles(sourceId));
-    await this.store.updateProject(copy.id, { systemPrompt: src.systemPrompt, designPrompt: src.designPrompt, seo: src.seo, folderId: src.folderId });
+    await this.store.updateProject(copy.id, { systemPrompt: src.systemPrompt, designPrompt: src.designPrompt, seo: src.seo, profile: src.profile, folderId: src.folderId });
     await this.services.clone(sourceId, copy.id);
     return (await this.store.getProject(copy.id))!;
   }

@@ -3,7 +3,7 @@ import { ProjectsApplication } from "../../../../server/modules/projects/applica
 import { CreateProjectUseCase } from "../../../../server/modules/projects/application/CreateProjectUseCase.js";
 
 function fixture() {
-  const source = { id: "source", name: "App", description: "desc", systemPrompt: "system", designPrompt: "design", seo: { robots: false }, folderId: "folder" };
+  const source = { id: "source", name: "App", description: "desc", systemPrompt: "system", designPrompt: "design", seo: { robots: false }, profile: { purpose: "desc" }, folderId: "folder" };
   const store = {
     create: vi.fn().mockResolvedValue(undefined),
     getProject: vi.fn().mockImplementation(async (id) => ({ ...source, id })),
@@ -67,7 +67,7 @@ describe("Projects hexagonal migration", () => {
     const { app, store, ports, source } = fixture();
     await app.duplicateProject("new-owner", "source");
     expect(store.create).toHaveBeenCalledWith(expect.objectContaining({ ownerId: "new-owner", name: "App (copia)" }), { "pages/home.tsx": "code" }, undefined);
-    expect(store.updateProject).toHaveBeenCalledWith("0123456789abcdef", { systemPrompt: source.systemPrompt, designPrompt: source.designPrompt, seo: source.seo, folderId: source.folderId });
+    expect(store.updateProject).toHaveBeenCalledWith("0123456789abcdef", { systemPrompt: source.systemPrompt, designPrompt: source.designPrompt, seo: source.seo, profile: source.profile, folderId: source.folderId });
     expect(ports.clone).toHaveBeenCalledWith("source", "0123456789abcdef");
   });
   it("restores newest-first before images, records undo and emits only after persistence", async () => {

@@ -26,6 +26,13 @@ export interface EvaluationProject {
   lastOpenedAt: string;
   systemPrompt: string;
   designPrompt: string;
+  profile: {
+    purpose?: string;
+    audience?: string;
+    appType?: string;
+    coreFeatures?: string[];
+    constraints?: string[];
+  } | null;
   seo: {
     siteName?: string;
     siteDescription?: string;

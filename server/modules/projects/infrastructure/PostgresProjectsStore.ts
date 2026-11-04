@@ -10,13 +10,13 @@ const PROJECT_COLS = `id, owner_id as "ownerId", org_id as "orgId", name, descri
   email_domain as "emailDomain", email_domain_verified as "emailDomainVerified",
   published_version_id as "publishedVersionId", published_at as "publishedAt",
   favorite, archived, folder_id as "folderId", last_opened_at as "lastOpenedAt",
-  system_prompt as "systemPrompt", design_prompt as "designPrompt", seo, share_epoch as "shareEpoch",
+  system_prompt as "systemPrompt", design_prompt as "designPrompt", seo, profile, share_epoch as "shareEpoch",
   created_at as "createdAt", updated_at as "updatedAt"`;
 
 const PATCHABLE: Record<string, string> = {
   name: "name", description: "description", aiEnabled: "ai_enabled", visibility: "visibility",
   emailDomain: "email_domain", emailDomainVerified: "email_domain_verified", favorite: "favorite",
-  archived: "archived", folderId: "folder_id", systemPrompt: "system_prompt", designPrompt: "design_prompt", seo: "seo",
+  archived: "archived", folderId: "folder_id", systemPrompt: "system_prompt", designPrompt: "design_prompt", seo: "seo", profile: "profile",
 };
 
 export class PostgresProjectsStore extends PostgresProjectFileRepository implements ProjectsStore {
@@ -58,7 +58,7 @@ export class PostgresProjectsStore extends PostgresProjectFileRepository impleme
     const params: unknown[] = [id];
     for (const [key, value] of Object.entries(patch)) {
       if (value === undefined || !Object.hasOwn(PATCHABLE, key)) continue;
-      params.push(key === "seo" ? JSON.stringify(value) : value);
+      params.push(key === "seo" || key === "profile" ? JSON.stringify(value) : value);
       sets.push(`${PATCHABLE[key]} = $${params.length}`);
     }
     if (sets.length) await this.q(`update projects set ${sets.join(", ")} where id = $1`, params);
