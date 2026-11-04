@@ -1,10 +1,6 @@
+import { createHmac } from "node:crypto";
 import { config } from "./config.js";
-
-/**
- * Fixed-window rate limiter kept in memory. Good enough for one process; a multi-instance
- * deployment would move the counters to the database or Redis.
- */
-const windows = new Map<string, { count: number; resetAt: number }>();
+import { q } from "./database/index.js";
 
 export class RateLimitError extends Error {
   status = 429;
@@ -13,28 +9,61 @@ export class RateLimitError extends Error {
   }
 }
 
-export function rateLimit(key: string, limit: number, windowMs: number) {
-  const now = Date.now();
-  let w = windows.get(key);
-  if (!w || w.resetAt <= now) windows.set(key, (w = { count: 0, resetAt: now + windowMs }));
-  w.count++;
-  if (w.count > limit) throw new RateLimitError(Math.ceil((w.resetAt - now) / 1000));
+export class RateLimitStoreError extends Error {
+  status = 503;
+  constructor(cause: unknown) {
+    super("El servicio de protección contra abuso no está disponible", { cause });
+    this.name = "RateLimitStoreError";
+  }
 }
+
+type RateLimitQuery = <T = Record<string, unknown>>(sql: string, params?: unknown[]) => Promise<T[]>;
+
+export function createRateLimiter(
+  query: RateLimitQuery,
+  hashKey = (key: string) => createHmac("sha256", config.secretsKey).update(key).digest("hex"),
+) {
+  return async (key: string, limit: number, windowMs: number) => {
+    if (!key || !Number.isSafeInteger(limit) || limit < 1 || !Number.isFinite(windowMs) || windowMs < 1) {
+      throw new RangeError("Límite de solicitudes no válido");
+    }
+    let window: { count: number; retry_after_sec: number } | undefined;
+    try {
+      [window] = await query<{ count: number; retry_after_sec: number }>(
+        `insert into rate_limit_windows (key, count, reset_at)
+         values ($1, 1, now() + ($2::double precision * interval '1 millisecond'))
+         on conflict (key) do update set
+           count = case when rate_limit_windows.reset_at <= now() then 1 else rate_limit_windows.count + 1 end,
+           reset_at = case when rate_limit_windows.reset_at <= now()
+             then now() + ($2::double precision * interval '1 millisecond')
+             else rate_limit_windows.reset_at end
+         returning count, greatest(1, ceil(extract(epoch from (reset_at - now()))))::integer as retry_after_sec`,
+        [hashKey(key), windowMs],
+      );
+    } catch (error) {
+      throw new RateLimitStoreError(error);
+    }
+    if (!window) throw new RateLimitStoreError(new Error("La consulta no devolvió un contador"));
+    if (Number(window.count) > limit) throw new RateLimitError(Number(window.retry_after_sec));
+  };
+}
+
+export const rateLimit = createRateLimiter(q);
 
 let cleanupTimer: NodeJS.Timeout | undefined;
 
 export function startRateLimitCleanup() {
   if (cleanupTimer) return;
   cleanupTimer = setInterval(() => {
-    const now = Date.now();
-    for (const [key, window] of windows) if (window.resetAt <= now) windows.delete(key);
+    void q("delete from rate_limit_windows where reset_at <= now()").catch((error) =>
+      console.warn("[forja] no se pudieron limpiar límites de solicitudes:", (error as Error).message),
+    );
   }, 60_000).unref();
 }
 
 export function stopRateLimitCleanup() {
   if (cleanupTimer) clearInterval(cleanupTimer);
   cleanupTimer = undefined;
-  windows.clear();
 }
 
 /** Origins allowed to make state-changing calls to the studio API. */

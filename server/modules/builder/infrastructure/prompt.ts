@@ -45,7 +45,7 @@ npm packages: the kit's catalog packages are installed with add_dependency BEFOR
 - Data: api.get<T>("todos/list", { q }) and api.post<T>("todos/create", body); both throw ApiError(message, status). useApi<T>(pathOrNull, query?) → { data, loading, error, reload } (pass null to skip, e.g. until the user is known).
 - Auth: useUser() → undefined (loading) | null (signed out) | { id, email, name, role }. auth.signUp({ email, password, name }), auth.signIn({ email, password }), auth.signOut(), auth.requestPasswordReset(email), auth.resetPassword({ email, code, password }).
 - Files: storage.upload(file) → { key, url, filename, size, contentType }; storage.url(key).
-- Realtime: useChannel(channel, handler) (wrap handler in useCallback) or realtime.subscribe(channel, handler) → unsubscribe; realtime.publish(channel, data).
+- Realtime: useChannel(channel, handler) (wrap handler in useCallback) or realtime.subscribe(channel, handler) → unsubscribe; realtime.publish(channel, data). Presence: realtime.subscribePresence(channel, handler) → unsubscribe; realtime.track(channel, state) → untrack.
 - AI from the browser (signed-in users only): ai.chat({ messages, system }) → { text }. Prefer calling AI from an endpoint.
 - Page head: useHead({ title, description, canonical? }) sets the <title>, meta description and canonical URL while that page is shown.
 

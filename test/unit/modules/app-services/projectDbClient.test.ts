@@ -63,6 +63,18 @@ it("surfaces non-success responses instead of returning empty results", async ()
   await expect(db.query("select 1")).rejects.toThrow("App data service returned 503: database offline");
 });
 
+it("fetches project database performance metrics from the owner service", async () => {
+  const fetch = vi.fn(async () => Response.json({ active: true, operations: 4 }));
+  vi.stubGlobal("fetch", fetch);
+  const client = new ProjectDbClient("http://app-runtime:4200", "shared-token");
+
+  await expect(client.metrics("project-1")).resolves.toMatchObject({ active: true, operations: 4 });
+  expect(fetch).toHaveBeenCalledWith(
+    "http://app-runtime:4200/internal/data/project-1/metrics",
+    expect.objectContaining({ method: "POST" }),
+  );
+});
+
 it("preserves commit and rollback semantics across the internal HTTP boundary", async () => {
   const pg = await PGlite.create();
   await pg.exec("create table users (id text primary key)");
@@ -83,6 +95,7 @@ it("preserves commit and rollback semantics across the internal HTTP boundary", 
     cloneDatabase: async () => {},
     closeAll: async () => {},
     isAwake: () => true,
+    dbMetrics: () => ({ active: true, opens: 0, openFailures: 0, closes: 0, operations: 0, failedOperations: 0, openMs: 0, queueWaitMs: 0, operationMs: 0, lastOperationAt: null }),
   }, "runtime-token");
   vi.stubGlobal("fetch", (input: string | URL | Request, init?: RequestInit) => app.request(input.toString(), init));
 

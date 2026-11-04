@@ -4,7 +4,7 @@ import { WebSocketServer } from "ws";
 import { config } from "../shared/config.js";
 import { closePlatformDb, platformDb } from "../shared/database/index.js";
 import { createAppDataService } from "../modules/app-services/appDataService.js";
-import { closeAll, closeProject, cloneDatabase, dumpDatabase, execSql, isAwake, projectDb } from "../modules/app-services/projectDb.js";
+import { closeAll, closeProject, cloneDatabase, dumpDatabase, execSql, isAwake, projectDb, projectDbMetrics } from "../modules/app-services/projectDb.js";
 import { attachSocket, stopRealtime } from "../modules/app-services/realtime.js";
 import { stopEmailTransport } from "../modules/app-services/email.js";
 import { parseAppHost, checkShareToken, cookie, serveApp, stopAppRuntime } from "../modules/app-runtime/index.js";
@@ -39,10 +39,11 @@ app.route("/", createAppDataService({
   cloneDatabase,
   closeAll,
   isAwake,
+  dbMetrics: projectDbMetrics,
 }, config.appDataServiceToken));
 app.route("/", createAppRuntimeHttpApp(runtimePorts));
 
-const wss = new WebSocketServer({ noServer: true });
+const wss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 });
 let server: ReturnType<typeof serve>;
 
 async function startHttp() {

@@ -23,7 +23,7 @@ import {
 } from "../../modules/evaluations/playground.js";
 import { EVAL_EMAIL } from "../../modules/evaluations/runner.js";
 import { createPlatformModelManagement } from "../../modules/model-management/index.js";
-import { rateLimit, RateLimitError } from "../../shared/security.js";
+import { rateLimit, RateLimitError, RateLimitStoreError } from "../../shared/security.js";
 
 type AdminApiModules = {
   identity: IdentityModule;
@@ -85,11 +85,11 @@ export function createAdminApi({ identity, settings, models }: AdminApiModules) 
     return c.json({ providers: await models.providers.listProviders() });
   });
   modelRoutes.post("/providers/:id/test", async (c) => {
-    rateLimit(`probe:${me(c)}`, 30, 60_000);
+    await rateLimit(`probe:${me(c)}`, 30, 60_000);
     return c.json(await probeProvider(c.req.param("id")!));
   });
   modelRoutes.get("/providers/:id/models", async (c) => {
-    rateLimit(`probe:${me(c)}`, 30, 60_000);
+    await rateLimit(`probe:${me(c)}`, 30, 60_000);
     return c.json(await listProviderModels(c.req.param("id")!));
   });
 
@@ -105,11 +105,11 @@ export function createAdminApi({ identity, settings, models }: AdminApiModules) 
   });
   modelRoutes.post("/models/sync", async (c) => {
     if (!models.providers.providerSecret("openrouter")) return c.json({ error: "Configura y activa OpenRouter para sincronizar su catálogo." }, 400);
-    rateLimit(`sync:${me(c)}`, 5, 60 * 60_000);
+    await rateLimit(`sync:${me(c)}`, 5, 60 * 60_000);
     return c.json({ synced: await models.sync.syncOpenRouter() });
   });
   modelRoutes.post("/models/test/*", async (c) => {
-    rateLimit(`probe:${me(c)}`, 30, 60_000);
+    await rateLimit(`probe:${me(c)}`, 30, 60_000);
     return c.json(await probeModel(modelIdOf(c.req.path, "/models/test/"), me(c)));
   });
   modelRoutes.patch("/models/item/*", async (c) => {
@@ -126,7 +126,7 @@ export function createAdminApi({ identity, settings, models }: AdminApiModules) 
   agentRoutes.get("/agents/roles", (c) => c.json({ roles: playgroundRoles() }));
   agentRoutes.get("/agents/runs", (c) => c.json({ runs: listPlaygroundRuns() }));
   agentRoutes.post("/agents/runs", async (c) => {
-    rateLimit(`playground:${me(c)}`, 20, 60 * 60_000);
+    await rateLimit(`playground:${me(c)}`, 20, 60 * 60_000);
     try {
       return c.json({ runId: await startPlayground(await body(c), me(c)) }, 202);
     } catch (error) {
@@ -155,6 +155,7 @@ export function createAdminApi({ identity, settings, models }: AdminApiModules) 
   });
   api.onError((error, c) => {
     if (error instanceof RateLimitError) return c.json({ error: error.message }, 429, { "retry-after": String(error.retryAfterSec) });
+    if (error instanceof RateLimitStoreError) return c.json({ error: error.message }, 503);
     if (error instanceof SettingsError) return c.json({ error: error.message, field: error.field }, 400);
     if (error instanceof ProviderError || error instanceof ModelError) return c.json({ error: error.message }, 400);
     return c.json({ error: (error as Error).message }, 400);

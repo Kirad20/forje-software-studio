@@ -18,7 +18,7 @@ import { createSettingReactions } from "./settingReactions.js";
 import { warnMovedEnv } from "../modules/settings/index.js";
 import { cookie, serveApp } from "../modules/app-runtime/index.js";
 import { startGithubSync, stopGithubSync } from "../modules/integrations/github.js";
-import { rateLimit, STUDIO_HEADERS, startRateLimitCleanup, stopRateLimitCleanup } from "../shared/security.js";
+import { rateLimit, RateLimitError, RateLimitStoreError, STUDIO_HEADERS, startRateLimitCleanup, stopRateLimitCleanup } from "../shared/security.js";
 import { BuilderServiceClient, langfuse, metricsIdle, stopBuilder, reloadLangfuse } from "../modules/builder/index.js";
 import { stopAppRuntime } from "../modules/app-runtime/index.js";
 import { checkShareToken, parseAppHost } from "../modules/app-runtime/index.js";
@@ -107,9 +107,11 @@ app.all("/mcp", async (c) => {
   const account = await accountFromApiToken(bearer);
   if (account) {
     try {
-      rateLimit(`mcp:${account.id}`, 240, 60_000);
+      await rateLimit(`mcp:${account.id}`, 240, 60_000);
     } catch (e) {
-      return c.json({ error: (e as Error).message }, 429);
+      if (e instanceof RateLimitError) return c.json({ error: e.message }, 429, { "retry-after": String(e.retryAfterSec) });
+      if (e instanceof RateLimitStoreError) return c.json({ error: e.message }, 503);
+      throw e;
     }
   }
   if (!account) return c.json({ error: "Crea un token en el studio (Cuenta → Tokens MCP) y envíalo como Authorization: Bearer" }, 401);
@@ -132,7 +134,7 @@ function page(title: string, body: string) {
 }
 
 let server: ReturnType<typeof serve>;
-const wss = new WebSocketServer({ noServer: true });
+const wss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 });
 
 function listening(info: { port: number }) {
   console.log(`[forja] plataforma en ${config.publicUrl} (puerto ${info.port})`);

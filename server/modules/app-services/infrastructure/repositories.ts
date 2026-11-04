@@ -42,7 +42,7 @@ const statements: Record<string, string> = {
   secretValues: `select name, value_enc from project_secrets where project_id = $1 and value_enc is not null`,
   storagePut: `insert into storage_objects (project_id, key, filename, content_type, size) values ($1, $2, $3, $4, $5)
     on conflict (project_id, key) do update set filename = excluded.filename, content_type = excluded.content_type, size = excluded.size, created_at = now()`,
-  storageGet: `select filename, content_type from storage_objects where project_id = $1 and key = $2`,
+  storageGet: `select filename, content_type, size from storage_objects where project_id = $1 and key = $2`,
   storageDelete: `delete from storage_objects where project_id = $1 and key = $2`,
   storageList: `select key, filename, content_type as "contentType", size, created_at as "createdAt" from storage_objects where project_id = $1 order by created_at desc`,
   storageUsage: `select coalesce(sum(size), 0)::int as bytes from storage_objects where project_id = $1`,

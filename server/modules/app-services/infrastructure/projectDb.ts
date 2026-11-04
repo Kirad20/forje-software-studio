@@ -20,7 +20,36 @@ interface Open {
   queue: Promise<unknown>;
 }
 
+export interface ProjectDbMetrics {
+  active: boolean;
+  opens: number;
+  openFailures: number;
+  closes: number;
+  operations: number;
+  failedOperations: number;
+  openMs: number;
+  queueWaitMs: number;
+  operationMs: number;
+  lastOperationAt: string | null;
+}
+
 const open = new Map<string, Promise<Open>>();
+const metricSnapshots = new Map<string, Omit<ProjectDbMetrics, "active">>();
+
+function metricsFor(projectId: string) {
+  let metrics = metricSnapshots.get(projectId);
+  if (!metrics) {
+    metrics = {
+      opens: 0, openFailures: 0, closes: 0, operations: 0,
+      failedOperations: 0, openMs: 0, queueWaitMs: 0,
+      operationMs: 0, lastOperationAt: null,
+    };
+  }
+  metricSnapshots.delete(projectId);
+  metricSnapshots.set(projectId, metrics);
+  while (metricSnapshots.size > 2000) metricSnapshots.delete(metricSnapshots.keys().next().value!);
+  return metrics;
+}
 
 /** Tables the BaaS keeps in every project database. Prefixed so they sort apart from app tables. */
 const BAAS_SCHEMA = /* sql */ `
@@ -52,12 +81,22 @@ create table if not exists _forja_reset_codes (
 `;
 
 async function openDb(projectId: string): Promise<Open> {
+  const started = Date.now();
   const dir = paths.projectDb(projectId);
-  mkdirSync(dir, { recursive: true });
-  const db = await PGlite.create(dir);
-  await db.exec(BAAS_SCHEMA);
-  const entry: Open = { db, timer: setTimeout(() => {}, 0), queue: Promise.resolve() };
-  return entry;
+  const metrics = metricsFor(projectId);
+  try {
+    mkdirSync(dir, { recursive: true });
+    const db = await PGlite.create(dir);
+    await db.exec(BAAS_SCHEMA);
+    metrics.opens++;
+    metrics.openMs += Date.now() - started;
+    const entry: Open = { db, timer: setTimeout(() => {}, 0), queue: Promise.resolve() };
+    return entry;
+  } catch (error) {
+    metrics.openFailures++;
+    metrics.openMs += Date.now() - started;
+    throw error;
+  }
 }
 
 function scheduleSleep(projectId: string, entry: Open) {
@@ -65,7 +104,12 @@ function scheduleSleep(projectId: string, entry: Open) {
   entry.timer = setTimeout(async () => {
     open.delete(projectId);
     await entry.queue.catch(() => {});
-    await entry.db.close().catch(() => {});
+    try {
+      await entry.db.close();
+      metricsFor(projectId).closes++;
+    } catch (error) {
+      console.warn(`[forja] no se pudo cerrar la base del proyecto ${projectId}:`, (error as Error).message);
+    }
   }, config.dbIdleMs);
   entry.timer.unref();
 }
@@ -84,8 +128,23 @@ async function get(projectId: string): Promise<Open> {
 
 /** PGlite is single-connection; queue work so a transaction never interleaves with other queries. */
 async function run<T>(projectId: string, fn: (db: PGlite) => Promise<T>): Promise<T> {
+  const queuedAt = Date.now();
   const entry = await get(projectId);
-  const next = entry.queue.then(() => fn(entry.db));
+  const metrics = metricsFor(projectId);
+  metrics.queueWaitMs += Date.now() - queuedAt;
+  const next = entry.queue.then(async () => {
+    const started = Date.now();
+    metrics.operations++;
+    metrics.lastOperationAt = new Date(started).toISOString();
+    try {
+      return await fn(entry.db);
+    } catch (error) {
+      metrics.failedOperations++;
+      throw error;
+    } finally {
+      metrics.operationMs += Date.now() - started;
+    }
+  });
   entry.queue = next.catch(() => {});
   return next;
 }
@@ -139,7 +198,8 @@ export async function closeProject(projectId: string) {
   if (e) {
     clearTimeout(e.timer);
     await e.queue.catch(() => {});
-    await e.db.close().catch(() => {});
+    await e.db.close();
+    metricsFor(projectId).closes++;
   }
 }
 
@@ -164,10 +224,16 @@ export async function closeAll() {
       clearTimeout(e.timer);
       await e.queue.catch(() => {});
       await e.db.close();
+      metricsFor(id).closes++;
     }
   }
 }
 
 export async function isAwake(projectId: string) {
   return remote ? remote.isAwake(projectId) : open.has(projectId);
+}
+
+export async function projectDbMetrics(projectId: string): Promise<ProjectDbMetrics> {
+  if (remote) return remote.metrics<ProjectDbMetrics>(projectId);
+  return { active: open.has(projectId), ...metricsFor(projectId) };
 }
