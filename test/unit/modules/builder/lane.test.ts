@@ -38,5 +38,22 @@ describe("task lane orchestration", () => {
     f.ports.createGate.mockRejectedValueOnce(new Error("verifier down"));
     await f.useCase.execute({ projectId: "p", turnId: "t" }, task, {});
     expect(f.events.find(e => e.type === "tool_end")).toMatchObject({ type: "tool_end", taskId: "ui", ok: false, output: "No se pudo comprobar: verifier down" });
+    expect(f.ports.repository.finish.mock.calls[0]![1].steps).toEqual([{ tool: "finish_gate", summary: "Comprobación automática antes de terminar", ok: false, output: "No se pudo comprobar: verifier down" }]);
+  });
+  it.each([false, true])("retains tool error diagnostics when execution fails later: %s", async (crash) => {
+    const f = fixture();
+    f.ports.run.mockImplementationOnce(async (_task, _input, hooks) => {
+      hooks.emit({ type: "tool_start", id: "tool-1", name: "execute_sql", summary: "select * from missing", taskId: "ui" });
+      hooks.emit({ type: "tool_end", id: "tool-1", ok: false, output: "Error: relation missing does not exist", taskId: "ui" });
+      if (crash) throw new Error("provider down after tool");
+      return result;
+    });
+    const execution = f.useCase.execute({ projectId: "p", turnId: "t" }, task, {});
+    if (crash) await expect(execution).rejects.toThrow("provider down after tool");
+    else await execution;
+    expect(f.ports.repository.finish.mock.calls[0]![1]).toMatchObject({
+      status: crash ? "failed" : "done",
+      steps: [{ tool: "execute_sql", summary: "select * from missing", ok: false, output: "Error: relation missing does not exist" }],
+    });
   });
 });

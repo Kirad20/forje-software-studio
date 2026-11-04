@@ -154,19 +154,38 @@ export function CodePanel({ projectId, reloadKey, initialPath = null }: { projec
 // --- Users -----------------------------------------------------------------------------
 
 export function UsersPanel({ projectId }: { projectId: string }) {
-  const { data, error } = useLoad<{ users: { id: string; email: string; name: string | null; role: string; hasPassword: boolean; createdAt: string }[] }>(
+  const { data, error, reload } = useLoad<{ users: { id: string; email: string; name: string | null; role: string; hasPassword: boolean; createdAt: string }[] }>(
     `/projects/${projectId}/users`,
   );
+  const [query, setQuery] = useState("");
   if (!data) return <Loading error={error} />;
+  const visible = data.users.filter((u) => `${u.email} ${u.name ?? ""} ${u.role}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()));
   return (
-    <>
+    <div className="stack">
       <Header
         title="Usuarios de la app"
         hint="Cuentas de las personas que usan tu app. Viven en la base de datos del proyecto, separadas de tu cuenta de Forja."
-      />
+      >
+        <button className="sm" onClick={reload}><Refresh /> Actualizar</button>
+      </Header>
+      {error && <div className="error-box" role="alert">{error}</div>}
+      <div className="tools-summary">
+        <div><strong>{data.users.length}</strong><span>Usuarios registrados</span></div>
+        <div><strong>{data.users.filter((u) => u.role === "admin").length}</strong><span>Administradores</span></div>
+        <div><strong>{data.users.filter((u) => !u.hasPassword).length}</strong><span>Sin contraseña fijada</span></div>
+      </div>
+      {data.users.length > 0 && (
+        <div className="panel-filters">
+          <input type="search" aria-label="Buscar usuarios" placeholder="Buscar por nombre, correo o rol…" value={query} onChange={(e) => setQuery(e.target.value)} />
+          <span className="small muted">{visible.length} de {data.users.length}</span>
+        </div>
+      )}
       {data.users.length === 0 ? (
         <div className="card empty">Nadie se ha registrado todavía. Pide al constructor «añade inicio de sesión».</div>
+      ) : visible.length === 0 ? (
+        <div className="tools-empty"><strong>No hay usuarios que coincidan</strong><p>Prueba con otro nombre, correo o rol.</p><button className="sm" onClick={() => setQuery("")}>Limpiar búsqueda</button></div>
       ) : (
+        <div className="panel-table">
         <table className="grid card">
           <thead>
             <tr>
@@ -178,7 +197,7 @@ export function UsersPanel({ projectId }: { projectId: string }) {
             </tr>
           </thead>
           <tbody>
-            {data.users.map((u) => (
+            {visible.map((u) => (
               <tr key={u.id}>
                 <td>{u.email}</td>
                 <td>{u.name ?? "—"}</td>
@@ -189,8 +208,9 @@ export function UsersPanel({ projectId }: { projectId: string }) {
             ))}
           </tbody>
         </table>
+        </div>
       )}
-    </>
+    </div>
   );
 }
 
@@ -510,19 +530,39 @@ export function AiPanel({ project, onChange }: { project: Project; onChange: () 
 // --- Logs ------------------------------------------------------------------------------------
 
 export function LogsPanel({ projectId, lines }: { projectId: string; lines: { at: string; env: string; level: string; source: string; message: string }[] }) {
-  const { data, error } = useLoad<{ logs: typeof lines }>(`/projects/${projectId}/logs`);
+  const { data, error, reload } = useLoad<{ logs: typeof lines }>(`/projects/${projectId}/logs`);
   const [errorsOnly, setErrorsOnly] = useState(false);
-  const all = [...(data?.logs ?? []), ...lines].filter((l) => !errorsOnly || l.level === "error");
+  const [query, setQuery] = useState("");
+  const [env, setEnv] = useState("all");
+  const entries = [...(data?.logs ?? []), ...lines];
+  const all = entries.filter((l) => (!errorsOnly || l.level === "error") && (env === "all" || l.env === env) && `${l.source} ${l.message}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()));
+  const filtered = errorsOnly || !!query || env !== "all";
   return (
     <div className="stack">
       <Header title="Registros" hint="Peticiones, errores del servidor y de la consola del navegador, correos y tareas. En memoria; se pierden al reiniciar.">
+        <button className="sm" onClick={reload}><Refresh /> Actualizar</button>
+      </Header>
+      {error && <div className="error-box" role="alert">{error}</div>}
+      <div className="panel-filters">
+        <input type="search" aria-label="Buscar registros" placeholder="Buscar mensaje o fuente…" value={query} onChange={(e) => setQuery(e.target.value)} />
+        <select aria-label="Entorno de los registros" value={env} onChange={(e) => setEnv(e.target.value)}>
+         <option value="all">Todos los entornos</option>
+         <option value="preview">Vista previa</option>
+         <option value="published">Publicada</option>
+        </select>
         <label className="row" style={{ color: "var(--text)" }}>
           <input type="checkbox" style={{ width: "auto" }} checked={errorsOnly} onChange={(e) => setErrorsOnly(e.target.checked)} />
           Solo errores
         </label>
-      </Header>
+      </div>
+      <div className="small muted">{Math.min(all.length, 400)} registros visibles · Más recientes primero</div>
       <div className="card" style={{ padding: "6px 12px" }}>
-        {all.length === 0 && <div className="empty">Sin registros.</div>}
+        {!data && !error && <div className="chat-history-state" role="status"><span className="spinner" /> Cargando registros…</div>}
+        {data && all.length === 0 && <div className="tools-empty">
+         <strong>{filtered ? "No hay registros con estos filtros" : "Todavía no hay actividad"}</strong>
+         <p>{filtered ? "Prueba con otra búsqueda o muestra todos los entornos." : "Aquí aparecerán las peticiones, tareas y mensajes de tu app."}</p>
+         {filtered && <button className="sm" onClick={() => { setQuery(""); setEnv("all"); setErrorsOnly(false); }}>Limpiar filtros</button>}
+        </div>}
         {all
           .slice(-400)
           .reverse()

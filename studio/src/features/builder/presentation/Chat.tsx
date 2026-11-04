@@ -1,8 +1,10 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { MousePointer2, Paperclip } from "lucide-react";
 import { api, streamGet, streamPost } from "../application/controller.js";
 import type { ChatStreamEvent } from "../application/contracts.js";
 import { browser } from "../../../shared/infrastructure/browser.js";
 import { AgentLanes, type Lane, type TeamTurn } from "./AgentLanes.js";
+import { ToolStep } from "./ToolStep.js";
 import { ChangeCard, type TimelineEntry, type TurnDetail } from "../../files/index.js";
 import { GithubCommitCard, type GithubCard } from "../../integrations/index.js";
 import { Check, Cross, Send } from "../../../shared/Icons.js";
@@ -48,7 +50,7 @@ interface TaskRow {
   model: string | null;
   status: "pending" | "running" | "done" | "failed";
   summary: string | null;
-  steps: { tool: string; summary: string; ok: boolean }[] | null;
+  steps: { tool: string; summary: string; ok: boolean; output?: string }[] | null;
   dependsOn: string[] | null;
   doneWhen?: string[] | null;
   inputTokens: number | null;
@@ -67,8 +69,8 @@ function teamOf(rows: TaskRow[]): TeamTurn {
       goal: t.role === "fast" ? "" : t.goal,
       model: t.model ?? undefined,
       status: t.status,
-      steps: (t.steps ?? []).map((s, i) => ({ id: `${t.id}:${i}`, name: s.tool, summary: s.summary, state: s.ok ? "ok" : "err" })),
-      note: t.role === "fast" ? undefined : (t.summary ?? undefined),
+      steps: (t.steps ?? []).map((s, i) => ({ id: `${t.id}:${i}`, name: s.tool, summary: s.summary, state: s.ok ? "ok" : "err", output: s.output })),
+      note: t.role === "fast" && t.status !== "failed" ? undefined : (t.summary ?? undefined),
       usd: Number(t.usd ?? 0),
       tokens: (t.inputTokens ?? 0) + (t.outputTokens ?? 0) + (t.cacheReadTokens ?? 0),
       dependsOn: t.dependsOn ?? [],
@@ -225,6 +227,10 @@ function toItems(messages: Message[], tasks: TaskRow[] = []): Item[] {
       }
     }
   }
+  // A failed lane may never produce an assistant reply to anchor its diagnostics.
+  for (const [turn, rows] of byTurn) {
+    if (!shown.has(turn)) items.push({ kind: "team", team: teamOf(rows), turn });
+  }
   // A change card closes each turn that wrote code.
   for (let i = items.length - 1; i >= 0; i--) {
     const t = items[i]!.turn;
@@ -255,7 +261,7 @@ function liveTurn(onChange: (items: Item[]) => void, setError: (message: string)
     } else if (e.type === "plan") {
       for (const t of e.tasks) Object.assign(lane(t.id, t.role), { goal: t.goal, dependsOn: t.dependsOn, doneWhen: t.doneWhen ?? [] });
     } else if (e.type === "task_start") Object.assign(lane(e.taskId, e.role), { status: "running", model: e.model });
-    else if (e.type === "task_end") Object.assign(lane(e.taskId), { status: e.ok ? "done" : "failed", usd: e.usd, tokens: e.tokens, note: e.taskId === "fast" || e.taskId === "chat" ? undefined : e.summary });
+    else if (e.type === "task_end") Object.assign(lane(e.taskId), { status: e.ok ? "done" : "failed", usd: e.usd, tokens: e.tokens, note: e.ok && (e.taskId === "fast" || e.taskId === "chat") ? undefined : e.summary });
     else if (e.type === "review" && team) team.review = { ok: e.ok, summary: e.summary, issues: e.issues };
     else if (e.type === "done" && team) team.metrics = { usd: e.usd, baselineUsd: e.baselineUsd, cachedTokens: e.cachedTokens };
     else if (e.type === "text" && e.taskId && e.taskId !== "fast" && e.taskId !== "chat") lane(e.taskId).note = e.text;
@@ -397,11 +403,10 @@ function UserBubble({ text }: { text: string }) {
 }
 
 function Steps({ steps }: { steps: Step[] }) {
-  const [open, setOpen] = useState<string | null>(null);
   const [all, setAll] = useState(false);
   const running = steps.some((s) => s.state === "running");
   // Long runs fold to the last few steps, with a count of the rest.
-  const shown = all || running || steps.length <= 5 ? steps : steps.slice(-3);
+  const shown = all || running || steps.length <= 5 ? steps : steps.filter((s, i) => s.state === "err" || i >= steps.length - 3);
   return (
     <div className="steps">
       {shown.length < steps.length && (
@@ -410,14 +415,7 @@ function Steps({ steps }: { steps: Step[] }) {
         </button>
       )}
       {shown.map((s) => (
-        <div key={s.id}>
-          <button className={`step ${s.state === "err" ? "err" : ""}`} aria-expanded={open === s.id} onClick={() => setOpen(open === s.id ? null : s.id)} disabled={!s.output}>
-            {s.state === "running" ? <span className="spinner" style={{ width: 11, height: 11 }} /> : s.state === "ok" ? <Check /> : <Cross />}
-            <span>{TOOL_LABEL[s.name] ?? s.name}</span>
-            {s.summary && <span className="what">{s.summary}</span>}
-          </button>
-          {open === s.id && s.output && <pre className="step-output">{s.output}</pre>}
-        </div>
+        <ToolStep key={s.id} step={s} label={TOOL_LABEL[s.name] ?? s.name} />
       ))}
     </div>
   );
@@ -425,47 +423,14 @@ function Steps({ steps }: { steps: Step[] }) {
 
 // --- Composer menus ------------------------------------------------------------------------------
 
-function ModeMenu({ mode, onChange }: { mode: Mode; onChange: (m: Mode) => void }) {
-  const [open, setOpen] = useState(false);
-  const ref = useDismiss<HTMLDivElement>(open, () => setOpen(false));
+function ModePicker({ mode, onChange }: { mode: Mode; onChange: (m: Mode) => void }) {
   return (
-    <div className="menu-anchor" ref={ref}>
-      <button className={`mode-btn ${mode}`} aria-haspopup="listbox" aria-expanded={open} title={`${MODES[mode].hint} · Alt+P`} onClick={() => setOpen((o) => !o)}>
-        <span aria-hidden>{MODES[mode].icon}</span> {MODES[mode].label} <span className="caret">▾</span>
-      </button>
-      {open && (
-        <div className="popover up left mode-menu" role="listbox" aria-label="Modo del chat">
-          {MODE_ORDER.map((m) => (
-            <button
-              key={m}
-              role="option"
-              aria-selected={mode === m}
-              className="menu-item tall"
-              onClick={() => {
-                onChange(m);
-                setOpen(false);
-              }}
-            >
-              <span className="mode-ico" aria-hidden>
-                {MODES[m].icon}
-              </span>
-              <span className="grow" style={{ textAlign: "left" }}>
-                <span style={{ display: "block", fontWeight: 500 }}>
-                  {MODES[m].label} {m === "chat" && <span className="pill ok tiny">más barato</span>}
-                </span>
-                <span className="small muted" style={{ whiteSpace: "normal" }}>
-                  {MODES[m].hint}
-                </span>
-              </span>
-              {mode === m && <span className="check">✓</span>}
-            </button>
-          ))}
-          <div className="menu-sep" />
-          <div className="small muted kbd-row">
-            Cambiar de modo con <kbd>Alt</kbd> <kbd>P</kbd>
-          </div>
-        </div>
-      )}
+    <div className="chat-modes" role="group" aria-label="Modo del chat">
+      {MODE_ORDER.map((m) => (
+        <button key={m} className={mode === m ? "on" : ""} aria-pressed={mode === m} title={MODES[m].hint} onClick={() => onChange(m)}>
+          <span aria-hidden>{MODES[m].icon}</span> {MODES[m].label}
+        </button>
+      ))}
     </div>
   );
 }
@@ -534,7 +499,12 @@ type Recognition = { lang: string; interimResults: boolean; continuous: boolean;
 const SpeechCtor: (new () => Recognition) | undefined =
   typeof window === "undefined" ? undefined : ((window as unknown as Record<string, unknown>).SpeechRecognition ?? (window as unknown as Record<string, unknown>).webkitSpeechRecognition) as (new () => Recognition) | undefined;
 
-const STARTERS = ["Explícame cómo está organizada la app", "Añade un modo oscuro", "Revisa la accesibilidad de la portada"];
+const STARTERS: { title: string; hint: string; mode: Mode; prompt: string }[] = [
+  { title: "Crear una función", hint: "Convierte una idea en algo real", mode: "build", prompt: "Quiero agregar una nueva función a mi app: " },
+  { title: "Mejorar el diseño", hint: "Pantallas más claras y fáciles de usar", mode: "build", prompt: "Mejora el diseño de mi app. Quiero enfocarme en: " },
+  { title: "Planear un cambio", hint: "Revisa el plan antes de construir", mode: "plan", prompt: "Prepara un plan para este cambio, sin implementarlo todavía: " },
+  { title: "Entender mi app", hint: "Pregunta sin modificar el código", mode: "chat", prompt: "Explícame cómo está organizada la app y qué puedo hacer a continuación." },
+];
 
 export function Chat({
   projectId,
@@ -575,6 +545,9 @@ export function Chat({
 }) {
   const [items, setItems] = useState<Item[]>([]);
   const [loadCount, setLoadCount] = useState(0);
+  const [historyLoading, setHistoryLoading] = useState(true);
+  const [historyError, setHistoryError] = useState("");
+  const [historyRetry, setHistoryRetry] = useState(0);
   const [mode, setModeState] = useState<Mode>(() => {
     try {
       const m = browser.localStorage.getItem("forja:chat-mode");
@@ -627,7 +600,24 @@ export function Chat({
   queueRef.current = queue;
   const [planTurn, setPlanTurn] = useState<string | null>(null);
   const [live, setLive] = useState<Item[]>([]);
-  const [input, setInput] = useState("");
+  const [draft] = useState(() => {
+    try {
+      return { text: browser.localStorage.getItem(`forja:draft:${projectId}`) ?? "", unavailable: false };
+    } catch {
+      return { text: "", unavailable: true };
+    }
+  });
+  const [input, setInput] = useState(draft.text);
+  const [draftUnavailable, setDraftUnavailable] = useState(draft.unavailable);
+  useEffect(() => {
+    try {
+      if (input) browser.localStorage.setItem(`forja:draft:${projectId}`, input);
+      else browser.localStorage.removeItem(`forja:draft:${projectId}`);
+      setDraftUnavailable(false);
+    } catch {
+      setDraftUnavailable(true);
+    }
+  }, [input, projectId]);
   const [caret, setCaret] = useState(0);
   const [menuIdx, setMenuIdx] = useState(0);
   const [attachments, setAttachments] = useState<string[]>([]);
@@ -644,6 +634,7 @@ export function Chat({
   const logRef = useRef<HTMLDivElement>(null);
   const started = useRef(false);
   const stick = useRef(true);
+  const [awayFromBottom, setAwayFromBottom] = useState(false);
 
   const attach = async (list: FileList | File[] | null) => {
     if (!list?.length) return;
@@ -708,6 +699,8 @@ export function Chat({
   useEffect(() => {
     let disposed = false;
     const controller = new AbortController();
+    setHistoryLoading(true);
+    setHistoryError("");
     void load().then((r) => {
       if (disposed) return;
       if (r.building) {
@@ -735,13 +728,17 @@ export function Chat({
         browser.sessionStorage.removeItem(`forja:first:${projectId}`);
         void send(first);
       }
+    }).catch((e) => {
+      if (!disposed) setHistoryError((e as Error).message);
+    }).finally(() => {
+      if (!disposed) setHistoryLoading(false);
     });
     return () => {
       disposed = true;
       controller.abort();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId]);
+  }, [projectId, historyRetry]);
 
   // Follow the log while it grows, unless the owner scrolled up to read. A jump, not a smooth
   // scroll: the scroll events of an animation would read as the owner scrolling away.
@@ -786,10 +783,11 @@ export function Chat({
   }
 
   async function send(text: string, opts: { mode?: Mode; implementPlan?: boolean } = {}) {
-    if (!text.trim()) return;
+    if (!text.trim() || uploading || historyError) return;
     const turnMode = opts.mode ?? mode;
     setInput("");
     stick.current = true;
+    setAwayFromBottom(false);
     if (building) {
       setQueue((q) => [...q, { text, mode: turnMode }]);
       return;
@@ -938,19 +936,24 @@ export function Chat({
         onScroll={(e) => {
           const el = e.currentTarget;
           stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+          setAwayFromBottom(!stick.current);
         }}
       >
-        {all.length === 0 && (
+        {historyLoading && <div className="chat-history-state" role="status"><span className="spinner" /> Cargando conversación…</div>}
+        {historyError && <div className="error-box" role="alert"><strong>No pudimos cargar la conversación</strong><p>{historyError}</p><button className="sm" onClick={() => setHistoryRetry((n) => n + 1)}>Reintentar</button></div>}
+        {!historyLoading && !historyError && all.length === 0 && (
           <div className="chat-empty">
             <div className="chat-empty-mark" aria-hidden>
               ✦
             </div>
             <div className="chat-empty-title">Cuéntame qué construimos</div>
-            <div className="small muted">Describe pantallas, datos y quién la usará. Escribe «/» para ver las habilidades o «@» para mencionar un archivo.</div>
+            <div className="small muted">Empieza con una idea o elige un punto de partida. Podrás revisar el mensaje antes de enviarlo.</div>
             <div className="starter-list">
               {STARTERS.map((s) => (
-                <button key={s} className="starter" onClick={() => addToInput(s)}>
-                  {s}
+                <button key={s.title} className="starter" onClick={() => { setMode(s.mode); addToInput(s.prompt); }}>
+                  <span className="starter-icon" aria-hidden>{MODES[s.mode].icon}</span>
+                  <span><strong>{s.title}</strong><small>{s.hint}</small></span>
+                  <span className="starter-arrow" aria-hidden>↗</span>
                 </button>
               ))}
             </div>
@@ -1052,7 +1055,7 @@ export function Chat({
           </div>
         )}
         {building && (
-          <div className="thinking">
+          <div className="thinking" role="status">
             <span className="dots" aria-hidden>
               <i />
               <i />
@@ -1069,10 +1072,18 @@ export function Chat({
             </button>
           </div>
         ))}
-        {error && <div className="error-box">{error}</div>}
+        {error && <div className="error-box" role="alert">{error}</div>}
       </div>
+      {awayFromBottom && <button className="chat-jump sm" onClick={() => {
+        setOnlyMarked(false);
+        stick.current = true;
+        setAwayFromBottom(false);
+        if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
+      }}>↓ Ir a lo más reciente</button>}
       <div className="composer">
         <ProblemsBar problems={problems} disabled={false} onFix={(list) => void send(fixMessage(list), { mode: "build" })} />
+        <ModePicker mode={mode} onChange={setMode} />
+        <div className="chat-mode-hint">{mode === "build" ? "Aplica cambios en tu app." : mode === "chat" ? "Explora ideas sin cambiar el código." : "Primero un plan. Tú apruebas la implementación."}</div>
         <div className={`composer-box mode-${mode}`}>
           {(attachments.length > 0 || selection || uploading) && (
             <div className="composer-chips">
@@ -1141,7 +1152,7 @@ export function Chat({
                 }
                 if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
                   e.preventDefault();
-                  void send(input);
+                  if (!historyLoading) void send(input);
                 }
               }}
             />
@@ -1149,7 +1160,8 @@ export function Chat({
           <div className="composer-tools">
             <input ref={fileInput} type="file" multiple hidden accept="image/*,.pdf,.txt,.md,.csv,.json,.svg" onChange={(e) => void attach(e.target.files)} />
             <PlusMenu actions={plusActions} />
-            <ModeMenu mode={mode} onChange={setMode} />
+            <button className="composer-shortcut" title="Adjuntar archivos (máximo 5 MB por archivo)" aria-label="Adjuntar archivos" disabled={uploading} onClick={() => fileInput.current?.click()}><Paperclip size={16} aria-hidden /></button>
+            {onSelectElement && <button className="composer-shortcut" title="Seleccionar un elemento de tu app" aria-label="Seleccionar elemento" onClick={onSelectElement}><MousePointer2 size={16} aria-hidden /></button>}
             <span className="grow" />
             {SpeechCtor && (
               <button className={`round-btn ${listening ? "rec" : ""}`} aria-label={listening ? "Dejar de dictar" : "Dictar"} aria-pressed={listening} title={listening ? "Dejar de dictar" : "Dictar con la voz"} onClick={dictate}>
@@ -1158,7 +1170,7 @@ export function Chat({
             )}
             {building ? (
               <>
-                <button className="sm" disabled={!input.trim()} onClick={() => send(input)}>
+                <button className="sm" disabled={!input.trim() || uploading || historyLoading || !!historyError} onClick={() => send(input)}>
                   Poner en cola
                 </button>
                 <button className="round-btn stop" aria-label="Detener" title="Detener" onClick={() => api(`/projects/${projectId}/chat/stop`, { body: {} })}>
@@ -1166,7 +1178,7 @@ export function Chat({
                 </button>
               </>
             ) : (
-              <button className="send-btn" aria-label="Enviar mensaje" title="Enviar (Enter) · Shift+Enter para salto de línea" disabled={!input.trim()} onClick={() => send(input)}>
+              <button className="send-btn" aria-label="Enviar mensaje" title="Enviar (Enter) · Shift+Enter para salto de línea" disabled={!input.trim() || uploading || historyLoading || !!historyError} onClick={() => send(input)}>
                 <Send />
               </button>
             )}
@@ -1177,9 +1189,9 @@ export function Chat({
             <kbd>/</kbd> habilidades · <kbd>@</kbd> archivos · <kbd>Alt</kbd>+<kbd>P</kbd> modo
           </span>
           <span className="grow" />
-          {mode === "chat" && <span>Chat: solo lee, no cambia el código</span>}
-          {mode === "plan" && <span>Plan: nada cambia hasta que lo apruebes</span>}
+          <span title="Shift+Enter para un salto de línea">Enter ↵</span>
         </div>
+        {(input || draftUnavailable) && <div className={`draft-state ${draftUnavailable ? "warn" : ""}`} role="status">{draftUnavailable ? "No se puede guardar el borrador en este navegador." : "Borrador guardado en este navegador"}</div>}
       </div>
       {dragging && <div className="drop-hint">Suelta para adjuntar</div>}
     </section>

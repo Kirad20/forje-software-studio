@@ -280,7 +280,6 @@ async function runLane(
         role: lane.role,
         maxSteps: MAX_STEPS[lane.role],
         signal: s.signal,
-        emit: s.emit,
         taskId: lane.id,
         turnId: s.turnId,
       }),

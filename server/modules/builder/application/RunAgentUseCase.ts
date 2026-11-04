@@ -138,7 +138,7 @@ export class RunAgentUseCase<M extends ExecutionModel> {
         if (c.name === "run_tests") result.testsOk = ok && output.startsWith("Todo en verde");
         if (!ok) result.toolErrors++;
         this.ports.recordToolCall({ runId, projectId: spec.ctx.projectId, source: "builder", role: spec.role, step, tool: c.name, inputChars: JSON.stringify(c.input ?? {}).length, resultChars: output.length, ok, ms: this.ports.now() - started });
-        result.steps.push({ tool: c.name, summary, ok });
+        result.steps.push({ tool: c.name, summary, ok, ...(!ok ? { output: output.slice(0, 2000) } : {}) });
         emit({ type: "tool_end", id: c.id, ok, output: output.slice(0, 2000) });
         return { type: "tool_result", tool_use_id: c.id, content: output, is_error: !ok || undefined };
       }));

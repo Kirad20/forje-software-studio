@@ -1,4 +1,5 @@
 import { Fragment, useCallback, useEffect, useRef, useState, type ComponentType } from "react";
+import { BarChart3, BookOpen, Clock, Code2, CreditCard, Database, FolderOpen, Globe, LayoutGrid, Mail, Plug, ScrollText, ShieldCheck, Sparkles, Star, UsersRound, type LucideIcon } from "lucide-react";
 import { api, projectsController } from "../application/controller.js";
 import type { ProjectLogLine } from "../application/contracts.js";
 import type { Project, Me } from "../../../shared/contracts/index.js";
@@ -24,21 +25,37 @@ const TEXT_EDIT_WHY: Record<string, string> = {
 
 type View = "preview" | "services" | "settings" | "details";
 type ServiceKey = "data" | "users" | "ai" | "integrations" | "analytics" | "seo" | "docs" | "jobs" | "storage" | "email" | "payments" | "logs" | "security" | "code";
+const SERVICE_GUIDES: Record<ServiceKey, { description: string; prompt: string }> = {
+  data: { description: "Explora tablas y registros de tu aplicación.", prompt: "Ayúdame a diseñar los datos de mi app. Necesito guardar: " },
+  users: { description: "Gestiona cuentas, acceso y permisos.", prompt: "Quiero mejorar el acceso de usuarios de mi app. Necesito: " },
+  ai: { description: "Configura la inteligencia artificial de tu app.", prompt: "Quiero agregar una función de IA a mi app para: " },
+  integrations: { description: "Conecta tu aplicación con servicios externos.", prompt: "Quiero conectar mi app con este servicio: " },
+  analytics: { description: "Entiende las visitas y el uso de tu aplicación.", prompt: "Ayúdame a medir el uso de mi app. Quiero conocer: " },
+  seo: { description: "Mejora cómo aparece tu app en los buscadores.", prompt: "Revisa el SEO de mi app y propón mejoras en títulos, descripciones y metadatos antes de cambiar el código." },
+  docs: { description: "Consulta la documentación y las decisiones del proyecto.", prompt: "Ayúdame a documentar mi app. Quiero explicar: " },
+  jobs: { description: "Automatiza tareas y revisa sus ejecuciones.", prompt: "Quiero automatizar una tarea en mi app: " },
+  storage: { description: "Organiza los archivos que almacena tu app.", prompt: "Quiero que los usuarios puedan subir archivos a mi app. Necesito: " },
+  email: { description: "Configura y prueba los correos de tu aplicación.", prompt: "Quiero enviar correos desde mi app cuando: " },
+  payments: { description: "Prepara cobros y suscripciones.", prompt: "Ayúdame a planificar los pagos de mi app. Quiero cobrar por: " },
+  logs: { description: "Revisa la actividad y encuentra el origen de los errores.", prompt: "Consulta los registros y problemas actuales de mi app. Explica qué está fallando y propón una solución antes de hacer cambios." },
+  security: { description: "Revisa los hallazgos de seguridad de tu proyecto.", prompt: "Explícame los hallazgos de seguridad actuales de mi app y cómo resolverlos. No hagas cambios todavía." },
+  code: { description: "Explora y edita los archivos de tu proyecto.", prompt: "Explícame cómo está organizado el código de mi app y dónde debería hacer este cambio: " },
+};
 
-const SERVICES: { key: ServiceKey; label: string; icon: string; search: string }[] = [
-  { key: "data", label: "Datos", icon: "⛁", search: "base de datos postgres sql tablas" },
-  { key: "users", label: "Usuarios", icon: "☺", search: "cuentas autenticacion login" },
-  { key: "ai", label: "IA", icon: "✦", search: "inteligencia artificial modelos" },
-  { key: "integrations", label: "Integraciones", icon: "⚷", search: "servicios externos api claves" },
-  { key: "analytics", label: "Analítica", icon: "▥", search: "estadisticas metricas visitas" },
-  { key: "seo", label: "SEO", icon: "◎", search: "buscadores metadatos posicionamiento" },
-  { key: "docs", label: "Docs", icon: "▢", search: "documentacion archivos" },
-  { key: "jobs", label: "Tareas", icon: "◷", search: "trabajos programados cron temporizadores" },
-  { key: "storage", label: "Archivos", icon: "⇪", search: "almacenamiento subidas uploads" },
-  { key: "email", label: "Correo", icon: "✉", search: "email mensajes envio" },
-  { key: "payments", label: "Pagos", icon: "¤", search: "cobros suscripciones stripe" },
-  { key: "logs", label: "Registros", icon: "≡", search: "logs errores actividad" },
-  { key: "security", label: "Seguridad", icon: "⛨", search: "vulnerabilidades escaneo" },
+const SERVICES: { key: ServiceKey; label: string; icon: LucideIcon; search: string }[] = [
+  { key: "data", label: "Datos", icon: Database, search: "base de datos postgres sql tablas" },
+  { key: "users", label: "Usuarios", icon: UsersRound, search: "cuentas autenticacion login" },
+  { key: "ai", label: "IA", icon: Sparkles, search: "inteligencia artificial modelos" },
+  { key: "integrations", label: "Integraciones", icon: Plug, search: "servicios externos api claves" },
+  { key: "analytics", label: "Analítica", icon: BarChart3, search: "estadisticas metricas visitas" },
+  { key: "seo", label: "SEO", icon: Globe, search: "buscadores metadatos posicionamiento" },
+  { key: "docs", label: "Docs", icon: BookOpen, search: "documentacion archivos" },
+  { key: "jobs", label: "Tareas", icon: Clock, search: "trabajos programados cron temporizadores" },
+  { key: "storage", label: "Archivos", icon: FolderOpen, search: "almacenamiento subidas uploads" },
+  { key: "email", label: "Correo", icon: Mail, search: "email mensajes envio" },
+  { key: "payments", label: "Pagos", icon: CreditCard, search: "cobros suscripciones stripe" },
+  { key: "logs", label: "Registros", icon: ScrollText, search: "logs errores actividad" },
+  { key: "security", label: "Seguridad", icon: ShieldCheck, search: "vulnerabilidades escaneo" },
 ];
 const normalizeServiceSearch = (value: string) => value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
 /** Always listed among the used ones. */
@@ -66,8 +83,16 @@ export function ProjectView({
   const [project, setProject] = useState<Project | null>(null);
   const [error, setError] = useState("");
   const [view, setView] = useState<View>("preview");
-  const [service, setService] = useState<ServiceKey>("data");
+  const [service, setService] = useState<ServiceKey | "overview">("overview");
   const [serviceSearch, setServiceSearch] = useState("");
+  const [favorites, setFavorites] = useState<ServiceKey[]>(() => {
+    try {
+      const saved: unknown = JSON.parse(browser.localStorage.getItem("forja:favorite-tools") ?? "[]");
+      return Array.isArray(saved) ? saved.filter((key): key is ServiceKey => typeof key === "string" && Object.hasOwn(SERVICE_GUIDES, key)) : [];
+    } catch {
+      return [];
+    }
+  });
   const [used, setUsed] = useState<Record<string, boolean>>({});
   const [filesKey, setFilesKey] = useState(0);
   const [logLines, setLogLines] = useState<ProjectLogLine[]>([]);
@@ -219,16 +244,33 @@ export function ProjectView({
     setService(key);
     setView("services");
   };
+  const draftRequest = (text: string) => {
+    setView("preview");
+    showChat();
+    setInsert({ text, nonce: Date.now() });
+  };
+  const toggleFavorite = (key: ServiceKey) => {
+    const next = favorites.includes(key) ? favorites.filter((k) => k !== key) : [...favorites, key];
+    setFavorites(next);
+    try {
+      browser.localStorage.setItem("forja:favorite-tools", JSON.stringify(next));
+    } catch {
+      setNotice({ text: "La selección se mantiene aquí, pero no se pudo guardar en este navegador.", tone: "warn" });
+    }
+  };
 
   if (error) return <div className="empty">{error}</div>;
   if (!project) return <div className="empty">Cargando…</div>;
 
   const errors = logLines.filter((l) => l.level === "error").length;
   const isUsed = (k: ServiceKey) => ALWAYS_USED.has(k) || !!used[k];
-  const ordered = [...SERVICES.filter((s) => isUsed(s.key)), ...SERVICES.filter((s) => !isUsed(s.key))];
+  const ordered = [...SERVICES].sort((a, b) => Number(favorites.includes(b.key)) - Number(favorites.includes(a.key)) || Number(isUsed(b.key)) - Number(isUsed(a.key)));
   const query = normalizeServiceSearch(serviceSearch.trim());
   const visibleServices = ordered.filter((s) => !query || normalizeServiceSearch(`${s.label} ${s.key} ${s.search}`).includes(query));
   const showCode = !query || normalizeServiceSearch("codigo code archivos fuente editor").includes(query);
+  const toolCards: { key: ServiceKey; label: string; icon: LucideIcon }[] = [...visibleServices];
+  if (showCode) toolCards.push({ key: "code", label: "Código", icon: Code2 });
+  toolCards.sort((a, b) => Number(favorites.includes(b.key)) - Number(favorites.includes(a.key)));
   const pageLabel = path === "/" ? "Inicio" : path;
   const publishLabel = !project.slug ? "Publicar" : project.hasUnpublishedChanges ? "Publicar cambios" : "Publicada";
 
@@ -273,7 +315,7 @@ export function ProjectView({
               </>
             ) : view === "services" ? (
               <span className="page-chip">
-                {SERVICES.find((s) => s.key === service)?.icon} {SERVICES.find((s) => s.key === service)?.label ?? "Código"}
+                {service === "overview" ? "Herramientas del proyecto" : SERVICES.find((s) => s.key === service)?.label ?? "Código"}
                 <button className="ghost sm icon-btn" style={{ height: 20, width: 20 }} aria-label="Volver a la vista previa" onClick={() => setView("preview")}>
                   ×
                 </button>
@@ -362,7 +404,7 @@ export function ProjectView({
               </button>
               {panel === "checkpoints" && <CheckpointPanel projectId={id} reloadKey={filesKey} onClose={closePanel} myEmail={me.email} />}
             </div>
-            <button className={`tool ${selecting ? "on" : ""}`} onClick={toggleSelect} title="Elige un elemento de la vista previa para pedir un cambio sobre él">
+            <button className={`tool ${selecting ? "on" : ""}`} aria-pressed={selecting} onClick={toggleSelect} title="Elige un elemento de la vista previa para pedir un cambio sobre él">
               ⌖ Seleccionar
             </button>
             <button
@@ -390,6 +432,9 @@ export function ProjectView({
                 ))
               }
             </Menu>
+            <button className="tool" onClick={() => { setService("overview"); setView("services"); }}>
+              <LayoutGrid size={14} aria-hidden /> Herramientas
+            </button>
             {selecting && <span className="small muted">Haz clic en un elemento de la vista previa · Esc para cancelar</span>}
             {editingText && <span className="small muted">Haz clic en un texto y escribe · Enter guarda · Esc cancela</span>}
           </div>
@@ -434,6 +479,7 @@ export function ProjectView({
               onClearSelection={() => setSelection(null)}
               onSelectElement={() => {
                 setView("preview");
+                setMobilePane("preview");
                 if (!selecting) toggleSelect();
               }}
               onOpenDetails={(d) => {
@@ -508,6 +554,10 @@ export function ProjectView({
                   />
                 </label>
                 <div className="svc-nav-items">
+                  <button className={service === "overview" ? "on" : ""} aria-current={service === "overview" ? "page" : undefined} onClick={() => setService("overview")}>
+                    <span className="svc-icon" aria-hidden><LayoutGrid size={16} /></span>
+                    <span className="svc-label">Vista general</span>
+                  </button>
                   {visibleServices.map((s, i) => (
                     <Fragment key={s.key}>
                       {i > 0 && isUsed(visibleServices[i - 1]!.key) && !isUsed(s.key) && <div className="sep" />}
@@ -516,8 +566,9 @@ export function ProjectView({
                         aria-current={service === s.key ? "page" : undefined}
                         onClick={() => setService(s.key)}
                       >
-                        <span className="svc-icon" aria-hidden>{s.icon}</span>
+                        <span className="svc-icon" aria-hidden><s.icon size={16} /></span>
                         <span className="svc-label">{s.label}</span>
+                        {favorites.includes(s.key) && <Star size={12} className="svc-favorite" aria-hidden />}
                         {s.key === "logs" && errors > 0 && <span className="pill err svc-count">{errors}</span>}
                       </button>
                     </Fragment>
@@ -527,15 +578,67 @@ export function ProjectView({
                     <>
                       <div className="menu-label">Avanzado</div>
                       <button className={service === "code" ? "on" : ""} aria-current={service === "code" ? "page" : undefined} onClick={() => setService("code")}>
-                        <span className="svc-icon" aria-hidden>{"{}"}</span>
+                        <span className="svc-icon" aria-hidden><Code2 size={16} /></span>
                         <span className="svc-label">Código</span>
+                        {favorites.includes("code") && <Star size={12} className="svc-favorite" aria-hidden />}
                       </button>
                     </>
                   )}
-                  {visibleServices.length === 0 && !showCode && <div className="svc-no-results">No hay herramientas que coincidan.</div>}
+                  {visibleServices.length === 0 && !showCode && <div className="svc-no-results">No hay coincidencias. <button onClick={() => setServiceSearch("")}>Limpiar búsqueda</button></div>}
                 </div>
               </nav>
+              <div className="svc-workspace">
+                {service !== "overview" && (
+                  <header className="svc-context">
+                    <div className="grow">
+                      <button className="link-btn" onClick={() => setService("overview")}>← Todas las herramientas</button>
+                      <h2>{SERVICES.find((s) => s.key === service)?.label ?? "Código"}</h2>
+                      <p>{SERVICE_GUIDES[service].description}</p>
+                    </div>
+                    <button className="sm" aria-label="Pedir ayuda al constructor" onClick={() => draftRequest(SERVICE_GUIDES[service].prompt)}>✦ Pedir ayuda<span className="svc-help-detail"> al constructor</span></button>
+                  </header>
+                )}
               <div className={`svc-detail ${["data", "docs", "storage", "code"].includes(service) ? "" : "pad"}`}>
+                {service === "overview" && (
+                  <div className="tools-home">
+                    <header className="tools-intro">
+                      <span className="tool-eyebrow">ESPACIO DE CONSTRUCCIÓN</span>
+                      <h1>Todo para darle vida a tu app</h1>
+                      <p>Explora tus herramientas o pide ayuda al constructor. Tú decides qué cambiar y cuándo publicarlo.</p>
+                      <div className="tools-quick-actions">
+                        <button className="primary" onClick={() => draftRequest("Quiero agregar una nueva función a mi app: ")}>✦ Crear una función</button>
+                        <button onClick={() => { setView("preview"); setMobilePane("preview"); }}>Ver mi app</button>
+                        <button onClick={() => openService("logs")}>Revisar errores {errors > 0 && <span className="pill err">{errors}</span>}</button>
+                      </div>
+                    </header>
+                    <div className="tools-summary">
+                      <div><strong>{SERVICES.filter((s) => !!used[s.key]).length}</strong><span>Servicios en uso</span></div>
+                      <div><strong>{project.slug ? "Publicada" : "En desarrollo"}</strong><span>{project.hasUnpublishedChanges ? "Hay cambios por publicar" : "Estado de tu app"}</span></div>
+                      <div><strong>{building ? "Trabajando" : "Listo para ayudarte"}</strong><span>Constructor</span></div>
+                    </div>
+                    <div className="tools-section-head">
+                      <h2>{query ? "Resultados de búsqueda" : "Explora las herramientas"}</h2>
+                      <span className="small muted">{visibleServices.length + Number(showCode)} disponibles</span>
+                    </div>
+                    <div className="tools-grid">
+                      {toolCards.map((s) => (
+                        <div className="tool-card-wrap" key={s.key}>
+                          <button className="tool-card" onClick={() => openService(s.key)}>
+                            <span className="tool-card-top"><span className="tool-card-icon" aria-hidden><s.icon size={20} /></span>{!!used[s.key] && <span className="pill tiny">En uso</span>}</span>
+                            <strong>{s.label}<span aria-hidden>↗</span></strong>
+                            <span className="tool-card-description">{SERVICE_GUIDES[s.key].description}</span>
+                          </button>
+                          <button className={`tool-favorite ${favorites.includes(s.key) ? "on" : ""}`} aria-label={`${favorites.includes(s.key) ? "Quitar" : "Añadir"} ${s.label} ${favorites.includes(s.key) ? "de" : "a"} favoritos`} aria-pressed={favorites.includes(s.key)} onClick={() => toggleFavorite(s.key)} title={favorites.includes(s.key) ? "Quitar de favoritos" : "Añadir a favoritos"}>
+                            <Star size={15} fill={favorites.includes(s.key) ? "currentColor" : "none"} aria-hidden />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                    {visibleServices.length === 0 && !showCode && (
+                      <div className="tools-empty"><strong>No encontramos esa herramienta</strong><p>Prueba con “datos”, “correo” o “código”.</p><button onClick={() => setServiceSearch("")}>Ver todas las herramientas</button></div>
+                    )}
+                  </div>
+                )}
                 {service === "data" && <DataPanel projectId={id} projectName={project.name} reloadKey={filesKey} />}
                 {service === "users" && <UsersPanel projectId={id} />}
                 {service === "ai" && <AiPanel project={project} onChange={load} />}
@@ -554,12 +657,14 @@ export function ProjectView({
                     reloadKey={filesKey}
                     building={building}
                     onFix={(text) => {
+                      setView("preview");
                       showChat();
                       setOutbox((o) => ({ nonce: (o?.nonce ?? 0) + 1, text }));
                     }}
                   />
                 )}
                 {service === "code" && <CodePanel key={codeFile ?? ""} projectId={id} reloadKey={filesKey} initialPath={codeFile} />}
+              </div>
               </div>
             </div>
           )}
