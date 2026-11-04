@@ -3,6 +3,7 @@ import { api } from "../application/controller.js";
 import { timeAgo } from "../../../shared/presentation/format.js";
 import { Select, Switch } from "../../../shared/ui.js";
 import { EditDialog } from "../../../shared/EditDialog.js";
+import { useConfirmation } from "../../../shared/ConfirmDialog.js";
 import type { SettingView } from "./Settings.js";
 
 interface CatalogModel {
@@ -43,6 +44,7 @@ const matches = (glob: string, m: CatalogModel) =>
 
 /** Admin → Modelos: the whole catalog, its whitelist, OpenRouter sync and a test per model. */
 export function Models() {
+  const { confirm, dialog } = useConfirmation();
   const [data, setData] = useState<{ models: CatalogModel[]; openrouter: { configured: boolean; lastSync: string | null } } | null>(null);
   const [filter, setFilter] = useState("");
   const [provider, setProvider] = useState("");
@@ -196,7 +198,7 @@ export function Models() {
                           className="ghost danger small"
                           disabled={pending !== null}
                           onClick={async () => {
-                            if (!confirm(`¿Borrar ${m.id}?`)) return;
+                            if (!await confirm(`¿Borrar ${m.id}? Esta acción no se puede deshacer.`)) return;
                             setPending(m.id);
                             setError("");
                             try {
@@ -235,6 +237,7 @@ export function Models() {
         <Whitelist models={data.models} onSaved={load} />
       </details>
       {editing && <ModelEditor key={editing.id} model={editing} onClose={() => setEditing(null)} onSaved={async () => { await load(); setEditing(null); setNote("Modelo actualizado."); }} />}
+      {dialog}
     </div>
   );
 }

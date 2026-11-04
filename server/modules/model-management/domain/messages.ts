@@ -34,6 +34,21 @@ export interface LlmRequest {
   signal?: AbortSignal;
 }
 
+/** Capacity estimate, including message/tool framing but never base64 image bytes. */
+export function estimateRequestTokens(req: LlmRequest): number {
+  let images = 0;
+  const messages = req.messages.map((m) => ({
+    ...m,
+    content: typeof m.content === "string" ? m.content : m.content.map((b) => {
+      if (b.type !== "image") return b;
+      images++;
+      return { type: "image" };
+    }),
+  }));
+  const serialized = JSON.stringify({ system: req.system, messages, tools: req.tools });
+  return Math.ceil((serialized.length / 3.5 + images * 1500) * 1.2) + 1024;
+}
+
 export interface Usage {
   /** Uncached input tokens. */
   input: number;

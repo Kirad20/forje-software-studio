@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { api } from "../application/controller.js";
 import { Switch } from "../../../shared/ui.js";
 import { EditDialog } from "../../../shared/EditDialog.js";
+import { useConfirmation } from "../../../shared/ConfirmDialog.js";
 
 interface ProviderView {
   id: string;
@@ -58,7 +59,7 @@ export function Providers() {
         Un proveedor se usa cuando está activado y tiene su clave (o su URL). Las claves se guardan cifradas y nunca vuelven al navegador.
       </p>
       <div className="admin-toolbar">
-        <input aria-label="Buscar proveedores" placeholder="Buscar por nombre, identificador o URL…" value={filter} onChange={(e) => setFilter(e.target.value)} />
+        <input type="search" name="provider-search" autoComplete="off" autoCorrect="off" spellCheck={false} aria-label="Buscar proveedores" placeholder="Buscar por nombre, identificador o URL…" value={filter} onChange={(e) => setFilter(e.target.value)} />
         <button className="primary" disabled={adding} onClick={() => setAdding(true)}>+ Añadir proveedor</button>
       </div>
       <div className="small muted">{list.filter((p) => p.available).length} de {list.length} proveedores disponibles</div>
@@ -75,6 +76,7 @@ export function Providers() {
 }
 
 function ProviderCard({ p, onPatch, onDeleted }: { p: ProviderView; onPatch: (b: Record<string, unknown>) => Promise<string | null>; onDeleted: (l: ProviderView[]) => void }) {
+  const { confirm, dialog } = useConfirmation();
   const [key, setKey] = useState("");
   const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -117,7 +119,7 @@ function ProviderCard({ p, onPatch, onDeleted }: { p: ProviderView; onPatch: (b:
         <span className="muted">Clave de API</span>
         <div className="row">
           {p.keySet && <code>{p.keyBroken ? "no se puede descifrar" : (p.keyHint ?? "••••")}</code>}
-          <input className="grow" aria-label={`Clave de API de ${p.label}`} disabled={busy} type="password" autoComplete="off" placeholder={p.keySet ? "Reemplazar clave" : p.kind === "openai" && p.id !== "openrouter" ? "Opcional en servidores locales" : "Pega la clave"} value={key} onChange={(e) => setKey(e.target.value)} />
+          <input className="grow" name={`provider-key-${p.id}`} aria-label={`Clave de API de ${p.label}`} disabled={busy} type="password" autoComplete="new-password" placeholder={p.keySet ? "Reemplazar clave" : p.kind === "openai" && p.id !== "openrouter" ? "Opcional en servidores locales" : "Pega la clave"} value={key} onChange={(e) => setKey(e.target.value)} />
           <button
             disabled={busy || !key.trim()}
             onClick={async () => {
@@ -127,7 +129,7 @@ function ProviderCard({ p, onPatch, onDeleted }: { p: ProviderView; onPatch: (b:
             Guardar
           </button>
           {p.keySet && (
-            <button disabled={busy} className="danger" onClick={() => { if (confirm(`¿Quitar la clave de ${p.label}?`)) void update({ apiKey: null }); }}>
+            <button disabled={busy} className="danger" onClick={async () => { if (await confirm(`¿Quitar la clave de ${p.label}?`)) void update({ apiKey: null }); }}>
               Quitar
             </button>
           )}
@@ -165,7 +167,7 @@ function ProviderCard({ p, onPatch, onDeleted }: { p: ProviderView; onPatch: (b:
             className="danger"
             disabled={busy || testing}
             onClick={async () => {
-              if (!confirm(`¿Borrar el proveedor «${p.label}» y sus modelos propios?`)) return;
+              if (!await confirm(`¿Borrar el proveedor «${p.label}» y sus modelos propios? Esta acción no se puede deshacer.`)) return;
               setBusy(true);
               setError("");
               try {
@@ -182,6 +184,7 @@ function ProviderCard({ p, onPatch, onDeleted }: { p: ProviderView; onPatch: (b:
         if (!failure) setEditing(false);
         return failure;
       }} />}
+      {dialog}
     </section>
   );
 }
@@ -267,7 +270,7 @@ function AddProvider({ onDone }: { onDone: (list?: ProviderView[]) => void }) {
         <label>Identificador<input required placeholder="p. ej. ollama" pattern="[a-z0-9-]{2,32}" value={id} onChange={(e) => setId(e.target.value.toLowerCase())} /></label>
         <label>Nombre visible<input maxLength={80} placeholder="p. ej. Ollama local" value={label} onChange={(e) => setLabel(e.target.value)} /></label>
         <label>URL base<input required type="url" maxLength={500} placeholder="http://localhost:11434/v1" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} /></label>
-        <label>Clave (opcional)<input type="password" autoComplete="off" value={apiKey} onChange={(e) => setApiKey(e.target.value)} /></label>
+        <label>Clave (opcional)<input name="new-provider-api-key" type="password" autoComplete="new-password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} /></label>
       </fieldset>
       {error && <div className="error-box">{error}</div>}
       <div className="row">

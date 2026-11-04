@@ -1,6 +1,6 @@
 import { meanOf, sampleBeta } from "../domain/bandit.js";
 import { costUsd, type ModelInfo, type ModelScope } from "../domain/models.js";
-import { ModelCallError, textOf, type Effort, type LlmRequest } from "../domain/messages.js";
+import { estimateRequestTokens, ModelCallError, textOf, type Effort, type LlmRequest } from "../domain/messages.js";
 import { NoModelError, type Role, type Mode, type Intent, type Domain, type Features, type AnalysisContext, type PickInput, type Candidate, type Pick, type CallOptions, type CallResult } from "../domain/routing.js";
 import type { ModelRouterPorts } from "../ports/ModelRouterPorts.js";
 
@@ -135,17 +135,30 @@ async function analyzeRequest(scope: ModelScope, text: string, ctx: AnalysisCont
  * Expensive models only explore once they have a few uses, so sampling noise alone never
  * picks a pricey model for cheap work.
  */
-async function pick(scope: ModelScope, role: Role, f: PickInput, opts: { exclude?: Set<string>; rand?: () => number } = {}): Promise<Pick> {
+async function pick(scope: ModelScope, role: Role, f: PickInput, opts: { exclude?: Set<string>; rand?: () => number; requiredContext?: number } = {}): Promise<Pick> {
   const profile = ROLES[role];
   const needsTools = f.needsTools ?? profile.needsTools;
   const mode = await projectMode(scope.projectId);
   const estIn = profile.estIn * (f.complexity >= 4 ? 1.6 : 1);
-  const candidates = (await allowedModels(scope)).filter(
-    (m) => !opts.exclude?.has(m.id) && (!needsTools || m.tools) && (!f.needsVision || m.vision) && m.context >= Math.min(estIn * 2, 128_000),
+  // Role estimates describe a whole task, not the prompt of one call.
+  const requiredContext = opts.requiredContext ?? maxTokensFor(role) + 1024;
+  const allowed = await allowedModels(scope);
+  const candidates = allowed.filter(
+    (m) => !opts.exclude?.has(m.id) && (!needsTools || m.tools) && (!f.needsVision || m.vision) && m.context >= requiredContext,
   );
   if (!candidates.length) {
     throw new NoModelError(
-      `No hay ningún modelo permitido que sirva para «${role}»${f.needsVision ? " con imágenes" : ""}. Revisa la lista de modelos en Ajustes → Modelos.`,
+      `No hay ningún modelo permitido que sirva para «${role}»${f.needsVision ? " con imágenes" : ""}. ${
+        !allowed.length ? "No hay modelos habilitados y permitidos con un proveedor disponible." : allowed.map((m) => {
+          const reasons = [
+            opts.exclude?.has(m.id) ? "excluido tras un fallo o por la petición" : "",
+            needsTools && !m.tools ? "sin herramientas" : "",
+            f.needsVision && !m.vision ? "sin visión" : "",
+            m.context < requiredContext ? `contexto ${m.context}; se necesitan al menos ${requiredContext} tokens, incluida la respuesta` : "",
+          ].filter(Boolean);
+          return `${m.label}: ${reasons.join(", ")}`;
+        }).join(" · ")
+      } Revisa proveedores, capacidades, contexto y permisos en Ajustes → Modelos.`,
     );
   }
   const taskClass = taskClassOf(role, f);
@@ -184,12 +197,19 @@ async function callModel(scope: ModelScope, role: Role, f: PickInput, req: LlmRe
   const exclude = new Set(opts.exclude ?? []);
   const failed: string[] = [];
   let next: ModelInfo | undefined = opts.pinned;
+  // Reserve the largest transport default without changing provider-specific output budgets.
+  const maxTokens = req.maxTokens ?? 16_000;
+  const requiredContext = estimateRequestTokens(req) + maxTokens;
+  if (next && next.context < requiredContext) {
+    exclude.add(next.id);
+    next = undefined;
+  }
   for (let attempt = 0; attempt < 4; attempt++) {
     let model = next;
     if (!model) {
-      const p = await pick(scope, role, f, { exclude });
+      const p = await pick(scope, role, f, { exclude, requiredContext });
       model = p.model;
-      if (!opts.pinned || attempt > 0) await logDecision(scope.projectId ?? null, role, p, opts.log);
+      if (model.id !== opts.pinned?.id || attempt > 0) await logDecision(scope.projectId ?? null, role, p, opts.log);
     }
     next = undefined;
     try {
