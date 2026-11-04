@@ -6,7 +6,7 @@ import { createJobs } from "../../../../server/modules/app-services/application/
 import { createAuth } from "../../../../server/modules/app-services/application/auth.js";
 import { createAi } from "../../../../server/modules/app-services/application/ai.js";
 import { createEmail } from "../../../../server/modules/app-services/application/email.js";
-import { createStorage } from "../../../../server/modules/app-services/application/storage.js";
+import { createStorage, MAX_PROJECT_STORAGE_BYTES } from "../../../../server/modules/app-services/application/storage.js";
 import { createSecrets } from "../../../../server/modules/app-services/application/secrets.js";
 import { createAnalytics } from "../../../../server/modules/app-services/application/analytics.js";
 
@@ -50,6 +50,47 @@ describe("app service capability boundaries", () => {
     expect(one).not.toHaveBeenCalled();
   });
 
+  it("enforces a project storage quota before writing files", async () => {
+    const write = vi.fn();
+    const q = vi.fn();
+    const one = vi.fn(async (operation: string) => operation === "storageGet" ? undefined : { bytes: MAX_PROJECT_STORAGE_BYTES });
+    const api = createStorage({
+      one, q, newId: () => "id",
+      files: { extension: () => ".txt", write },
+    } as any);
+
+    await expect(api.putObject("p", new Uint8Array([1]), { filename: "note.txt" }))
+      .rejects.toMatchObject({ status: 413 });
+    expect(write).not.toHaveBeenCalled();
+    expect(q).not.toHaveBeenCalled();
+  });
+
+  it("serializes concurrent uploads so they cannot race past the project quota", async () => {
+    let used = MAX_PROJECT_STORAGE_BYTES - 1;
+    let nextId = 0;
+    const write = vi.fn();
+    const one = vi.fn(async (operation: string) =>
+      operation === "storageGet" ? undefined : { bytes: used },
+    );
+    const q = vi.fn(async (_operation: string, params: unknown[]) => {
+      used += Number(params[4]);
+      return [];
+    });
+    const api = createStorage({
+      one, q, newId: () => String(++nextId),
+      files: { extension: () => ".txt", write },
+    } as any);
+
+    const results = await Promise.allSettled([
+      api.putObject("p", new Uint8Array([1]), { filename: "a.txt" }),
+      api.putObject("p", new Uint8Array([2]), { filename: "b.txt" }),
+    ]);
+
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect(results.filter((result) => result.status === "rejected")).toHaveLength(1);
+    expect(write).toHaveBeenCalledTimes(1);
+  });
+
   it("lets project secrets override integrations and reports decrypt failures without exposing values", async () => {
     const onDecryptError = vi.fn();
     const api = createSecrets({
@@ -91,6 +132,59 @@ describe("app service capability boundaries", () => {
     expect(api.realtimeStats("one")).toEqual([]);
     expect(socket.off).toHaveBeenCalledWith("message", expect.any(Function));
     api.stopRealtime();
+    api.stopRealtime();
+  });
+
+  it("limits realtime connections, subscriptions and payload sizes", () => {
+    const api = createRealtime({ maxConnectionsPerProject: 1, maxChannelsPerSocket: 1, maxMessageBytes: 64 });
+    const callbacks: Record<string, (raw?: unknown) => void> = {};
+    const socket = {
+      readyState: 1, send: vi.fn(), close: vi.fn(),
+      on: vi.fn((event, cb) => { callbacks[event] = cb; }), off: vi.fn(),
+    };
+    const rejected = { ...socket, send: vi.fn(), close: vi.fn(), on: vi.fn(), off: vi.fn() };
+
+    api.attachSocket("p", socket);
+    expect(api.attachSocket("p", rejected)).toBe(false);
+    expect(rejected.close).toHaveBeenCalledWith(1013, expect.any(String));
+
+    callbacks.message(JSON.stringify({ type: "subscribe", channel: "one" }));
+    callbacks.message(JSON.stringify({ type: "subscribe", channel: "two" }));
+    expect(socket.send).toHaveBeenCalledWith(expect.stringContaining("error"));
+    expect(() => api.publish("p", "one", "x".repeat(100))).toThrow("grande");
+    callbacks.message(JSON.stringify({ type: "presence:join", channel: "one", data: "0123456789" }));
+    expect(socket.send).toHaveBeenCalledWith(expect.stringContaining("presencia"));
+
+    callbacks.close();
+    expect(api.attachSocket("p", rejected)).toBe(true);
+    api.stopRealtime();
+  });
+
+  it("tracks ephemeral realtime presence and removes it when a socket closes", () => {
+    const api = createRealtime();
+    const makeSocket = () => {
+      const callbacks: Record<string, (raw?: unknown) => void> = {};
+      return {
+        callbacks,
+        socket: {
+          readyState: 1, send: vi.fn(), close: vi.fn(),
+          on: vi.fn((event, cb) => { callbacks[event] = cb; }), off: vi.fn(),
+        },
+      };
+    };
+    const first = makeSocket();
+    api.attachSocket("p", first.socket);
+    first.callbacks.message(JSON.stringify({ type: "subscribe", channel: "room" }));
+    first.callbacks.message(JSON.stringify({ type: "presence:join", channel: "room", data: { name: "Ada" } }));
+
+    const second = makeSocket();
+    api.attachSocket("p", second.socket);
+    second.callbacks.message(JSON.stringify({ type: "subscribe", channel: "room" }));
+    expect(second.socket.send).toHaveBeenCalledWith(expect.stringContaining('"action":"sync"'));
+    expect(second.socket.send).toHaveBeenCalledWith(expect.stringContaining('"name":"Ada"'));
+
+    first.callbacks.close();
+    expect(second.socket.send).toHaveBeenCalledWith(expect.stringContaining('"action":"leave"'));
     api.stopRealtime();
   });
 

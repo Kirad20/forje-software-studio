@@ -17,6 +17,10 @@ type Rows = { rows: Record<string, unknown>[]; total: number; columns: Col[]; pr
 
 export function DataPanel({ projectId, projectName, reloadKey }: { projectId: string; projectName: string; reloadKey: number }) {
   const schema = useLoad<{ tables: Record<string, Col[]>; awake: boolean }>(`/projects/${projectId}/db/schema?internal=1`, [reloadKey]);
+  const metrics = useLoad<{ active: boolean; opens: number; openFailures: number; closes: number; operations: number; failedOperations: number; openMs: number; queueWaitMs: number; operationMs: number }>(
+    `/projects/${projectId}/db/metrics`,
+    [reloadKey],
+  );
   const [opened, setOpened] = useState(false);
   const [table, setTable] = useState<string>("");
   const [page, setPage] = useState(0);
@@ -65,6 +69,11 @@ export function DataPanel({ projectId, projectName, reloadKey }: { projectId: st
           <span className="small muted">
             {names.filter((n) => !n.startsWith("_")).length} tablas · {schema.data.awake ? "despierta" : "dormida"}
           </span>
+          {metrics.data && (
+            <span className="small muted">
+              {metrics.data.operations} consultas · {metrics.data.queueWaitMs} ms en cola · {metrics.data.openFailures} fallos al abrir
+            </span>
+          )}
           <a href="#" className="small" onClick={(e) => (e.preventDefault(), setOpened(true))}>
             Ver datos →
           </a>
@@ -692,7 +701,7 @@ export function PaymentsPanel({ projectId }: { projectId: string }) {
 // --- Storage ---------------------------------------------------------------------------------
 
 export function StoragePanel({ projectId, reloadKey }: { projectId: string; reloadKey: number }) {
-  const store = useLoad<{ objects: { key: string; filename: string; contentType: string; size: number; createdAt: string }[]; bytes: number }>(
+  const store = useLoad<{ objects: { key: string; filename: string; contentType: string; size: number; createdAt: string }[]; bytes: number; quotaBytes: number }>(
     `/projects/${projectId}/storage`,
     [reloadKey],
   );
@@ -700,7 +709,7 @@ export function StoragePanel({ projectId, reloadKey }: { projectId: string; relo
   const [section, setSection] = useState<"uploads" | "static">("uploads");
   if (!store.data || !files.data) return <Loading error={store.error || files.error} />;
   const statics = files.data.files.filter((f) => f.path.startsWith("static/") && !f.path.startsWith("static/__dev/"));
-  const LIMIT = 100 * 1024 * 1024;
+  const LIMIT = store.data.quotaBytes;
   return (
     <div className="two-col" style={{ gridTemplateColumns: "240px 1fr" }}>
       <div className="list" style={{ padding: 12, display: "grid", alignContent: "start", gap: 6 }}>
@@ -719,7 +728,7 @@ export function StoragePanel({ projectId, reloadKey }: { projectId: string; relo
           <div className="meter-bar">
             <div style={{ width: `${Math.min(100, (store.data.bytes / LIMIT) * 100)}%` }} />
           </div>
-          <span className="small muted">{bytes(store.data.bytes)} subidos · 100 MB por archivo</span>
+          <span className="small muted">{bytes(store.data.bytes)} de {bytes(LIMIT)} · 100 MB por archivo</span>
         </div>
       </div>
       <div style={{ overflow: "auto", padding: 18 }}>

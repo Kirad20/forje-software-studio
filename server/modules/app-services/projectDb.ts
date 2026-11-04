@@ -1,5 +1,5 @@
 export type { ProjectDb } from "./ports/database.js";
-export { projectDb, execSql, dumpDatabase, closeProject, cloneDatabase, closeAll, isAwake } from "./infrastructure/projectDb.js";
+export { projectDb, execSql, dumpDatabase, closeProject, cloneDatabase, closeAll, isAwake, projectDbMetrics } from "./infrastructure/projectDb.js";
 import { schemaRows } from "./infrastructure/repositories.js";
 import { createProjectData } from "./application/projectData.js";
 export { createProjectData } from "./application/projectData.js";

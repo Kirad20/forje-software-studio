@@ -8,6 +8,7 @@ import {
   dumpDatabase,
   execSql,
   isAwake,
+  projectDbMetrics,
   listProjectRows,
   createProjectRow,
   deleteProjectRows,
@@ -17,7 +18,7 @@ import {
 } from "../../modules/app-services/projectDb.js";
 import { realtimeStats } from "../../modules/app-services/realtime.js";
 import { deleteSecret, listSecrets, setSecret } from "../../modules/app-services/secrets.js";
-import { deleteObject, listObjects, storageUsage } from "../../modules/app-services/storage.js";
+import { deleteObject, listObjects, MAX_PROJECT_STORAGE_BYTES, storageUsage } from "../../modules/app-services/storage.js";
 import { BuilderServiceClient, listTasks, loadHistory, type AgentEvent } from "../../modules/builder/index.js";
 import { isBuilding, penalizeTurn, pendingPlan, runBuilderTurn, stopBuilding, type ChatMode } from "../../modules/builder/index.js";
 import { replaceVisibleText } from "../../modules/builder/contracts.js";
@@ -60,7 +61,7 @@ import {
 import { usageSummary } from "../../modules/usage/usage.js";
 import { createPlatformModelManagement, type ModelInfo } from "../../modules/model-management/index.js";
 import { TOOL_HINTS } from "../mcp/server.js";
-import { clientIp, isHttps, rateLimit, RateLimitError, requestOrigin, studioOrigins } from "../../shared/security.js";
+import { clientIp, isHttps, rateLimit, RateLimitError, RateLimitStoreError, requestOrigin, studioOrigins } from "../../shared/security.js";
 
 type Env = { Variables: { account: PublicAccount; project: Project; access: Access; orgRole: OrgRole } };
 type StudioApiModules = {
@@ -84,6 +85,7 @@ const publicRoutes = new Hono<Env>();
 
 studioApi.onError((err, c) => {
   if (err instanceof RateLimitError) return c.json({ error: err.message }, 429, { "retry-after": String(err.retryAfterSec) });
+  if (err instanceof RateLimitStoreError) return c.json({ error: err.message }, 503);
   return c.json({ error: err.message }, 400);
 });
 
@@ -143,7 +145,7 @@ publicRoutes.get("/auth/status", async (c) => c.json({ needsSetup: await account
 /** First run: the one-time token from the server log creates the first administrator. */
 publicRoutes.post("/auth/setup", async (c) => {
   const body = await c.req.json<{ token: string; email: string; password: string; name?: string }>();
-  rateLimit(`setup-ip:${ipOf(c)}`, 5, 15 * 60_000);
+  await rateLimit(`setup-ip:${ipOf(c)}`, 5, 15 * 60_000);
   startSession(c, await accounts.completeSetup(body));
   return c.json({ ok: true });
 });
@@ -151,8 +153,8 @@ publicRoutes.post("/auth/setup", async (c) => {
 publicRoutes.post("/auth/login", async (c) => {
   const { email, password } = await c.req.json<{ email: string; password: string }>();
   if (!validEmail(email) || typeof password !== "string") return c.json({ error: "Correo o contraseña incorrectos" }, 401);
-  rateLimit(`pw-ip:${ipOf(c)}`, 30, 15 * 60_000);
-  rateLimit(`pw-email:${email.toLowerCase()}`, 10, 15 * 60_000);
+  await rateLimit(`pw-ip:${ipOf(c)}`, 30, 15 * 60_000);
+  await rateLimit(`pw-email:${email.toLowerCase()}`, 10, 15 * 60_000);
   const token = await accounts.loginWithPassword(email, password);
   if (!token) return c.json({ error: "Correo o contraseña incorrectos" }, 401);
   startSession(c, token);
@@ -162,8 +164,8 @@ publicRoutes.post("/auth/login", async (c) => {
 publicRoutes.post("/auth/request", async (c) => {
   const { email } = await c.req.json<{ email: string }>();
   if (!validEmail(email)) return c.json({ error: "Correo no válido" }, 400);
-  rateLimit(`login-ip:${ipOf(c)}`, 20, 15 * 60_000);
-  rateLimit(`login-email:${email.toLowerCase()}`, 5, 15 * 60_000);
+  await rateLimit(`login-ip:${ipOf(c)}`, 20, 15 * 60_000);
+  await rateLimit(`login-email:${email.toLowerCase()}`, 5, 15 * 60_000);
   // Same answer whether or not a code went out, so this cannot be used to probe who has an account.
   if (await accounts.canSignUp(email)) await accounts.requestLoginCode(email);
   return c.json({ ok: true, hint: "Si el correo puede entrar, recibirá un código. Sin SMTP configurado, el código está en la consola del servidor." });
@@ -171,7 +173,7 @@ publicRoutes.post("/auth/request", async (c) => {
 
 publicRoutes.post("/auth/verify", async (c) => {
   const { email, code } = await c.req.json<{ email: string; code: string }>();
-  rateLimit(`verify-ip:${ipOf(c)}`, 30, 15 * 60_000);
+  await rateLimit(`verify-ip:${ipOf(c)}`, 30, 15 * 60_000);
   const token = await accounts.verifyLoginCode(email, code);
   if (!token) return c.json({ error: "Código incorrecto o caducado" }, 401);
   startSession(c, token);
@@ -181,15 +183,15 @@ publicRoutes.post("/auth/verify", async (c) => {
 publicRoutes.post("/auth/password/forgot", async (c) => {
   const { email } = await c.req.json<{ email: string }>();
   if (!validEmail(email)) return c.json({ error: "Correo no válido" }, 400);
-  rateLimit(`reset-ip:${ipOf(c)}`, 10, 15 * 60_000);
-  rateLimit(`reset-email:${email.toLowerCase()}`, 3, 15 * 60_000);
+  await rateLimit(`reset-ip:${ipOf(c)}`, 10, 15 * 60_000);
+  await rateLimit(`reset-email:${email.toLowerCase()}`, 3, 15 * 60_000);
   await accounts.requestPasswordReset(email);
   return c.json({ ok: true, hint: "Si el correo tiene cuenta, recibirá un código. Sin SMTP configurado, está en la consola del servidor." });
 });
 
 publicRoutes.post("/auth/password/reset", async (c) => {
   const { email, code, password } = await c.req.json<{ email: string; code: string; password: string }>();
-  rateLimit(`reset-verify-ip:${ipOf(c)}`, 20, 15 * 60_000);
+  await rateLimit(`reset-verify-ip:${ipOf(c)}`, 20, 15 * 60_000);
   if (!(await accounts.resetPassword(email ?? "", code, password))) return c.json({ error: "Código incorrecto o caducado" }, 401);
   return c.json({ ok: true });
 });
@@ -235,7 +237,7 @@ accountRoutes.get("/me/security", async (c) => {
 accountRoutes.put("/me/password", async (c) => {
   const account = c.get("account");
   const { current, password } = await c.req.json<{ current?: string; password: string }>();
-  rateLimit(`pw-change:${account.id}`, 5, 15 * 60_000);
+  await rateLimit(`pw-change:${account.id}`, 5, 15 * 60_000);
   await accounts.changePassword(account.id, current, password, account.email);
   // Every session ended with the old password; this one continues under a fresh token.
   startSession(c, await accounts.createSession(account.id));
@@ -294,7 +296,7 @@ accountRoutes.put("/models/account", async (c) => {
 });
 accountRoutes.post("/models/sync", async (c) => {
   if (!models.providers.providerSecret("openrouter")) return c.json({ error: "Configura OpenRouter en Administración → Proveedores para sincronizar el catálogo." }, 400);
-  rateLimit(`sync:${c.get("account").id}`, 3, 60 * 60_000);
+  await rateLimit(`sync:${c.get("account").id}`, 3, 60 * 60_000);
   return c.json({ synced: await models.sync.syncOpenRouter() });
 });
 
@@ -302,7 +304,7 @@ accountRoutes.post("/models/sync", async (c) => {
 accountRoutes.get("/github", async (c) => c.json(await github.accountStatus(c.get("account").id)));
 accountRoutes.post("/github/token", async (c) => {
   const { token } = await c.req.json<{ token: string }>();
-  rateLimit(`github-token:${c.get("account").id}`, 10, 60 * 60_000);
+  await rateLimit(`github-token:${c.get("account").id}`, 10, 60 * 60_000);
   try {
     return c.json(await github.connectAccount(c.get("account").id, String(token ?? "")));
   } catch (e) {
@@ -648,7 +650,7 @@ projectRoutes.post("/projects/:id/github", async (c) => {
   const denied = ownerOnly(c);
   if (denied) return denied;
   const body = await c.req.json<{ mode: "create" | "link"; name?: string; private?: boolean; repo?: string; branch?: string }>();
-  rateLimit(`github-link:${c.get("account").id}`, 10, 60 * 60_000);
+  await rateLimit(`github-link:${c.get("account").id}`, 10, 60 * 60_000);
   try {
     const result =
       body.mode === "link"
@@ -661,7 +663,7 @@ projectRoutes.post("/projects/:id/github", async (c) => {
   }
 });
 projectRoutes.post("/projects/:id/github/sync", async (c) => {
-  rateLimit(`github-sync:${pid(c)}`, 30, 10 * 60_000);
+  await rateLimit(`github-sync:${pid(c)}`, 30, 10 * 60_000);
   try {
     const result = await github.syncProject(pid(c), { message: "Sincronización manual desde Forja" });
     return c.json({ link: await github.getLink(pid(c)), result });
@@ -685,7 +687,7 @@ projectRoutes.post("/projects/:id/members", async (c) => {
   const denied = ownerOnly(c);
   if (denied) return denied;
   const { email } = await c.req.json<{ email: string }>();
-  rateLimit(`invite:${c.get("account").id}`, 30, 60 * 60_000);
+  await rateLimit(`invite:${c.get("account").id}`, 30, 60 * 60_000);
   return c.json(await orgs.inviteMember(c.get("project"), c.get("account").email, email ?? ""));
 });
 projectRoutes.delete("/projects/:id/members/:who", async (c) => {
@@ -922,13 +924,14 @@ projectRoutes.get("/projects/:id/db/export", async (c) => {
     },
   });
 });
+projectRoutes.get("/projects/:id/db/metrics", async (c) => c.json(await projectDbMetrics(pid(c))));
 
 // App users
 projectRoutes.get("/projects/:id/users", async (c) => c.json({ users: await listAppUsers(pid(c)) }));
 
 // Storage
 projectRoutes.get("/projects/:id/storage", async (c) =>
-  c.json({ objects: await listObjects(pid(c)), bytes: await storageUsage(pid(c)), origin: previewOrigin(pid(c)) }),
+  c.json({ objects: await listObjects(pid(c)), bytes: await storageUsage(pid(c)), quotaBytes: MAX_PROJECT_STORAGE_BYTES, origin: previewOrigin(pid(c)) }),
 );
 projectRoutes.delete("/projects/:id/storage/:key{.+}", async (c) => {
   await deleteObject(pid(c), c.req.param("key"));

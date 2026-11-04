@@ -87,4 +87,33 @@ describe("injected SDK workflows", () => {
     unsubscribe();
     expect(sockets[1]!.send).toHaveBeenLastCalledWith('{"type":"unsubscribe","channel":"todos"}');
   });
+
+  it("tracks realtime presence and delivers presence events separately from data", () => {
+    const socket = {
+      readyState: 0, send: vi.fn(), addEventListener: vi.fn(),
+      onopen: null, onmessage: null, onclose: null,
+    } as unknown as WebSocket;
+    const client = createClient(transport(), {
+      url: () => "wss://example/realtime",
+      connect: () => socket,
+      schedule: vi.fn(),
+    });
+    const handler = vi.fn();
+    const unsubscribe = client.realtime!.subscribePresence("room", handler);
+    const untrack = client.realtime!.track("room", { name: "Ada" });
+
+    Object.assign(socket, { readyState: 1 });
+    socket.onopen!(new Event("open"));
+    expect(socket.send).toHaveBeenCalledWith('{"type":"subscribe","channel":"room"}');
+    expect(socket.send).toHaveBeenCalledWith('{"type":"presence:join","channel":"room","data":{"name":"Ada"}}');
+    socket.onmessage!(new MessageEvent("message", {
+      data: '{"type":"presence","channel":"room","action":"join","clientId":"client","state":{"name":"Lin"}}',
+    }));
+    expect(handler).toHaveBeenCalledWith(expect.objectContaining({ action: "join", state: { name: "Lin" } }));
+
+    untrack();
+    unsubscribe();
+    expect(socket.send).toHaveBeenCalledWith('{"type":"presence:leave","channel":"room"}');
+    expect(socket.send).toHaveBeenLastCalledWith('{"type":"unsubscribe","channel":"room"}');
+  });
 });

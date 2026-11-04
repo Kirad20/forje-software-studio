@@ -74,6 +74,10 @@ export class ProjectDbClient {
     return this.request<boolean>(`${encodeURIComponent(projectId)}/awake`, {});
   }
 
+  metrics<T = Record<string, unknown>>(projectId: string): Promise<T> {
+    return this.request<T>(`${encodeURIComponent(projectId)}/metrics`, {});
+  }
+
   private async request<T>(path: string, body: unknown): Promise<T> {
     const response = await fetch(`${this.baseUrl}/internal/data/${path}`, {
       method: "POST",

@@ -12,6 +12,7 @@ interface AppDataPorts {
   cloneDatabase(fromProjectId: string, toProjectId: string): Promise<void>;
   closeAll(): Promise<void>;
   isAwake(projectId: string): boolean | Promise<boolean>;
+  dbMetrics(projectId: string): unknown | Promise<unknown>;
 }
 
 interface TransactionSession {
@@ -67,6 +68,7 @@ export function createAppDataService(ports: AppDataPorts, token: string) {
     return c.json({ ok: true });
   });
   app.post("/internal/data/:projectId/awake", async (c) => c.json(await ports.isAwake(c.req.param("projectId"))));
+  app.post("/internal/data/:projectId/metrics", async (c) => c.json(await ports.dbMetrics(c.req.param("projectId"))));
   app.post("/internal/data/:projectId/transaction/begin", async (c) => {
     const projectId = c.req.param("projectId");
     const transactionId = randomUUID();

@@ -120,14 +120,28 @@ apps generadas ──▶ app-runtime: pv-<id> (vista previa) / <slug> (publicada
 | Pestaña Data: navegar, SQL, exportar | Datos: tablas, consola SQL, exportar | ✅ (export = tar del data dir, no pg_dump) |
 | Auth email/contraseña, bloqueo, reset con código de 8 dígitos, admin del dueño | Igual | ✅ |
 | Google/Microsoft sign-in gestionado | — | ❌ falta |
-| Storage con CDN, 100 MB/archivo | Disco local, 100 MB/archivo | ✅ (sin CDN) |
+| Storage con CDN, 100 MB/archivo | Disco local, 100 MB/archivo y 1 GB/proyecto | ⚠️ sin CDN/S3 |
 | Correo con sandbox hasta verificar dominio | Igual; SMTP opcional | ⚠️ la verificación DNS es manual (botón) |
 | Correo entrante | Endpoint de ingreso + registro | ⚠️ sin MX real |
-| Floot AI con créditos, interruptor por proyecto | Forja AI: Anthropic u OpenAI-compatible, créditos, interruptor | ✅ (sin imágenes/embeddings/voz) |
+| Floot AI con créditos, interruptor por proyecto | Forja AI: texto y visión en modelos compatibles, créditos, interruptor | ⚠️ sin embeddings/voz |
 | Tareas: background, timers, cron (≥5 min, 10/proyecto, 15 min) | Igual | ✅ |
-| Realtime WebSocket | Canales por proyecto, publish desde servidor y navegador | ✅ (sin presencia) |
+| Realtime WebSocket | Canales por proyecto, publish y presencia efímera; 250 conexiones/proyecto, 50 canales/conexión, 64 KB/mensaje | ✅ (sin fan-out entre réplicas) |
 | Pagos Stripe | `ctx.payments.checkout` con clave propia | ⚠️ sin Stripe Connect ni comisión |
 | Secretos que el agente nunca ve | Cifrados AES-GCM, el agente solo pide nombres | ✅ |
+
+Los límites de abuso de Forja y de las apps se guardan en Postgres y se comparten entre
+procesos; las claves se almacenan como HMAC, no como correos o direcciones IP en claro. Si
+Postgres no está disponible, los endpoints protegidos fallan con `503` en vez de dejar pasar
+la solicitud sin límite. Las apps conservan PGlite local por proyecto: no hay todavía
+réplicas de realtime, backups automáticos/restauración administrada ni opción de Postgres
+gestionado para los datos de cada app. Para recuperación ante pérdida del volumen, configura
+snapshots externos de `DATA_DIR` y prueba su restauración.
+El panel Datos expone `GET /api/projects/:id/db/metrics` con aperturas, errores de inicio,
+tiempo acumulado en cola y duración de operaciones; son acumulados del proceso, no percentiles.
+
+El storage sigue en disco local; la cuota inicial es 1 GB por proyecto y 100 MB por archivo.
+OAuth de Google/Microsoft, entrega entrante con MX real, S3/CDN, embeddings/voz, Stripe
+Connect y presencia duradera no están habilitados por estas APIs.
 | Checkpoints: línea de tiempo por cambio con autor, restaurar a cualquier punto | Registro de cambios (Constructor/Tú/Agente MCP), checkpoints con nombre, marca de publicación; restaurar es deshacible | ✅ |
 | Publicar a subdominio, despublicar, app privada | `<slug>.localhost`, privada por token | ✅ |
 | Panel: carpetas, favoritos, estado, orden, lista/cuadrícula, renombrar/duplicar/archivar/borrar | Igual | ✅ |

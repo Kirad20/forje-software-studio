@@ -26,6 +26,7 @@ function databasePorts() {
     cloneDatabase: vi.fn(async () => {}),
     closeAll: vi.fn(async () => {}),
     isAwake: vi.fn(() => true),
+    dbMetrics: vi.fn(() => ({ active: true, opens: 1, openFailures: 0, closes: 0, operations: 2, failedOperations: 0, totalOpenMs: 8, totalQueueMs: 3, totalOperationMs: 5 })),
   };
 }
 
@@ -87,4 +88,18 @@ it("returns the supported database lifecycle operations", async () => {
   expect(ports.closeProject).toHaveBeenCalledWith("project-1");
   expect(ports.cloneDatabase).toHaveBeenCalledWith("project-1", "project-2");
   expect(ports.closeAll).toHaveBeenCalledOnce();
+});
+
+it("exposes project database timing metrics through the internal service", async () => {
+  const ports = databasePorts();
+  const app = createAppDataService(ports, "runtime-secret");
+  const response = await app.request("/internal/data/project-1/metrics", {
+    method: "POST",
+    headers: { authorization: "Bearer runtime-secret", "content-type": "application/json" },
+    body: "{}",
+  });
+
+  expect(response.status).toBe(200);
+  await expect(response.json()).resolves.toMatchObject({ active: true, opens: 1, operations: 2 });
+  expect(ports.dbMetrics).toHaveBeenCalledWith("project-1");
 });

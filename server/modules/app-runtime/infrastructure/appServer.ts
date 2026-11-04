@@ -3,7 +3,7 @@ import { config } from "../../../shared/config.js";
 import { appAiChat, AiUnavailableError } from "../../app-services/ai.js";
 import * as auth from "../../app-services/auth.js";
 import { HttpError, serviceContext, type AppEnv, type EndpointContext } from "../../app-services/context.js";
-import { getObject, putObject } from "../../app-services/storage.js";
+import { getObject, MAX_FILE_BYTES, putObject, StorageLimitError } from "../../app-services/storage.js";
 import { log, projectEvents, watchProblems } from "./observation.js";
 import type { RuntimeEvent } from "../application/ports.js";
 import type { Project } from "../../projects/index.js";
@@ -440,7 +440,7 @@ async function baasRoute(req: Request, t: AppTarget, p: string): Promise<Respons
       "POST log": [120, 60_000],
     };
     const key = `${req.method} ${p}`;
-    if (limits[key]) rateLimit(`app:${pid}:${key}:${ip}`, ...limits[key]!);
+    if (limits[key]) await rateLimit(`app:${pid}:${key}:${ip}`, ...limits[key]!);
     // Auth and AI calls must be JSON: a cross-site form cannot send that without a preflight.
     if ((p.startsWith("auth/") || p === "ai/chat") && req.method === "POST" && !(req.headers.get("content-type") ?? "").includes("application/json")) {
       return json({ error: "Se espera JSON" }, 415);
@@ -469,9 +469,12 @@ async function baasRoute(req: Request, t: AppTarget, p: string): Promise<Respons
       case "POST storage/upload": {
         const user = await auth.userFromSession(pid, token);
         if (!user && t.env === "published") return json({ error: "Inicia sesión para subir archivos." }, 401);
+        const contentLength = Number(req.headers.get("content-length") ?? 0);
+        if (contentLength > MAX_FILE_BYTES + 1024 * 1024) return json({ error: "La petición supera el límite de carga de 100 MB" }, 413);
         const form = await req.formData();
         const file = form.get("file");
         if (!(file instanceof File)) return json({ error: "Falta el archivo" }, 400);
+        if (file.size > MAX_FILE_BYTES) return json({ error: "El archivo supera 100 MB" }, 413);
         const obj = await putObject(pid, new Uint8Array(await file.arrayBuffer()), { filename: file.name, contentType: file.type });
         return json({ ...obj, url: `${t.base}/_baas/storage/files/${encodeURIComponent(obj.key)}` });
       }
@@ -508,6 +511,7 @@ async function baasRoute(req: Request, t: AppTarget, p: string): Promise<Respons
   } catch (e) {
     if (e instanceof RateLimitError) return json({ error: e.message }, 429, { "retry-after": String(e.retryAfterSec) });
     if (e instanceof auth.AuthError) return json({ error: e.message }, e.status);
+    if (e instanceof StorageLimitError) return json({ error: e.message }, e.status);
     if (e instanceof AiUnavailableError) return json({ error: e.message }, 402);
     throw e;
   }
