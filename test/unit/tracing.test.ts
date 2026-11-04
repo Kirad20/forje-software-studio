@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { createLangfuse } from "../../server/modules/builder/index.js";
+import { config } from "../../server/shared/config.js";
+import { createLangfuse, langfuse, reloadLangfuse } from "../../server/modules/builder/index.js";
 
 const usage = { input: 1000, output: 50, cacheRead: 200, cacheWrite: 10 };
 
@@ -59,6 +60,19 @@ describe("Langfuse export", () => {
     const { langfuse } = await import("../../server/modules/builder/index.js");
     expect(langfuse).toBeNull();
     vi.unstubAllEnvs();
+  });
+
+  it("enables tracing after platform settings are loaded", () => {
+    const previous = { ...config.langfuse };
+    try {
+      config.langfuse.publicKey = "pk";
+      config.langfuse.secretKey = "sk";
+      reloadLangfuse();
+      expect(langfuse).not.toBeNull();
+    } finally {
+      Object.assign(config.langfuse, previous);
+      reloadLangfuse();
+    }
   });
 
   it("sends a finished eval case as a trace in the run's session, with one score per measure", async () => {

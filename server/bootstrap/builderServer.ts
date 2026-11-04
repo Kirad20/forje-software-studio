@@ -2,7 +2,7 @@ import { serve } from "@hono/node-server";
 import { config } from "../shared/config.js";
 import { closePlatformDb, platformDb } from "../shared/database/index.js";
 import { createBuilderService } from "../modules/builder/index.js";
-import { builderTools, toolByName, isBuilding, stopBuilding, runBuilderTurn, startSecurityReview, stopBuilder, metricsIdle, langfuse } from "../modules/builder/index.js";
+import { builderTools, toolByName, isBuilding, stopBuilding, runBuilderTurn, startSecurityReview, stopBuilder, metricsIdle, langfuse, reloadLangfuse } from "../modules/builder/index.js";
 import { reloadProviders } from "../modules/model-management/providers.js";
 import { createMonolith } from "./composition.js";
 import { ApplicationLifecycle } from "./ApplicationLifecycle.js";
@@ -15,6 +15,7 @@ const app = createBuilderService({
   reloadSettings: async () => {
     await monolith.settings.loadSettings();
     await reloadProviders();
+    reloadLangfuse();
   },
   startSecurityReview,
   runTurn: (input, emit) => runBuilderTurn(
@@ -65,7 +66,10 @@ const lifecycle = new ApplicationLifecycle([
     stop: closePlatformDb,
   },
   { name: "builder module bindings", start: monolith.startBindings, stop: monolith.stopBindings },
-  { name: "builder settings", start: monolith.settings.start, stop: async () => { monolith.settings.stop(); } },
+  { name: "builder settings", start: async () => {
+    await monolith.settings.start();
+    reloadLangfuse();
+  }, stop: async () => { monolith.settings.stop(); } },
   { name: "builder model management", start: monolith.models.start, stop: monolith.models.stop },
   { name: "builder providers", start: async () => { await reloadProviders(); }, stop: async () => {} },
   { name: "builder runtime event relay", start: async () => {
