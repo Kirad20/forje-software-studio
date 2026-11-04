@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../application/controller.js";
 import { timeAgo } from "../../../shared/presentation/format.js";
+import { useConfirmation } from "../../../shared/ConfirmDialog.js";
 
 interface Stats {
   classes: { taskClass: string; uses: number; models: { modelId: string; alpha: number; beta: number; mean: number; uses: number; usdPerUse: number }[] }[];
@@ -9,6 +10,7 @@ interface Stats {
 
 /** Admin → Enrutador: what the router learned per task class, and the choices it made lately. */
 export function Router() {
+  const { confirm, dialog } = useConfirmation();
   const [stats, setStats] = useState<Stats | null>(null);
   const [note, setNote] = useState("");
   const load = () => api<Stats>("/admin/router/stats").then(setStats);
@@ -17,14 +19,19 @@ export function Router() {
   }, []);
   if (!stats) return <div className="empty"><span className="spinner" /></div>;
   const forget = async (f: { taskClass?: string; modelId?: string }, what: string) => {
-    if (!confirm(`¿Olvidar lo aprendido ${what}? El enrutador vuelve a partir de la calidad declarada de cada modelo.`)) return;
-    const r = await api<{ removed: number }>("/admin/router/reset", { body: f });
-    setNote(`${r.removed} registros olvidados.`);
-    await load();
+    if (!await confirm(`¿Olvidar lo aprendido ${what}? El enrutador vuelve a partir de la calidad declarada de cada modelo.`)) return;
+    try {
+      const r = await api<{ removed: number }>("/admin/router/reset", { body: f });
+      setNote(`${r.removed} registros olvidados.`);
+      await load();
+    } catch (e) {
+      setNote((e as Error).message);
+    }
   };
 
   return (
     <div className="stack" style={{ gap: 16 }}>
+      {dialog}
       <p className="small muted" style={{ margin: 0 }}>
         Para cada tipo de tarea, el enrutador estima la probabilidad de éxito de cada modelo (compila, la revisión aprueba, el dueño conserva el cambio) y la combina con el coste. Olvídalo tras cambiar precios o
         modelos para que vuelva a explorar.

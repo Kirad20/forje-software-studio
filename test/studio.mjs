@@ -643,6 +643,15 @@ async function main() {
     await page.reload();
     card = page.locator("section").filter({ has: page.locator("strong", { hasText: /^Ollama del equipo$/ }) });
     await card.getByText("Cabeceras configuradas: x-team-token").waitFor();
+    const search = page.getByRole("searchbox", { name: "Buscar proveedores" });
+    assert(await search.getAttribute("autocomplete") === "off", "la búsqueda permite autocompletar credenciales");
+    for (let i = 0; i < 3; i++) {
+      await search.fill("proveedor-inexistente");
+      await card.waitFor({ state: "hidden" });
+      await search.fill("");
+      await card.waitFor({ state: "visible" });
+      assert(await search.inputValue() === "", "la búsqueda volvió a rellenarse al limpiarla");
+    }
     assert(!await page.getByText("test-private-header", { exact: false }).count(), "se expuso el valor de una cabecera");
     await card.getByRole("button", { name: "Editar proveedor", exact: true }).click();
     dialog = page.getByRole("dialog", { name: "Editar proveedor" });
@@ -661,6 +670,14 @@ async function main() {
     await page.getByRole("alert").filter({ hasText: "Clave rechazada" }).waitFor();
     assert(await keyInput.inputValue() === "test-replacement", "se borró la clave cuando falló el guardado");
     await page.unroute("**/api/admin/providers/ux-local");
+    await card.getByRole("button", { name: "Guardar", exact: true }).click();
+    await card.getByRole("button", { name: "Quitar", exact: true }).waitFor();
+    await card.getByRole("button", { name: "Quitar", exact: true }).click();
+    await page.getByRole("alertdialog").getByRole("button", { name: "Cancelar", exact: true }).click();
+    await card.getByRole("button", { name: "Quitar", exact: true }).waitFor();
+    await card.getByRole("button", { name: "Quitar", exact: true }).click();
+    await page.getByRole("alertdialog").getByRole("button", { name: "Confirmar", exact: true }).click();
+    await card.getByRole("button", { name: "Quitar", exact: true }).waitFor({ state: "hidden" });
     await card.getByRole("button", { name: "Editar proveedor", exact: true }).click();
     dialog = page.getByRole("dialog", { name: "Editar proveedor" });
     await dialog.getByLabel("Reemplazar cabeceras personalizadas").check();
@@ -668,8 +685,25 @@ async function main() {
     await dialog.getByRole("button", { name: "Guardar cambios" }).click();
     await dialog.getByRole("alert").filter({ hasText: "Cabeceras no válidas" }).waitFor();
     await dialog.getByRole("button", { name: "Cancelar", exact: true }).click();
-    page.once("dialog", (d) => d.accept());
     await card.getByRole("button", { name: "Borrar", exact: true }).click();
+    let confirmation = page.getByRole("alertdialog", { name: "Confirmar acción" });
+    assert(await confirmation.getByRole("button", { name: "Cancelar", exact: true }).evaluate((el) => el === document.activeElement), "la confirmación no enfocó la opción segura");
+    await confirmation.getByRole("button", { name: "Cancelar", exact: true }).click();
+    await confirmation.waitFor({ state: "hidden" });
+    assert(await card.isVisible(), "se borró el proveedor al cancelar");
+    assert(await card.getByRole("button", { name: "Borrar", exact: true }).evaluate((el) => el === document.activeElement), "no se restauró el foco tras cancelar");
+    await page.route("**/api/admin/providers/ux-local", async (route) => {
+      if (route.request().method() === "DELETE") await route.fulfill({ status: 400, json: { error: "No se pudo borrar en la prueba" } });
+      else await route.continue();
+    });
+    await card.getByRole("button", { name: "Borrar", exact: true }).click();
+    confirmation = page.getByRole("alertdialog", { name: "Confirmar acción" });
+    await confirmation.getByRole("button", { name: "Confirmar", exact: true }).click();
+    await card.getByRole("alert").filter({ hasText: "No se pudo borrar" }).waitFor();
+    assert(await card.isVisible(), "se ocultó el proveedor al fallar el borrado");
+    await page.unroute("**/api/admin/providers/ux-local");
+    await card.getByRole("button", { name: "Borrar", exact: true }).click();
+    await page.getByRole("alertdialog").getByRole("button", { name: "Confirmar", exact: true }).click();
     await card.waitFor({ state: "hidden" });
   });
 
@@ -680,8 +714,8 @@ async function main() {
     await page.getByText("No hay cuentas con estos filtros.", { exact: false }).waitFor();
     await page.getByRole("button", { name: "Limpiar filtros", exact: true }).click();
     await page.getByRole("button", { name: `Rol de ${ADMIN.email}: Administración`, exact: true }).click();
-    page.once("dialog", (d) => d.accept());
     await page.getByRole("option", { name: "Usuario", exact: true }).click();
+    await page.getByRole("alertdialog").getByRole("button", { name: "Confirmar", exact: true }).click();
     await page.getByRole("alert").waitFor();
     await page.getByRole("button", { name: `Rol de ${ADMIN.email}: Administración`, exact: true }).waitFor();
   });

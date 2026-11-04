@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { api } from "../application/controller.js";
 import { ApiError } from "../../../shared/infrastructure/http-client.js";
 import { Select, Switch } from "../../../shared/ui.js";
+import { useConfirmation } from "../../../shared/ConfirmDialog.js";
 
 export interface SettingView {
   key: string;
@@ -142,6 +143,7 @@ export function Settings() {
 }
 
 function Field({ s, value, onChange, onSecret, disabled }: { s: SettingView; value: unknown; onChange: (v: unknown) => void; onSecret: (v: string | null) => Promise<boolean>; disabled: boolean }) {
+  const { confirm, dialog } = useConfirmation();
   const [secret, setSecret] = useState("");
   const [editing, setEditing] = useState(false);
   switch (s.type) {
@@ -165,9 +167,10 @@ function Field({ s, value, onChange, onSecret, disabled }: { s: SettingView; val
             <code className="grow">{s.secret.hint ?? "••••••••"}</code>
             {s.secret.broken && <span className="pill err">no se puede descifrar</span>}
             <button disabled={disabled} onClick={() => setEditing(true)}>Cambiar</button>
-            <button disabled={disabled} className="danger" onClick={() => { if (confirm(`¿Quitar ${s.label}?`)) void onSecret(null); }}>
+            <button disabled={disabled} className="danger" onClick={async () => { if (await confirm(`¿Quitar ${s.label}?`)) void onSecret(null); }}>
               Quitar
             </button>
+            {dialog}
           </div>
         );
       return (

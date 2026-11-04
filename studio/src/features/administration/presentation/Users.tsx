@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { api } from "../application/controller.js";
 import { timeAgo } from "../../../shared/presentation/format.js";
 import { Select, Switch } from "../../../shared/ui.js";
+import { useConfirmation } from "../../../shared/ConfirmDialog.js";
 
 interface User {
   id: string;
@@ -15,6 +16,7 @@ interface User {
 
 /** Admin → Usuarios: platform roles and access. Admins manage accounts, never other tenants' projects. */
 export function Users() {
+  const { confirm, dialog } = useConfirmation();
   const [users, setUsers] = useState<User[] | null>(null);
   const [filter, setFilter] = useState("");
   const [error, setError] = useState("");
@@ -44,6 +46,7 @@ export function Users() {
   const currentPage = Math.min(page, pages - 1);
   return (
     <div className="stack" style={{ gap: 12 }}>
+      {dialog}
       <div className="admin-toolbar">
         <input aria-label="Buscar usuarios" placeholder="Buscar por correo o nombre…" value={filter} onChange={(e) => setFilter(e.target.value)} />
         <Select label="Filtrar usuarios por rol" value={role} onValueChange={setRole} style={{ width: 220 }}
@@ -71,16 +74,16 @@ export function Users() {
                 </td>
                 <td>
                   <Select<User["platformRole"]> label={`Rol de ${u.email}`} value={u.platformRole} disabled={pending !== null}
-                    onValueChange={(platformRole) => {
-                      if (platformRole !== u.platformRole && confirm(`¿Cambiar el rol de ${u.email} a ${platformRole === "admin" ? "Administración" : "Usuario"}?`)) void patch(u, { platformRole });
+                    onValueChange={async (platformRole) => {
+                      if (platformRole !== u.platformRole && await confirm(`¿Cambiar el rol de ${u.email} a ${platformRole === "admin" ? "Administración" : "Usuario"}?`)) void patch(u, { platformRole });
                     }} style={{ width: 170 }} searchable={false}
                     options={[{ value: "user", label: "Usuario" }, { value: "admin", label: "Administración" }]} />
                 </td>
                 <td>{u.credits.toLocaleString()}</td>
                 <td>{timeAgo(u.createdAt)}</td>
                 <td>
-                  <Switch on={!u.disabled} disabled={pending !== null} onChange={(on) => {
-                    if (on || confirm(`¿Desactivar el acceso de ${u.email}?`)) void patch(u, { disabled: !on });
+                  <Switch on={!u.disabled} disabled={pending !== null} onChange={async (on) => {
+                    if (on || await confirm(`¿Desactivar el acceso de ${u.email}?`)) void patch(u, { disabled: !on });
                   }} label={`Acceso de ${u.email}`} />
                 </td>
               </tr>

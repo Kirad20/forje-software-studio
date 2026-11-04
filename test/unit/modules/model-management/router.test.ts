@@ -61,6 +61,50 @@ describe("model routing application", () => {
       .toMatchObject({ intent: "style", complexity: 1, needsVision: true, source: "heuristic" });
     expect(ports.invoke).not.toHaveBeenCalled();
   });
+  it("routes short fast requests to 32k local models instead of applying whole-task estimates", async () => {
+    const { ports, router } = setup();
+    ports.allowedModels.mockResolvedValue([{ ...b, context: 32_768, vision: false }]);
+    expect((await router.pick(scope, "fast", { ...features, complexity: 5 })).model.id).toBe("b");
+    const result = await router.callModel(scope, "fast", features, {
+      system: "Build a page", messages: [{ role: "user", content: "Change the title" }],
+    });
+    expect(result.model.id).toBe("b");
+    expect(ports.invoke.mock.calls[0]?.[1].maxTokens).toBeUndefined();
+  });
+  it("counts system, tool schemas and output reserve and reports insufficient capacity", async () => {
+    const { ports, router } = setup();
+    ports.allowedModels.mockResolvedValue([{ ...b, context: 32_768 }]);
+    const req = { system: "x".repeat(40_000), messages: [],
+      tools: [{ name: "write", description: "y".repeat(40_000), input_schema: {} }], maxTokens: 16_000 };
+    await expect(router.callModel(scope, "fast", features, req)).rejects.toThrow(/contexto 32768; se necesitan al menos/);
+    expect(ports.invoke).not.toHaveBeenCalled();
+  });
+  it("switches away from a pinned model that no longer fits without penalizing it", async () => {
+    const { ports, router } = setup();
+    const result = await router.callModel(scope, "fast", features, {
+      messages: [{ role: "user", content: "x".repeat(80_000) }],
+    }, { pinned: { ...a, context: 32_768 } });
+    expect(result.model.id).toBe("b");
+    expect(ports.invoke.mock.calls.map(([m]) => m.id)).toEqual(["b"]);
+    expect(ports.recordOutcome).not.toHaveBeenCalled();
+    expect(ports.logDecision).toHaveBeenCalledTimes(1);
+  });
+  it("counts images as visual tokens rather than base64 text", async () => {
+    const { ports, router } = setup();
+    ports.allowedModels.mockResolvedValue([{ ...b, context: 32_768, tools: false }]);
+    const result = await router.callModel(scope, "qa", { ...features, needsVision: true, needsTools: false }, {
+      messages: [{ role: "user", content: [{ type: "image", source: { type: "base64", media_type: "image/png", data: "x".repeat(400_000) } }] }],
+      maxTokens: 2000,
+    });
+    expect(result.model.id).toBe("b");
+  });
+  it("explains capability and permission failures without relaxing them for local models", async () => {
+    const { ports, router } = setup();
+    ports.allowedModels.mockResolvedValueOnce([{ ...b, tools: false, vision: false }]);
+    await expect(router.pick(scope, "fast", { ...features, needsVision: true })).rejects.toThrow(/b: sin herramientas, sin visión/);
+    ports.allowedModels.mockResolvedValueOnce([]);
+    await expect(router.pick(scope, "fast", features)).rejects.toThrow("No hay modelos habilitados y permitidos");
+  });
   it("allows vision-only judges on fallback without relaxing the QA role default", async () => {
     const { ports, router } = setup();
     ports.allowedModels.mockResolvedValue([{ ...b, tools: false }]);
