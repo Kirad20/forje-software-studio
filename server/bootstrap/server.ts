@@ -203,7 +203,10 @@ const lifecycle = new ApplicationLifecycle([
     await metricsIdle();
     await langfuse?.flush();
   } },
-  { name: "settings", start: monolith.settings.start, stop: async () => { monolith.settings.stop(); } },
+  { name: "settings", start: async () => {
+    await monolith.settings.start();
+    reloadLangfuse();
+  }, stop: async () => { monolith.settings.stop(); } },
   { name: "model management", start: monolith.models.start, stop: monolith.models.stop },
   { name: "installation configuration", start: async () => {
     warnMovedEnv();
