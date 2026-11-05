@@ -12,6 +12,8 @@ import { postgresModelManagementRepository } from "./infrastructure/PostgresMode
 import { routingPorts } from "./infrastructure/routing.js";
 import { createRouterAdministration } from "./application/RouterAdministration.js";
 import { postgresRouterAdministrationRepository } from "./infrastructure/PostgresRouterAdministrationRepository.js";
+import { createModelClassification } from "./application/ModelClassification.js";
+import { recordClassificationUsage } from "./infrastructure/PostgresClassificationUsage.js";
 export { createModelManagementQueries } from "./application/ModelManagementQueries.js";
 export type { ProjectModelPatch, RouterDecisionView, ModelSpendView } from "./domain/management.js";
 export type { ModelManagementRepository } from "./ports/ModelManagementRepository.js";
@@ -21,6 +23,7 @@ export function createPlatformModelManagement(audit?: ModelAudit) {
   const providers = createPlatformProviderService();
   const catalog = createPlatformCatalogService();
   const router = createPlatformModelRouter();
+  const classification = createModelClassification({ catalog, callModel: router.callModel, recordUsage: recordClassificationUsage });
   const sync = createCatalogSync();
   const management = {
     ...createModelManagementQueries(postgresModelManagementRepository, catalog, routingPorts.posteriors),
@@ -59,5 +62,5 @@ export function createPlatformModelManagement(audit?: ModelAudit) {
     unbind();
     starting = undefined;
   };
-  return { providers, catalog, router, sync, management, start, stop };
+  return { providers, catalog, router, classification, sync, management, start, stop };
 }

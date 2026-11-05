@@ -1,6 +1,6 @@
 import { creditsAtRate, matchesModelPolicy, ModelError, validateModelInput, type ModelInfo, type ModelInput, type ModelScope } from "../domain/models.js";
 import type { CatalogRepository } from "../ports/CatalogRepository.js";
-import { classifyProviderModel, type ProviderModel } from "../domain/classification.js";
+import { importedModelInput, type ClassifiedProviderModel } from "../domain/classification.js";
 
 export function createCatalogService(repository: CatalogRepository) {
   const platformAllows = (model: ModelInfo) => matchesModelPolicy(model, repository.policy().allow);
@@ -68,13 +68,13 @@ export function createCatalogService(repository: CatalogRepository) {
     await repository.remove(id);
     await repository.audit(id, actorId, "delete");
   }
-  async function importProviderModels(provider: string, remote: ProviderModel[], actorId: string | null) {
+  async function importProviderModels(provider: string, remote: ClassifiedProviderModel[], actorId: string | null) {
     if (provider === "openrouter") throw new ModelError("Usa la sincronización de OpenRouter.");
     if (!await repository.hasProvider(provider)) throw new ModelError(`No existe el proveedor «${provider}».`);
     const existing = new Set((await repository.list()).map(m => m.id));
     const result = { created: 0, skipped: 0, errors: [] as { model: string; error: string }[] };
     for (const model of remote) {
-      const input = classifyProviderModel(provider, model);
+      const input = importedModelInput(provider, model);
       const id = `${provider}:${model.id.trim()}`;
       if (existing.has(id)) { result.skipped++; continue; }
       try {
