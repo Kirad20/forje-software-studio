@@ -9,7 +9,7 @@ import {
 } from "../../modules/model-management/providers.js";
 import { listProviderModels, probeModel, probeProvider } from "../../modules/model-management/probe.js";
 import { createAdministrationApi, type AdministrationEnv } from "../../modules/administration/index.js";
-import type { IdentityModule, PublicAccount } from "../../modules/identity/index.js";
+import { AdminApiTokenError, type IdentityModule, type PublicAccount } from "../../modules/identity/index.js";
 import type { ProjectsModule } from "../../modules/projects/index.js";
 import type { CollaborationModule } from "../../modules/collaboration/index.js";
 import { GROUPS, SettingsError, type SettingsModule } from "../../modules/settings/index.js";
@@ -42,6 +42,29 @@ export function createAdminApi({ identity, settings, models }: AdminApiModules) 
   const modelRoutes = new Hono<AdministrationEnv>();
   const agentRoutes = new Hono<AdministrationEnv>();
   const routerRoutes = new Hono<AdministrationEnv>();
+  const tokenRoutes = new Hono<AdministrationEnv>();
+
+  tokenRoutes.use("/tokens/*", async (c, next) => {
+    c.header("Cache-Control", "no-store");
+    if (c.get("account").platformRole !== "admin") return c.json({ error: "Solo administradores de la plataforma." }, 403);
+    await next();
+  });
+  tokenRoutes.get("/tokens", async (c) => c.json({ tokens: await identity.listAdminApiTokens(me(c)) }));
+  tokenRoutes.post("/tokens", async (c) => {
+    const input = await body<{ name?: unknown; expiresAt?: unknown }>(c);
+    if (!input || typeof input !== "object" || Array.isArray(input)
+      || typeof input.name !== "string"
+      || (input.expiresAt !== undefined && typeof input.expiresAt !== "string")) {
+      return c.json({ error: "Se espera un nombre y una fecha de caducidad válida." }, 400);
+    }
+    const created = await identity.createAdminApiToken(me(c), input.name,
+      input.expiresAt === undefined ? undefined : new Date(input.expiresAt as string));
+    return c.json(created, 201);
+  });
+  tokenRoutes.delete("/tokens/:id", async (c) => {
+    await identity.revokeAdminApiToken(me(c), c.req.param("id"));
+    return c.json({ ok: true });
+  });
 
   accountRoutes.get("/users", async (c) => c.json({ users: await identity.listAccounts(EVAL_EMAIL) }));
   accountRoutes.patch("/users/:id", async (c) => {
@@ -167,8 +190,10 @@ export function createAdminApi({ identity, settings, models }: AdminApiModules) 
     models: modelRoutes,
     agents: agentRoutes,
     router: routerRoutes,
+    tokens: tokenRoutes,
   });
   api.onError((error, c) => {
+    if (error instanceof AdminApiTokenError) return c.json({ error: error.message }, error.status);
     if (error instanceof RateLimitError) return c.json({ error: error.message }, 429, { "retry-after": String(error.retryAfterSec) });
     if (error instanceof RateLimitStoreError) return c.json({ error: error.message }, 503);
     if (error instanceof SettingsError) return c.json({ error: error.message, field: error.field }, 400);

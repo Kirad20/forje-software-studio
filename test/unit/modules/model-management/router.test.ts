@@ -27,6 +27,24 @@ function setup() {
   return { ports, router: createModelRouter(ports) };
 }
 describe("model routing application", () => {
+  it("preserves provider failures when retries exhaust the remaining eligible models", async () => {
+    const { ports, router } = setup();
+    ports.allowedModels.mockResolvedValue([{ ...b, context: 128000 }]);
+    ports.invoke.mockRejectedValueOnce(new ModelCallError("503: No available accounts", true, 503));
+    await expect(router.callModel(scope, "fast", features, { messages: [], maxTokens: 16000 }))
+      .rejects.toMatchObject({
+        retryable: false,
+        message: expect.stringContaining("Ningún modelo pudo responder: b: 503: No available accounts"),
+      });
+    expect(ports.invoke).toHaveBeenCalledTimes(1);
+  });
+  it("keeps initial eligibility failures distinct from provider failures", async () => {
+    const { ports, router } = setup();
+    ports.allowedModels.mockResolvedValue([]);
+    await expect(router.callModel(scope, "fast", features, { messages: [] }))
+      .rejects.toThrow("No hay modelos habilitados y permitidos");
+    expect(ports.invoke).not.toHaveBeenCalled();
+  });
   it("retries a pinned provider failure, excludes it, records the weak signal and bills only the success", async () => {
     const { ports, router } = setup();
     ports.invoke.mockRejectedValueOnce(new ModelCallError("overloaded", true));

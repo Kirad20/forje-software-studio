@@ -117,6 +117,13 @@ export function createBuilderService(ports: BuilderServicePorts, token: string) 
     if (!parsed.success) return c.json({ error: "Invalid builder turn", issues: parsed.error.issues }, 400);
     const input = parsed.data as BuilderTurnInput;
     if (ports.isBuilding(input.projectId) || activeStreams.has(input.projectId)) return c.json({ error: "El constructor ya está trabajando" }, 409);
+    try {
+      await ports.reloadSettings();
+    } catch (error) {
+      console.error("[builder] configuration reload before turn:", error);
+      return c.json({ error: "No se pudo actualizar la configuración del constructor. Reintenta cuando el servicio esté disponible." }, 503);
+    }
+    if (ports.isBuilding(input.projectId) || activeStreams.has(input.projectId)) return c.json({ error: "El constructor ya está trabajando" }, 409);
 
     const encoder = new TextEncoder();
     const active: ActiveBuilderStream = { events: [], subscribers: new Set() };
