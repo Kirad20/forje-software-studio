@@ -11,7 +11,7 @@ import type { Project } from "../../projects/index.js";
 import { formatProblem } from "../../app-runtime/index.js";
 import { typecheckProject } from "../../app-runtime/index.js";
 import { skillIndex } from "./skills.js";
-import { criteriaOf, CONTRACT_FILE, planOverview } from "../domain/Plan.js";
+import { criteriaOf, CONTRACT_FILE, PLAN_DOC, checkPlanDoc, planOverview } from "../domain/Plan.js";
 import { runAgent } from "./AgentExecutionAdapter.js";
 import { imageBlocks, save, UPLOADS } from "./SqlChatHistoryAdapter.js";
 import type { AgentEvent, AgentExecutionResult } from "../domain/AgentExecution.js";
@@ -462,13 +462,17 @@ async function runTeam(s: TurnState, opts: { given?: Plan; planOnly?: boolean } 
       required: ["summary", "contract", "tasks"],
     },
     async run(input) {
+      const docErrors = checkPlanDoc((await readAllFiles(s.project.id))[PLAN_DOC]);
       const checked = await new CheckPlanUseCase({
         compile: async contract => {
           const files = { ...(await readAllFiles(s.project.id)), [CONTRACT_FILE]: contract };
           return (await typecheckProject(files)).filter(p => p.file === CONTRACT_FILE).slice(0, 8).map(p => `${CONTRACT_FILE}: ${formatProblem(p)}`);
         },
       }).execute(input);
-      if (!checked.plan) throw new Error(`Plan rechazado (${checked.errors.length}):\n${checked.errors.map((error, i) => `${i + 1}. ${error}`).join("\n")}\nCorrige todo y vuelve a llamar a submit_plan.`);
+      if (!checked.plan || docErrors.length) {
+        const errors = [...docErrors, ...checked.errors];
+        throw new Error(`Plan rechazado (${errors.length}):\n${errors.map((error, i) => `${i + 1}. ${error}`).join("\n")}\nCorrige todo y vuelve a llamar a submit_plan.`);
+      }
       plan = checked.plan;
       return `Plan aceptado: ${plan.tasks.length} tareas. Termina ahora con un mensaje corto.`;
     },
@@ -513,8 +517,10 @@ async function runTeam(s: TurnState, opts: { given?: Plan; planOnly?: boolean } 
       [s.project.id, s.turnId, JSON.stringify(finalPlan)],
     );
     const ROLE_ES: Record<SpecialistRole, string> = { data: "Datos", backend: "Backend", ui: "Interfaz" };
+    const planDoc = (await readAllFiles(s.project.id))[PLAN_DOC];
     const text = [
       finalPlan.summary,
+      planDoc ? `**Plan de implementación** (\`${PLAN_DOC}\`)\n${planDoc.slice(0, 6000)}${planDoc.length > 6000 ? `\n… (completo en ${PLAN_DOC})` : ""}` : "",
       finalPlan.tasks
         .map((t, i) => `${i + 1}. **${ROLE_ES[t.role]}** — ${t.goal.split("\n")[0]!.slice(0, 240)}${t.dependsOn.length ? ` (después de ${t.dependsOn.join(", ")})` : ""}`)
         .join("\n"),
@@ -542,7 +548,7 @@ async function runTeam(s: TurnState, opts: { given?: Plan; planOnly?: boolean } 
     const current = await readAllFiles(s.project.id);
     const preload = selectContext(current, `${t.goal}\n${finalPlan.contract}`, t.files, 30_000);
     const ctx: ToolContext = { account: s.account, projectId: s.project.id, author: "builder", owned: t.files, ownerMessage: s.request };
-    const projectDocs = ["static/__dev/design.md", "static/__dev/architecture.md"]
+    const projectDocs = [PLAN_DOC, "static/__dev/design.md", "static/__dev/architecture.md"]
       .map((path) => current[path] && `## ${path}\n${current[path]}`)
       .filter((doc): doc is string => Boolean(doc))
       .join("\n\n");
@@ -556,7 +562,7 @@ async function runTeam(s: TurnState, opts: { given?: Plan; planOnly?: boolean } 
       task: { id: t.id, role: t.role, goal: t.goal, files: t.files, acceptanceCriteria: criteriaOf(t) },
       correctionContext: extra,
       firstBuildGuidance: isNewApp(s) && !extra && t.role !== "backend" ? FIRST_BUILD : "",
-      projectDocumentationInstructions: "Respeta el diseño y la arquitectura vigentes. Antes de cambiar decisiones de UI o estructura, lee los documentos completos con read_files. El planificador actualiza estas notas compartidas.",
+      projectDocumentationInstructions: "Sigue el plan de implementación (static/__dev/plan.md) y respeta el diseño y la arquitectura vigentes. Antes de cambiar decisiones de UI o estructura, lee los documentos completos con read_files. El planificador actualiza estas notas compartidas.",
       projectDocs,
       projectMap: projectMap(current, await describeSchema(s.project.id, true)),
       relevantFiles: preloadSection(current, preload),
@@ -633,6 +639,7 @@ async function runTeam(s: TurnState, opts: { given?: Plan; planOnly?: boolean } 
               ownerRequest: s.request,
               projectContext: head,
               plan: overview,
+              implementationPlan: (await readAllFiles(s.project.id))[PLAN_DOC]?.slice(0, 20_000) ?? null,
               acceptanceCriteria: finalPlan.tasks.map(t => ({ id: t.id, criteria: criteriaOf(t) })),
               contract: { path: CONTRACT_FILE, source: finalPlan.contract },
               specialistReports: reports,

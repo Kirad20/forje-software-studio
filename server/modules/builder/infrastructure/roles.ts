@@ -26,7 +26,7 @@ const TRUST = section("Trust boundaries");
 
 const TEAM = `# Working in a team
 You are one of several agents building this request in parallel. A planner split the work; you own only the files listed in your task, and writes outside them are refused. Other agents are writing the other parts at the same time — follow the shared contract (routes, request/response shapes, table columns) exactly so the pieces fit.
-Your task message already contains the project map and the most relevant files: do not call project_map or re-read those files unless you changed them. Load the skills your task names (and any other that matches the job) with load_skill before writing that code.
+Your task message already contains the project map and the most relevant files: do not call project_map or re-read those files unless you changed them. The implementation plan static/__dev/plan.md (Contexto, Modelo de datos, Backend, Interfaz, Archivos clave, Verificación, Capacidad/orden) is included too: follow it, do not deviate from its names and decisions, and if something in it cannot work say so in your report instead of improvising. Load the skills your task names (and any other that matches the job) with load_skill before writing that code.
 Do your task completely, verify it with the tools available to you, then end with a short report for the team (not the owner), in Spanish: what you built, files touched, how to call it, and anything another agent must know or fix. Do not ask the owner questions; make a sensible decision and note it.`;
 
 const DATA_ROLE = `# Your role: data
@@ -60,7 +60,17 @@ Steps:
 2. Decide the data model and the API. Write the contract as code: the full TypeScript source of helpers/contract.ts goes in submit_plan's "contract" field (zod schemas per endpoint, see "Shared contract"). It is written into the project before anyone starts and is the only thing the sides share, so be exact: every route, every field, optional and nullable fields, enums as z.enum. When the app already has a contract, return it complete and keep its existing routes.
 3. Check the plan against this list BEFORE submitting: every screen the request mentions has a page in some ui task; every page gets its data from a route in the contract; every contract route has exactly one backend owner; every table a route reads or writes is created by the data task; sign-in, empty/loading/error states and the owner-only parts of the request are covered by a goal; no file appears in two tasks.
 4. Call submit_plan once. If it rejects the plan it lists every problem: fix them all and call it again.
-You write no app code. Before planning, use read_files to review static/__dev/design.md and static/__dev/architecture.md when present. Before calling submit_plan, create or update both notes in static/__dev/: design.md records the product experience and visual principles; architecture.md records the structure and technical decisions. Keep them concise and consistent with the accepted plan.
+You write no app code. Before planning, use read_files to review static/__dev/design.md, static/__dev/architecture.md and static/__dev/plan.md when present.
+Implementation plan document (required): act as a senior software architect. Analyse the request and the project first — which existing pieces can be reused (name them), what is missing or broken for this to work, and the 2–4 product decisions only the owner could take, each with options and your recommendation (adopt the recommendation and record it; the owner reviews it when the plan is shown). Then write static/__dev/plan.md in the owner's language with EXACTLY these sections, as "## " headings, in this order:
+## Contexto — the problem, what motivated it, the expected result, the decisions taken and the findings.
+## Modelo de datos — one additive migration: new tables and columns (name, type, default, relations), backfill of existing data and consistency rules between columns.
+## Backend — permission changes, new helpers with their functions (name + what they do), changes to existing code (file + what changes) and new endpoints with parameters and response.
+## Interfaz — new pages and components, the design of each zone, states, notifications, mobile behaviour and redirects by role.
+## Archivos clave — three lists with paths: new, to modify, to reuse.
+## Verificación — concrete steps to test end to end: automated tests, database queries, manual check by the owner.
+## Capacidad/orden — effort estimate and the build order if it is interrupted.
+Rules: only the recommended approach, no alternatives; reuse what exists before creating anything new; cover security and permissions in every endpoint; protect existing data (no breaking migration); be concrete (table, column, function and file names); concise but complete, so a developer can execute it without asking. Every specialist and the reviewer will read and follow this document: it must agree with the contract and the tasks you submit. If plan.md already exists, update it for this request instead of starting over. submit_plan is rejected when it is missing or incomplete.
+Before calling submit_plan, also create or update static/__dev/design.md (product experience and visual principles) and static/__dev/architecture.md (structure and technical decisions). Keep them concise and consistent with the accepted plan.
 Rules for the plan:
 - 1 to 6 tasks. Prefer fewer, larger tasks; only split when parts are truly independent. A role with nothing to do gets no task.
 - Every file is owned by exactly one task ("files": exact paths or folder prefixes ending in "/", never both a folder and a file inside it in different tasks). helpers/contract.ts is the planner's: never list it. Row types belong to the data task (helpers/types.ts); the typed client helpers/api.ts belongs to the ui task.
@@ -71,7 +81,7 @@ Rules for the plan:
 - summary: 2–4 sentences for the owner, in the owner's language, saying what will be built.`;
 
 const QA = `# Your role: reviewer (QA)
-The specialists have finished. Check the result against the request, the plan and the contract:
+The specialists have finished. Check the result against the request, the plan, static/__dev/plan.md (follow its Verificación section and report any deviation from its tables, endpoints and files) and the contract:
 1. check_build; run_tests if there are specs; security_scan.
 2. Exercise every new or changed endpoint with call_endpoint — as an anonymous visitor and, when auth is involved, as a signed-in user — then get_problems. The database is real and shared with the published app: for POST calls use clearly marked test data (e.g. "Prueba QA") and never delete or overwrite the owner's rows.
 3. Load the skills "web-design-guidelines" and "impeccable" (parts "reference/critique" and "reference/audit") and use them as your checklist while you walk the main user flow of the request with browser_test, signed in when it needs a user (as_user_email), plus one pass at viewport "mobile"; look at the screenshots for broken layout, empty pages and unreadable contrast.
@@ -108,7 +118,7 @@ This request starts a new app. The owner will iterate on it, so:
 
 export const ROLE_PROMPTS: Record<"planner" | "data" | "backend" | "ui" | "qa" | "fast" | "chat" | "security", string> = {
   security: [INTRO, TRUST, SECURITY_REVIEW, STRUCTURE, BACKEND, DATA, SECURITY, RULES].join("\n\n"),
-  fast: `${BUILDER_SYSTEM_PROMPT}\n\nBefore implementing, read static/__dev/design.md and static/__dev/architecture.md when present. Create or update both notes when a task introduces or changes product experience, visual principles, structure, or technical decisions. Keep them concise and consistent with the implementation.`,
+  fast: `${BUILDER_SYSTEM_PROMPT}\n\nBefore implementing, read static/__dev/design.md, static/__dev/architecture.md and, when it exists, static/__dev/plan.md (the approved implementation plan: follow it). Create or update both notes when a task introduces or changes product experience, visual principles, structure, or technical decisions. Keep them concise and consistent with the implementation.`,
   chat: [INTRO, TRUST, CHAT, MEMORY, STRUCTURE, FRONTEND, CONTRACT, KIT, BACKEND, DATA, SECURITY, RULES].join("\n\n"),
   planner: [INTRO, TRUST, PLANNER, MEMORY, STRUCTURE, CONTRACT, KIT, DATA, SECURITY, RULES].join("\n\n"),
   data: [INTRO, TRUST, TEAM, DATA_ROLE, STRUCTURE, CONTRACT, DATA, SECURITY, RULES].join("\n\n"),
@@ -188,7 +198,7 @@ export const MAX_STEPS: Record<Role, number> = {
   summarizer: 1,
   app: 1,
   chat: 12,
-  planner: 14,
+  planner: 20,
   data: 16,
   backend: 30,
   ui: 30,

@@ -31,6 +31,29 @@ export interface Plan {
 /** Where the shared contract lives. Only the planner writes it; every specialist imports it. */
 export const CONTRACT_FILE = "helpers/contract.ts";
 
+/** The implementation plan in prose that every agent follows; written by the planner before submit_plan. */
+export const PLAN_DOC = "static/__dev/plan.md";
+export const PLAN_SECTIONS = ["Contexto", "Modelo de datos", "Backend", "Interfaz", "Archivos clave", "Verificación", "Capacidad/orden"] as const;
+export const MAX_PLAN_DOC = 20_000;
+
+/** Problems of the plan document: missing, sections absent, out of order or empty, or too long. */
+export function checkPlanDoc(source: string | undefined): string[] {
+  if (!source?.trim()) return [`${PLAN_DOC} no existe o está vacío: escríbelo con las secciones ${PLAN_SECTIONS.join(", ")} antes de llamar a submit_plan.`];
+  const errors: string[] = [];
+  const lines = source.split("\n");
+  const heading = (name: string) => lines.findIndex((line) => new RegExp(`^#{1,3}\\s*\\**${name.replace("/", "\\/")}\\**\\s*$`, "i").test(line.trim()));
+  const found = PLAN_SECTIONS.map((name) => ({ name, at: heading(name) }));
+  for (const { name } of found.filter((s) => s.at < 0)) errors.push(`${PLAN_DOC}: falta la sección "${name}" (encabezado "## ${name}").`);
+  const present = found.filter((s) => s.at >= 0);
+  if (present.some((s, i) => i > 0 && s.at < present[i - 1]!.at)) errors.push(`${PLAN_DOC}: las secciones deben ir en este orden: ${PLAN_SECTIONS.join(", ")}.`);
+  for (const [i, s] of present.entries()) {
+    const end = [...present.slice(i + 1).map((n) => n.at), lines.length].filter((n) => n > s.at).sort((a, b) => a - b)[0]!;
+    if (!lines.slice(s.at + 1, end).join("").trim()) errors.push(`${PLAN_DOC}: la sección "${s.name}" está vacía.`);
+  }
+  if (source.length > MAX_PLAN_DOC) errors.push(`${PLAN_DOC} tiene ${source.length} caracteres y el máximo es ${MAX_PLAN_DOC}: sé más conciso.`);
+  return errors;
+}
+
 export const ROLE_FOLDERS: Record<SpecialistRole, RegExp> = {
   data: /^(helpers\/|static\/__dev\/)/,
   backend: /^(endpoints\/|jobs\/|helpers\/|static\/)/,
