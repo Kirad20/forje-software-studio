@@ -1,6 +1,6 @@
 import { mkdirSync, rmSync } from "node:fs";
 import path from "node:path";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 import { freshDatabase } from "../../../helpers/pg.mjs";
 
 const dataDir = path.join(process.cwd(), `.model-management-data-${process.pid}`);
@@ -58,5 +58,27 @@ describe("production provider/catalog persistence", () => {
     await module.stop();
     await module.start();
     await module.stop();
+  });
+  it("persists an Ollama provider and routes native discovery and inference", async () => {
+    await providers.saveProvider({ id: "native-ollama", kind: "ollama", baseUrl: "http://127.0.0.1:11434", enabled: true }, null, { create: true });
+    try {
+      expect(catalog.providerOf("native-ollama")).toMatchObject({ kind: "ollama" });
+      await catalog.saveModel({ provider: "native-ollama", model: "qwen3.5:9b-32k", context: 32768, tools: true, vision: true }, null, { create: true });
+      const { listProviderModels, probeProvider } = await import("../../../../server/modules/model-management/probe.js");
+      vi.stubGlobal("fetch", vi.fn(async () => Response.json({ models: [{ name: "qwen3.5:9b-32k" }] })));
+      expect(await listProviderModels("native-ollama")).toEqual({ models: [{ id: "qwen3.5:9b-32k", label: "qwen3.5:9b-32k", inPrice: 0, outPrice: 0 }] });
+      expect(await probeProvider("native-ollama")).toMatchObject({ ok: true, models: 1 });
+      const fetchMock = vi.fn<typeof fetch>(async () => Response.json({ model: "qwen3.5:9b-32k", message: { content: "OK" } }));
+      vi.stubGlobal("fetch", fetchMock);
+      const { invoke } = await import("../../../../server/modules/model-management/router.js");
+      const model = (await catalog.availableModels()).find(m => m.provider === "native-ollama")!;
+      expect(await invoke(model, { messages: [{ role: "user", content: "Hi" }] })).toMatchObject({ content: [{ type: "text", text: "OK" }] });
+      const [url, options] = fetchMock.mock.calls[0]!;
+      expect(url).toBe("http://127.0.0.1:11434/api/chat");
+      expect(JSON.parse(String(options?.body)).options.num_ctx).toBe(32768);
+    } finally {
+      vi.unstubAllGlobals();
+      await providers.deleteProvider("native-ollama", null);
+    }
   });
 });

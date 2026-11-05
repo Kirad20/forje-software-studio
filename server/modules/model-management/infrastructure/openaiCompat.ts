@@ -28,7 +28,7 @@ function toOpenAi(system: string | undefined, messages: LlmMessage[]): OpenAiMes
       const calls = m.content.filter((b): b is Extract<Block, { type: "tool_use" }> => b.type === "tool_use");
       out.push({
         role: "assistant",
-        content: textOf(m.content) || null,
+        content: textOf(m.content),
         tool_calls: calls.length ? calls.map((c) => ({ id: c.id, type: "function", function: { name: c.name, arguments: JSON.stringify(c.input) } })) : undefined,
       });
     } else {

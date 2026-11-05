@@ -28,7 +28,7 @@ export interface ModelScope {
 
 export interface Provider {
   id: string;
-  kind: "anthropic" | "openai";
+  kind: "anthropic" | "openai" | "ollama";
   endpoint?: CompatEndpoint;
 }
 

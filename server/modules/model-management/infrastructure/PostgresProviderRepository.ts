@@ -7,7 +7,7 @@ import type { ProviderRepository } from "../ports/ProviderRepository.js";
 
 const Input = z.object({
   id: z.string().regex(/^[a-z0-9-]{2,32}$/, "El id usa minúsculas, números y guiones (2–32)"),
-  kind: z.enum(["anthropic", "openai"]).optional(),
+  kind: z.enum(["anthropic", "openai", "ollama"]).optional(),
   label: z.string().trim().min(1).max(80).optional(),
   baseUrl: z.string().trim().url("La URL base debe ser una URL (https://…/v1)").max(500).nullable().optional(),
   apiKey: z.string().trim().min(1).max(4000).nullable().optional(),
@@ -19,7 +19,7 @@ const encryptHeaders = (h: Record<string, string> | undefined) =>
 
 export const postgresProviderRepository: ProviderRepository = {
   async list() {
-    const rows = await q<{ id: string; kind: "anthropic" | "openai"; label: string; base_url: string | null;
+    const rows = await q<{ id: string; kind: "anthropic" | "openai" | "ollama"; label: string; base_url: string | null;
       api_key_enc: string | null; headers_enc: string | null; enabled: boolean; builtin: boolean }>(
       `select id, kind, label, base_url, api_key_enc, headers_enc, enabled, builtin from providers order by builtin desc, id`,
     );
@@ -43,8 +43,8 @@ export const postgresProviderRepository: ProviderRepository = {
   },
   async create(p) {
     await q(
-      `insert into providers (id, kind, label, base_url, api_key_enc, headers_enc, enabled) values ($1, 'openai', $2, $3, $4, $5, $6)`,
-      [p.id, p.label ?? p.id, p.baseUrl, p.apiKey ? encrypt(p.apiKey) : null, encryptHeaders(p.headers), p.enabled ?? true],
+      `insert into providers (id, kind, label, base_url, api_key_enc, headers_enc, enabled) values ($1, $2, $3, $4, $5, $6, $7)`,
+      [p.id, p.kind ?? "openai", p.label ?? p.id, p.baseUrl, p.apiKey ? encrypt(p.apiKey) : null, encryptHeaders(p.headers), p.enabled ?? true],
     );
   },
   async update(p, seed) {

@@ -4,6 +4,7 @@ import { listProviders, providerSecret } from "../providers.js";
 import { invoke } from "../router.js";
 import type { LlmResponse } from "../types.js";
 import { q } from "../../../shared/database/index.js";
+import { ollamaBaseUrl } from "./ollama.js";
 
 /**
  * Connection tests for the admin panel. They answer with what happened, never throw:
@@ -28,6 +29,10 @@ export async function probeProvider(id: string): Promise<ProviderProbe> {
   const view = (await listProviders()).find((p) => p.id === id);
   if (!view) return { ok: false, ms: 0, error: `No existe el proveedor «${id}».` };
   if (!view.available) return { ok: false, ms: 0, error: view.missing ?? "No disponible" };
+  if (view.kind === "ollama") {
+    const result = await listProviderModels(id);
+    return result.error ? { ok: false, ms: ms(), error: result.error } : { ok: true, ms: ms(), models: result.models.length };
+  }
   try {
     if (view.kind === "anthropic") {
       const sdk = new Anthropic({ apiKey: providerSecret(id)!, maxRetries: 0, timeout: TIMEOUT_MS });
@@ -74,14 +79,19 @@ export async function listProviderModels(id: string): Promise<{ models: Provider
       return { models: page.data.map((m) => ({ id: m.id, label: m.display_name })) };
     }
     const endpoint = providerOf(id)!.endpoint!;
-    const res = await fetch(`${endpoint.baseUrl}/models`, {
+    const res = await fetch(view.kind === "ollama" ? `${ollamaBaseUrl(endpoint.baseUrl)}/api/tags` : `${endpoint.baseUrl}/models`, {
       headers: { ...(endpoint.apiKey ? { authorization: `Bearer ${endpoint.apiKey}` } : {}), ...endpoint.headers },
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
     if (!res.ok) return { models: [], error: `HTTP ${res.status}: ${(await res.text().catch(() => "")).slice(0, 300)}` };
-    const body = (await res.json().catch(() => ({}))) as {
+    const body = (await res.json()) as {
+      models?: { name: string }[];
       data?: { id?: unknown; name?: unknown; context_length?: unknown; pricing?: { prompt?: unknown; completion?: unknown } }[];
     };
+    if (view.kind === "ollama") {
+      if (!Array.isArray(body.models)) return { models: [], error: "Ollama no devolvió una lista de modelos válida." };
+      return { models: body.models.map(m => ({ id: m.name, label: m.name, inPrice: 0, outPrice: 0 })).sort((a, b) => a.id.localeCompare(b.id)) };
+    }
     const models = (Array.isArray(body.data) ? body.data : [])
       .filter((m) => typeof m.id === "string" && m.id)
       .map((m): ProviderModel => ({
