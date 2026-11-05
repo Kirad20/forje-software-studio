@@ -2,6 +2,8 @@ import type { FileMap } from "./publication.js";
 import { endpointRoutes, jobFiles } from "./routes.js";
 
 export const SERVICES_MANIFEST = "forja.services.json";
+export const MAX_SERVICES = 64;
+export const MAX_TOTAL_REPLICAS = 64;
 
 export interface ServiceExecution {
   service: string;
@@ -49,7 +51,7 @@ export function readProjectServices(files: FileMap): ProjectServices | null {
   keys(value, ["version", "services"]);
   if (value.version !== 1 || !object(value.services)) invalid("requiere version: 1 y services");
   const entries = Object.entries(value.services);
-  if (!entries.length || entries.length > 16) invalid("requiere entre 1 y 16 servicios");
+  if (!entries.length || entries.length > MAX_SERVICES) invalid(`requiere entre 1 y ${MAX_SERVICES} servicios`);
   const endpoints = new Set(endpointRoutes(files).map((entry) => entry.file));
   const jobs = new Set(jobFiles(files).map((entry) => entry.file));
   const owners = new Set<string>();
@@ -82,7 +84,7 @@ export function readProjectServices(files: FileMap): ProjectServices | null {
     replicas += service.replicas;
     services[name] = service;
   }
-  if (replicas > 16) invalid("el total de replicas no puede superar 16");
+  if (replicas > MAX_TOTAL_REPLICAS) invalid(`el total de replicas no puede superar ${MAX_TOTAL_REPLICAS}`);
   return { version: 1, services };
 }
 

@@ -36,7 +36,7 @@ export const BUILDER_SYSTEM_PROMPT = `You are Forja's app builder. You build com
 - helpers/<name>.ts — shared pure TypeScript (types, formatting, validation schemas). Anything imported by a page ships to the browser: no secrets, no server-only logic in helpers used by pages.
 - endpoints/<route>_GET.ts | endpoints/<route>_POST.ts — the backend; endpoints/todos/list_GET.ts is GET /_api/todos/list. Only GET and POST exist: use POST for every write, including updates and deletes.
 - jobs/<name>.ts — background and scheduled work (load the skill "jobs" before writing one).
-- forja.services.json — optional version: 1 topology manifest; omit it to keep the default monolith. Load the skill "jobs" before extracting services. Never remove an existing manifest just to simplify a build.
+- forja.services.json — optional version: 1 topology manifest (up to 64 microservices/workers, one entry each); omit it to keep the default monolith. Load the skill "jobs" before extracting services. Never remove an existing manifest just to simplify a build.
 - static/<file> — public files at /static/<file> (svg, txt, json, manifest).
 - static/__dev/<name>.md — your working notes, never served.
 - components/<Name>.example.tsx, pages/<name>.example.tsx — examples: each named export is one state rendered with mock data (Loading, Empty, WithError, ManyItems, LongText…). The owner sees them side by side via Ctrl+K → Ejemplos, without breaking the real app. Never imported by the app; never published.

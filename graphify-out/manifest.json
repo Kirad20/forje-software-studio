@@ -1518,9 +1518,9 @@
     "semantic_hash": ""
   },
   "server/modules/builder/infrastructure/prompt.ts": {
-    "mtime": 1793862517.6350825,
-    "seen": 1793862522.7649198,
-    "ast_hash": "73a4faf6d1c16b94233e703ac09934ef",
+    "mtime": 1793896041.0559895,
+    "seen": 1793896042.8460727,
+    "ast_hash": "f7722ceff496e8f494b07dc924dc4332",
     "semantic_hash": ""
   },
   "server/modules/builder/infrastructure/rename.ts": {
@@ -1542,9 +1542,9 @@
     "semantic_hash": ""
   },
   "server/modules/builder/infrastructure/skillLibrary.ts": {
-    "mtime": 1793862518.4487784,
-    "seen": 1793862522.766318,
-    "ast_hash": "1370d1262c5e0521343175cc6e177d8e",
+    "mtime": 1793896041.0394504,
+    "seen": 1793896042.8480818,
+    "ast_hash": "0f67392e9d54e82d27c16c56454970ce",
     "semantic_hash": ""
   },
   "server/modules/builder/infrastructure/skills.ts": {
@@ -3696,15 +3696,15 @@
     "semantic_hash": ""
   },
   "server/modules/app-runtime/domain/services.ts": {
-    "mtime": 1793862691.7998452,
-    "seen": 1793862707.0585167,
-    "ast_hash": "ea7673f64a6b67745eb147c159c4f9f2",
+    "mtime": 1793896042.178255,
+    "seen": 1793896042.7838314,
+    "ast_hash": "abd54ad27b47a5005ffccef5d07e06be",
     "semantic_hash": ""
   },
   "test/unit/modules/app-runtime/services.test.ts": {
-    "mtime": 1793863519.295475,
-    "seen": 1793863551.9974766,
-    "ast_hash": "d6172c8182392fbe376dfa608cd4bd7e",
+    "mtime": 1793896067.3309827,
+    "seen": 1793896071.0790834,
+    "ast_hash": "bb11eab37a01945dffb3e27585a1a781",
     "semantic_hash": ""
   },
   "server/modules/app-services/application/jobQueue.ts": {
@@ -3726,9 +3726,9 @@
     "semantic_hash": ""
   },
   "test/unit/modules/builder/topologyGuidance.test.ts": {
-    "mtime": 1793862433.3776393,
-    "seen": 1793862464.7917905,
-    "ast_hash": "532868a8c0c90ad6de628acc405a17eb",
+    "mtime": 1793896067.345653,
+    "seen": 1793896071.0860918,
+    "ast_hash": "a3302f1324662cc219690e27b3838ac0",
     "semantic_hash": ""
   },
   "test/unit/modules/projects/starterTemplate.test.ts": {
@@ -3762,15 +3762,15 @@
     "semantic_hash": ""
   },
   "docs/project-services.md": {
-    "mtime": 1793863972.534405,
-    "seen": 1793863989.073197,
-    "ast_hash": "ff2e944f71207421da50f139a79c570d",
+    "mtime": 1793896041.042868,
+    "seen": 1793896043.0561728,
+    "ast_hash": "f57f0d67aba8796aad62735725519223",
     "semantic_hash": ""
   },
   "test/unit/modules/app-runtime/serviceControl.test.ts": {
-    "mtime": 1793863955.9536898,
-    "seen": 1793863989.017422,
-    "ast_hash": "007e2b521333a754f7611ce55895533d",
+    "mtime": 1793896114.8553402,
+    "seen": 1793896126.001409,
+    "ast_hash": "1ab4f2288b43422b8bfefa9d04cd9067",
     "semantic_hash": ""
   },
   "test/unit/studio/service-control.test.tsx": {
@@ -3815,16 +3815,16 @@
     "ast_hash": "94a02d6f3408464e200bc7f8219386ae",
     "semantic_hash": ""
   },
-  "studio/src/features/service-control/presentation/ServiceControlPanel.tsx": {
-    "mtime": 1793864095.4625115,
-    "seen": 1793864123.1450963,
-    "ast_hash": "73d4dfc64e308ddacfa9e93b7da043ba",
-    "semantic_hash": ""
-  },
   "test/unit/modules/app-runtime/serviceControlRuntime.test.ts": {
     "mtime": 1793863956.6856613,
     "seen": 1793863989.017422,
     "ast_hash": "1d0e3bb1fb1ba33860834a3761455486",
+    "semantic_hash": ""
+  },
+  "studio/src/features/service-control/presentation/ServiceControlPanel.tsx": {
+    "mtime": 1793896015.9220407,
+    "seen": 1793896042.9830284,
+    "ast_hash": "7f3ef68227cd097376b31fb4f8f5d47a",
     "semantic_hash": ""
   },
   "package-lock.json": {

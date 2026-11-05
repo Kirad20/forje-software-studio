@@ -73,10 +73,11 @@ describe("Project service control", () => {
   it("validates the whole manifest's aggregate replica budget before persistence", async () => {
     const manifest = JSON.parse(files["forja.services.json"]);
     manifest.services.orders.replicas = 8;
-    manifest.services.invoices.replicas = 7;
+    manifest.services.invoices.replicas = 8;
+    for (let i = 0; i < 6; i++) manifest.services[`pad${i}`] = { kind: "service", endpoints: [`endpoints/pad${i}_GET.ts`], replicas: i === 5 ? 7 : 8 };
     manifest.services.health = { kind: "service", endpoints: ["endpoints/health_GET.ts"], replicas: 1 };
-    const { control, writeManifest } = fixture({ ...files, "forja.services.json": JSON.stringify(manifest) });
-    await expect(control.scale("p", "health", { replicas: 2 })).rejects.toThrow(/16/);
+    const { control, writeManifest } = fixture({ ...files, ...Object.fromEntries([0, 1, 2, 3, 4, 5].map((i) => [`endpoints/pad${i}_GET.ts`, "export default async () => ({});"])), "forja.services.json": JSON.stringify(manifest) });
+    await expect(control.scale("p", "health", { replicas: 2 })).rejects.toThrow(/64/);
     expect(writeManifest).not.toHaveBeenCalled();
   });
   it("keeps queue available while clearly reporting unreachable runtime", async () => {

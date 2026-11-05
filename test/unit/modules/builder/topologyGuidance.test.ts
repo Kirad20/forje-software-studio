@@ -9,6 +9,7 @@ describe("builder topology guidance", () => {
     expect(BUILDER_SYSTEM_PROMPT).toContain("ctx.jobs.enqueue");
     expect(BUILDER_SYSTEM_PROMPT).toContain("shared project database");
     expect(jobs).toContain("at-least-once");
+    expect(jobs).toContain("up to 64 services");
     expect(jobs).toContain("waits for completion");
     expect(jobs).not.toContain("NOT retried");
   });
