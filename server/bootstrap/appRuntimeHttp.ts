@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { clientIp as ipOfClient } from "../shared/security.js";
 import { isInternalServiceRequest } from "../shared/internalServiceAuth.js";
-import { cookie, parseCookies, serveApp, SHARE_COOKIE, checkShareToken, parseAppHost } from "../modules/app-runtime/index.js";
+import { cookie, parseCookies, serveApp, SHARE_COOKIE, checkShareToken, parseAppHost, getSandboxServices, restartSandboxService } from "../modules/app-runtime/index.js";
 import type { Project } from "../modules/projects/index.js";
 import type { ProjectEvent } from "../modules/project-observability/events.js";
 
@@ -19,6 +19,8 @@ export interface AppRuntimeHttpPorts {
   internalToken: string;
   emitProject(projectId: string, event: ProjectEvent): unknown;
   reloadSettings(): Promise<void>;
+  getSandboxServices?: typeof getSandboxServices;
+  restartSandboxService?: typeof restartSandboxService;
 }
 
 export interface ResolvedApp {
@@ -82,6 +84,25 @@ export async function handleAppRuntimeRequest(
 
 export function createAppRuntimeHttpApp(ports: AppRuntimeHttpPorts) {
   const app = new Hono();
+  const serviceTarget = z.object({ projectId: z.string().min(1).max(200) }).strict();
+  app.post("/internal/runtime/service-control/snapshot", async (c) => {
+    if (!isInternalServiceRequest(c.req.header("authorization"), ports.internalToken)) return c.json({ error: "Unauthorized" }, 401);
+    const parsed = serviceTarget.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: "Invalid service snapshot" }, 400);
+    if (!await ports.getProject(parsed.data.projectId)) return c.json({ error: "Project not found" }, 404);
+    return c.json({ available: true, scope: "app-runtime", services: (ports.getSandboxServices ?? getSandboxServices)(parsed.data.projectId) });
+  });
+  app.post("/internal/runtime/service-control/restart", async (c) => {
+    if (!isInternalServiceRequest(c.req.header("authorization"), ports.internalToken)) return c.json({ error: "Unauthorized" }, 401);
+    const parsed = serviceTarget.extend({
+      service: z.string().regex(/^[a-z][a-z0-9-]{0,39}$/),
+      env: z.enum(["preview", "published"]).optional(),
+    }).strict().safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: "Invalid service restart" }, 400);
+    if (!await ports.getProject(parsed.data.projectId)) return c.json({ error: "Project not found" }, 404);
+    await (ports.restartSandboxService ?? restartSandboxService)(parsed.data.projectId, parsed.data.service, parsed.data.env);
+    return c.json({ ok: true });
+  });
   const endpointCall = z.object({
     projectId: z.string().min(1),
     method: z.enum(["GET", "POST"]),

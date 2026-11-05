@@ -1,11 +1,11 @@
-const ALLOWED_PATTERN = /^(pages|components|helpers|endpoints|jobs|static)\/[A-Za-z0-9_.$\-/[\]]+$|^base\.css$|^package\.json$/;
+const ALLOWED_PATTERN = /^(pages|components|helpers|endpoints|jobs|static)\/[A-Za-z0-9_.$\-/[\]]+$|^base\.css$|^package\.json$|^forja\.services\.json$/;
 
 export class ProjectPath {
   readonly value: string;
 
   constructor(path: string) {
     if (!ProjectPath.isValid(path)) {
-      throw new Error(`Ruta no válida: "${path}". Usa pages/, components/, helpers/, endpoints/, jobs/, static/, base.css o package.json.`);
+      throw new Error(`Ruta no válida: "${path}". Usa pages/, components/, helpers/, endpoints/, jobs/, static/, base.css, package.json o forja.services.json.`);
     }
     this.value = path;
   }
@@ -19,7 +19,7 @@ export class ProjectPath {
 
   static assertValid(path: string): void {
     if (!ProjectPath.isValid(path)) {
-      throw new Error(`Ruta no válida: "${path}". Usa pages/, components/, helpers/, endpoints/, jobs/, static/, base.css o package.json.`);
+      throw new Error(`Ruta no válida: "${path}". Usa pages/, components/, helpers/, endpoints/, jobs/, static/, base.css, package.json o forja.services.json.`);
     }
   }
 

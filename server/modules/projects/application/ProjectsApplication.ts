@@ -6,6 +6,7 @@ import { ProjectPath } from "../domain/ProjectPath.js";
 import type { FileMap, ProjectSnapshot, ProjectPatch, TurnChanges } from "../domain/ProjectSnapshot.js";
 import type { Author } from "../ports/repositories.js";
 import type { ProjectsStore, ProjectServices } from "../ports/projects.js";
+import type { StarterTemplate } from "../domain/StarterTemplate.js";
 
 export const isDevFile = (path: string) => ProjectPath.isDevPath(path);
 
@@ -31,8 +32,8 @@ export class ProjectsApplication {
   isSlugTaken(slug: string, projectId: string) { return this.store.isSlugTaken(slug, projectId); }
   unpublish(projectId: string) { return this.store.unpublish(projectId); }
 
-  async createProject(ownerId: string, name: string, description = "", files?: FileMap, orgId?: string): Promise<ProjectSnapshot> {
-    return new CreateProjectUseCase(this.store, this.services).execute({ ownerId, name, description, files, orgId });
+  async createProject(ownerId: string, name: string, description = "", files?: FileMap, orgId?: string, template?: StarterTemplate): Promise<ProjectSnapshot> {
+    return new CreateProjectUseCase(this.store, this.services).execute({ ownerId, name, description, files, orgId, template });
   }
 
   async duplicateProject(ownerId: string, sourceId: string): Promise<ProjectSnapshot> {

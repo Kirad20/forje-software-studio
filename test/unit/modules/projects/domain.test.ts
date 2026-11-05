@@ -28,6 +28,15 @@ describe("Projects Domain (DDD & TDD)", () => {
       expect(devPath.isDevFile()).toBe(true);
       expect(normalPath.isDevFile()).toBe(false);
     });
+
+    it("allows only the exact root services manifest, not arbitrary JSON or traversal", () => {
+      expect(new ProjectPath("forja.services.json").value).toBe("forja.services.json");
+      expect(() => ProjectPath.assertValid("forja.services.json")).not.toThrow();
+      for (const invalid of ["services.json", "forja.services.json.bak", "/forja.services.json", "../forja.services.json", "forja.services.json/child", "forja\\services.json"]) {
+        expect(ProjectPath.isValid(invalid)).toBe(false);
+        expect(() => new ProjectPath(invalid)).toThrow("Ruta no válida");
+      }
+    });
   });
 
   describe("Project Entity", () => {

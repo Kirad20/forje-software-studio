@@ -1,4 +1,12 @@
-/** Files every new project starts with. The builder replaces them on its first turn. */
+export type StarterTemplate = "monolith" | "orders-invoices";
+
+export function parseStarterTemplate(value: unknown): StarterTemplate | undefined {
+  if (value === undefined) return undefined;
+  if (value === "monolith" || value === "orders-invoices") return value;
+  throw new Error("Template no válido: usa monolith u orders-invoices");
+}
+
+/** Existing projects and creation without a selector retain the monolith starter. */
 export function starterFiles(name: string): Record<string, string> {
   return {
     "base.css": `/* Design tokens: the only place colors, radii, shadows and type sizes are defined.

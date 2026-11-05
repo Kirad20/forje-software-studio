@@ -2,6 +2,7 @@ import type { ProjectDb } from "./database.js";
 import type { ObserverPorts } from "./observer.js";
 import type { AppEnv, EmailInput, EmailResult, AppAiInput, AppAiResult, StoredObject, CheckoutInput } from "../domain/contracts.js";
 export interface JobsApi {
+  enqueue?(projectId: string, env: AppEnv, name: string, payload: unknown, trigger: string): Promise<string>;
   runNow(projectId: string, env: AppEnv, name: string, payload: unknown, trigger: string): Promise<void>;
   addTimer(projectId: string, env: AppEnv, name: string, payload: unknown, runAt: Date): Promise<string>;
 }

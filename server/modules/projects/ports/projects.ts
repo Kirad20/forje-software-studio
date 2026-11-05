@@ -2,6 +2,7 @@ import type { Project } from "../domain/Project.js";
 import type { BeforeImage } from "../domain/ChangeTimeline.js";
 import type { FileMap, ProjectSnapshot, ProjectPatch, ChangeEntry } from "../domain/ProjectSnapshot.js";
 import type { LogChangeInput } from "./repositories.js";
+import type { StarterTemplate } from "../domain/StarterTemplate.js";
 
 export interface ProjectEventPort {
   emit(projectId: string, event: { type: "files"; paths: string[] } | { type: "published"; slug: string }): void;
@@ -10,7 +11,7 @@ export interface ProjectEventPort {
 export interface ProjectServices extends ProjectEventPort {
   projectId(): string;
   id(): string;
-  templates(name: string): FileMap;
+  templates(name: string, template?: StarterTemplate): FileMap;
   warmup(projectId: string): Promise<unknown>;
   clone(sourceId: string, targetId: string): Promise<void>;
 }

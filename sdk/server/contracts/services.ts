@@ -19,6 +19,8 @@ export interface Ai {
   chat(input: { messages: AiMessage[]; system?: string; model?: string; tools?: any[]; maxTokens?: number }): Promise<{ text: string; content: any[]; credits: number }>;
 }
 export interface Jobs {
+  /** Resolves after durable acceptance, not after execution. Delivery is at least once. */
+  enqueue(name: string, payload?: unknown): Promise<string>;
   run(name: string, payload?: unknown): Promise<void>;
   runAt(name: string, payload: unknown, when: Date | number): Promise<string>;
 }

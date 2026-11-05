@@ -56,4 +56,20 @@ describe("project index", () => {
     const b = buildIndex({ ...files, "pages/_index.tsx": files["pages/_index.tsx"] + "\n" }).facts.get("helpers/money.ts");
     expect(b).toBe(a);
   });
+
+  it("shows service assignments and preloads topology when editing its endpoints", () => {
+    const topology = {
+      ...files,
+      "forja.services.json": JSON.stringify({ version: 1, services: {
+        todos: { kind: "service", endpoints: ["endpoints/todos/list_GET.ts"], jobs: [], replicas: 2, maxConcurrency: 8 },
+      } }),
+    };
+    const map = projectMap(topology);
+    expect(map).toContain("todos · service · replicas 2 · maxConcurrency 8");
+    expect(map).toContain("endpoints/todos/list_GET.ts");
+    expect(map).toContain("monolith");
+    expect(selectContext(topology, "change todos listing", ["endpoints/todos/list_GET.ts"])).toContain("forja.services.json");
+    expect(() => projectMap({ ...files, "forja.services.json": "invalid" })).not.toThrow();
+    expect(projectMap({ ...files, "forja.services.json": "invalid" })).toContain("forja.services.json:");
+  });
 });

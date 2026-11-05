@@ -6,6 +6,7 @@ import { External, Send } from "../../../shared/Icons.js";
 import { Avatar, copyText, Menu, MenuItem, Modal } from "../../../shared/ui.js";
 import { go } from "../../../app/router.js";
 import { browser } from "../../../shared/infrastructure/browser.js";
+import type { CreateProjectOptions } from "../application/usecases.js";
 
 const IDEAS = ["un CRM para mi agencia", "reservas para mi estudio de yoga", "un tablero de tareas para mi equipo", "un portal de clientes", "una tienda en línea", "un asistente con IA para mis documentos"];
 
@@ -76,6 +77,7 @@ export function Dashboard() {
   const [tab, setTab] = useState<"mine" | "shared">("mine");
   const [folders, setFolders] = useState<Folder[]>([]);
   const [prompt, setPrompt] = useState("");
+  const [template, setTemplate] = useState<NonNullable<CreateProjectOptions["template"]>>("monolith");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
@@ -100,13 +102,13 @@ export function Dashboard() {
   }, []);
 
   const create = async () => {
-    if (!prompt.trim()) return;
+    if (!prompt.trim() && template === "monolith") return;
     setBusy(true);
     setError("");
     try {
-      const { project } = await projectsController.createProject(prompt);
+      const { project } = await projectsController.createProject(prompt || "Pedidos y facturas", template === "monolith" ? {} : { template });
       // The project view hands the idea to the builder when it opens.
-      browser.sessionStorage.setItem(`forja:first:${project.id}`, prompt);
+      if (template === "monolith") browser.sessionStorage.setItem(`forja:first:${project.id}`, prompt);
       go(`/p/${project.id}`);
     } catch (e) {
       setError((e as Error).message);
@@ -205,6 +207,13 @@ export function Dashboard() {
           <h1>Tu próxima idea empieza aquí</h1>
           <p>Descríbela en tus palabras. Forja la convierte en una app que puedes editar y publicar.</p>
         </div>
+        <label>
+          Plantilla inicial
+          <select disabled={busy} value={template} onChange={(e) => setTemplate(e.target.value as NonNullable<CreateProjectOptions["template"]>)}>
+            <option value="monolith">Proyecto vacío (monolito)</option>
+            <option value="orders-invoices">Ejemplo: API de pedidos + worker de facturas</option>
+          </select>
+        </label>
         <div className="idea-bar">
           <span className="idea-mark" aria-hidden>✦</span>
           <input
@@ -218,7 +227,7 @@ export function Dashboard() {
             Constructor incluido
           </span>
           <div className="split-btn">
-            <button className="primary" disabled={!prompt.trim() || busy} onClick={create}>
+            <button className="primary" disabled={(!prompt.trim() && template === "monolith") || busy} onClick={create}>
               {busy ? <span className="spinner" /> : <Send />} Crear proyecto
             </button>
             <Menu
