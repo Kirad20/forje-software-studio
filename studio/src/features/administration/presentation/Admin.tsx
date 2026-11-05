@@ -5,6 +5,7 @@ import { Providers } from "./Providers.js";
 import { Router } from "./Router.js";
 import { Settings } from "./Settings.js";
 import { Users } from "./Users.js";
+import { ApiTokens } from "./ApiTokens.js";
 import { Evals } from "../../evaluations/index.js";
 
 /** Platform administration: everything that used to be environment variables, and the tools to try it. */
@@ -16,6 +17,7 @@ const TABS = [
   ["router", "Enrutador", Router],
   ["evals", "Evals", Evals],
   ["users", "Usuarios", Users],
+  ["tokens", "API tokens", ApiTokens],
 ] as const;
 
 export function Admin({ tab }: { tab: string }) {

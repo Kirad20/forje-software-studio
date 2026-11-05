@@ -2,6 +2,10 @@ import type { PlatformRole, Account } from "../domain/Account.js";
 import { Password } from "../domain/Password.js";
 import type { AccountAccessUpdate, AccountAdminView, AccountSecurity, IdentityAccountsDependencies, PublicAccount } from "../ports/accountLifecycle.js";
 
+export class AdminApiTokenError extends Error {
+  constructor(message: string, readonly status: 400 | 403 = 400) { super(message); }
+}
+
 export class IdentityAccountsService {
   constructor(private readonly deps: IdentityAccountsDependencies) {}
 
@@ -83,6 +87,47 @@ export class IdentityAccountsService {
 
   accountFromApiToken(token: string | undefined): Promise<PublicAccount | null> {
     return token ? this.deps.tokens.findAccount(this.deps.random.hash(token)) : Promise.resolve(null);
+  }
+
+  async accountFromAdminApiToken(token: string | undefined): Promise<PublicAccount | null> {
+    if (!token) return null;
+    const account = await this.deps.tokens.findAccount(this.deps.random.hash(token), "admin");
+    return account?.platformRole === "admin" && !account.disabled ? account : null;
+  }
+
+  async createAdminApiToken(accountId: string, name: string, expiresAt = new Date(Date.now() + 30 * 86_400_000)) {
+    await this.requireAdmin(accountId);
+    if (typeof name !== "string" || !name.trim() || name.trim().length > 100) {
+      throw new AdminApiTokenError("El nombre debe tener entre 1 y 100 caracteres.");
+    }
+    if (!(expiresAt instanceof Date) || !Number.isFinite(expiresAt.getTime())
+      || expiresAt.getTime() <= Date.now() || expiresAt.getTime() > Date.now() + 90 * 86_400_000) {
+      throw new AdminApiTokenError("La caducidad debe estar en el futuro, hasta 90 días.");
+    }
+    const token = `fj_admin_${this.deps.random.token()}`;
+    const id = this.deps.random.id();
+    await this.deps.tokens.create(id, accountId, name.trim(), this.deps.random.hash(token), null, "admin", expiresAt);
+    await this.deps.audit?.(`admin_api_token:${id}`, accountId, "create");
+    return { token, id, expiresAt };
+  }
+
+  async listAdminApiTokens(accountId: string) {
+    await this.requireAdmin(accountId);
+    return this.deps.tokens.listAdmin(accountId);
+  }
+
+  async revokeAdminApiToken(accountId: string, id: string): Promise<boolean> {
+    await this.requireAdmin(accountId);
+    const revoked = await this.deps.tokens.revokeAdmin(accountId, id);
+    if (revoked) await this.deps.audit?.(`admin_api_token:${id}`, accountId, "delete");
+    return revoked;
+  }
+
+  private async requireAdmin(accountId: string): Promise<void> {
+    const access = await this.deps.accounts.getAccountAccess(accountId);
+    if (!access || access.platformRole !== "admin" || access.disabled) {
+      throw new AdminApiTokenError("Solo administradores activos de la plataforma.", 403);
+    }
   }
 
   async createApiToken(accountId: string, name: string, orgId: string | null = null): Promise<string> {

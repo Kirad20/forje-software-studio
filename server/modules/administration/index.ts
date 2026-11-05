@@ -9,6 +9,7 @@ export interface AdministrationRouteGroups {
   models: Hono<AdministrationEnv>;
   agents: Hono<AdministrationEnv>;
   router: Hono<AdministrationEnv>;
+  tokens?: Hono<AdministrationEnv>;
 }
 
 export function createAdministrationApi(groups: AdministrationRouteGroups): Hono<AdministrationEnv> {
@@ -18,5 +19,6 @@ export function createAdministrationApi(groups: AdministrationRouteGroups): Hono
   api.route("/", groups.models);
   api.route("/", groups.agents);
   api.route("/", groups.router);
+  if (groups.tokens) api.route("/", groups.tokens);
   return api;
 }

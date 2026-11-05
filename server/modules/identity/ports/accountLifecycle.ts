@@ -9,6 +9,7 @@ export interface PublicAccount {
   credits: number;
   platformRole: PlatformRole;
   tokenOrgId?: string | null;
+  disabled?: boolean;
 }
 
 export interface AccountCreation {
@@ -50,6 +51,7 @@ export interface AccountLifecycleRepository {
   setPassword(id: string, hash: string): Promise<void>;
   findResetAccount(email: string): Promise<{ id: string; email: string; disabled: boolean } | null>;
   getAccount(id: string): Promise<PublicAccount | undefined>;
+  getAccountAccess(id: string): Promise<{ platformRole: PlatformRole; disabled: boolean } | undefined>;
   listAccounts(excludeId?: string): Promise<AccountAdminView[]>;
   getSecurity(id: string): Promise<AccountSecurity | undefined>;
   updateAccess(id: string, patch: AccountAccessUpdate): Promise<boolean>;
@@ -72,12 +74,22 @@ export interface ApiTokenInfo {
   createdAt: Date;
 }
 
+export type ApiTokenPurpose = "project" | "admin";
+
+export interface AdminApiTokenInfo extends ApiTokenInfo {
+  purpose: "admin";
+  expiresAt: Date;
+  revokedAt: Date | null;
+}
+
 export interface ApiTokenRepository {
-  create(id: string, accountId: string, name: string, hash: string, orgId: string | null): Promise<void>;
+  create(id: string, accountId: string, name: string, hash: string, orgId: string | null, purpose?: ApiTokenPurpose, expiresAt?: Date): Promise<void>;
   /** Resolve an active account and record usage when found. */
-  findAccount(hash: string): Promise<PublicAccount | null>;
+  findAccount(hash: string, purpose?: ApiTokenPurpose): Promise<PublicAccount | null>;
   list(accountId: string): Promise<ApiTokenInfo[]>;
   delete(accountId: string, id: string): Promise<void>;
+  listAdmin(accountId: string): Promise<AdminApiTokenInfo[]>;
+  revokeAdmin(accountId: string, id: string): Promise<boolean>;
 }
 
 export interface IdentityRandom {
@@ -101,4 +113,5 @@ export interface IdentityAccountsDependencies {
   };
   projects: { ownedProjectIds(accountId: string): Promise<string[]> };
   policy: { signup: string; freeCredits: number };
+  audit?(key: string, actorId: string, action: "create" | "delete"): Promise<void>;
 }

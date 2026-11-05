@@ -1,4 +1,5 @@
 import pg from "pg";
+import { readFileSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { freshDatabase } from "../../../helpers/pg.mjs";
 import { PostgresAccountLifecycleRepository } from "../../../../server/modules/identity/infrastructure/PostgresAccountLifecycleRepository.js";
@@ -53,6 +54,12 @@ describe("identity SQL adapter compatibility", () => {
       create table api_tokens(id text primary key, account_id text references accounts on delete cascade, name text, token_hash text,
         org_id text, last_used_at timestamptz, created_at timestamptz default now());
     `);
+    await state.db.query(`insert into accounts (id, email, platform_role) values ('legacy', 'legacy@example.test', 'user');
+      insert into api_tokens (id, account_id, name, token_hash) values ('legacy-token', 'legacy', 'Legacy project', 'legacy-hash');`);
+    await state.db.query(readFileSync(new URL("../../../../server/shared/database/migrations/008_admin_api_tokens.sql", import.meta.url), "utf8"));
+    const legacy = await state.db.query("select purpose, expires_at, revoked_at from api_tokens where id = 'legacy-token'");
+    expect(legacy.rows[0]).toEqual({ purpose: "project", expires_at: null, revoked_at: null });
+    await state.db.query("delete from accounts where id = 'legacy'");
   }, 30_000);
   afterAll(async () => {
     if (state.db) await state.db.end();
@@ -145,5 +152,47 @@ describe("identity SQL adapter compatibility", () => {
     expect(await tokens.findAccount(sha256("fj_secret"))).toBeNull();
     await tokens.delete("user", "token");
     expect(await tokens.list("user")).toEqual([]);
+  });
+
+  it("isolates admin purpose across promotions, demotions, disabling, expiration and revocation", async () => {
+    await state.db.query("update accounts set disabled = false, platform_role = 'user' where id = 'user'");
+    const expires = new Date(Date.now() + 30 * 86_400_000);
+    await tokens.create("project-token", "user", "Project MCP", sha256("project-secret"), null);
+    await expect(tokens.create("unauthorized", "user", "Admin MCP", sha256("not-issued"), null, "admin", expires)).rejects.toThrow("administradores");
+    await state.db.query("update accounts set platform_role = 'admin' where id = 'user'");
+    expect(await tokens.findAccount(sha256("project-secret"), "admin")).toBeNull();
+    expect(await tokens.findAccount(sha256("project-secret"))).toMatchObject({ id: "user", platformRole: "admin" });
+    await tokens.create("admin-token", "user", "Admin MCP", sha256("admin-secret"), null, "admin", expires);
+    expect(await tokens.findAccount(sha256("admin-secret"))).toBeNull();
+    expect(await tokens.findAccount(sha256("admin-secret"), "admin")).toMatchObject({ id: "user", platformRole: "admin", disabled: false });
+    expect((await tokens.list("user")).map((token) => token.id)).toEqual(["project-token"]);
+    const list = await tokens.listAdmin("user");
+    expect(list).toMatchObject([{ id: "admin-token", purpose: "admin", expiresAt: expires, revokedAt: null }]);
+    expect(list[0]).not.toHaveProperty("token_hash");
+    const stored = await state.db.query("select token_hash from api_tokens where id = 'admin-token'");
+    expect(stored.rows[0].token_hash).toBe(sha256("admin-secret"));
+    expect(stored.rows[0].token_hash).not.toBe("admin-secret");
+    await state.db.query("update accounts set platform_role = 'user' where id = 'user'");
+    expect(await tokens.findAccount(sha256("admin-secret"), "admin")).toBeNull();
+    await state.db.query("update accounts set platform_role = 'admin', disabled = true where id = 'user'");
+    expect(await tokens.findAccount(sha256("admin-secret"), "admin")).toBeNull();
+    await expect(tokens.create("disabled-admin", "user", "Admin MCP", sha256("not-issued"), null, "admin", expires)).rejects.toThrow("administradores");
+    await state.db.query("update accounts set disabled = false where id = 'user'");
+    await state.db.query("update api_tokens set expires_at = now() - interval '1 second' where id = 'admin-token'");
+    expect(await tokens.findAccount(sha256("admin-secret"), "admin")).toBeNull();
+    await state.db.query("update api_tokens set expires_at = $1 where id = 'admin-token'", [expires]);
+    await tokens.delete("user", "admin-token");
+    expect(await tokens.findAccount(sha256("admin-secret"), "admin")).not.toBeNull();
+    expect(await tokens.revokeAdmin("admin", "admin-token")).toBe(false);
+    expect(await tokens.revokeAdmin("user", "project-token")).toBe(false);
+    expect(await tokens.revokeAdmin("user", "admin-token")).toBe(true);
+    expect(await tokens.revokeAdmin("user", "admin-token")).toBe(false);
+    expect(await tokens.findAccount(sha256("admin-secret"), "admin")).toBeNull();
+    expect(await tokens.listAdmin("user")).toMatchObject([{ id: "admin-token", revokedAt: expect.any(Date) }]);
+    await tokens.create("deleted-admin-token", "user", "Delete test", sha256("deleted-secret"), null, "admin", expires);
+    expect(await tokens.findAccount(sha256("deleted-secret"), "admin")).not.toBeNull();
+    await state.db.query("delete from api_tokens where id = 'deleted-admin-token'");
+    expect(await tokens.findAccount(sha256("deleted-secret"), "admin")).toBeNull();
+    await state.db.query("delete from api_tokens where account_id = 'user'; update accounts set platform_role = 'user' where id = 'user'");
   });
 });

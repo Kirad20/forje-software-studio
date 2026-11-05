@@ -1,4 +1,5 @@
 import { one, platformDb, q, type Tx } from "../../../shared/database/index.js";
+import type { PlatformRole } from "../domain/Account.js";
 import type { AccountAccessUpdate, AccountAdminView, AccountCreation, AccountLifecycleRepository, AccountSecurity, PublicAccount } from "../ports/accountLifecycle.js";
 
 const EVALUATION_ACCOUNT_EMAIL = "evals@forja.internal";
@@ -45,6 +46,10 @@ export class PostgresAccountLifecycleRepository implements AccountLifecycleRepos
 
   getAccount(id: string): Promise<PublicAccount | undefined> {
     return one<PublicAccount>(`select a.id, a.email, a.name, a.credits, a.platform_role as "platformRole" from accounts a where a.id = $1`, [id]);
+  }
+
+  getAccountAccess(id: string): Promise<{ platformRole: PlatformRole; disabled: boolean } | undefined> {
+    return one(`select platform_role as "platformRole", disabled from accounts where id = $1`, [id]);
   }
 
   listAccounts(excludeId?: string): Promise<AccountAdminView[]> {

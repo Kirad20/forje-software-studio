@@ -68,6 +68,42 @@ it("streams builder events and forwards the complete turn request", async () => 
   });
 });
 
+it("refreshes provider configuration before build and plan turns instead of using a stale startup cache", async () => {
+    const builder = ports();
+    let available = false;
+    builder.reloadSettings.mockImplementation(async () => { available = true; });
+    builder.runTurn.mockImplementation(async (_input, emit) => {
+      expect(available).toBe(true);
+      emit({ type: "text", text: "fresh providers" });
+    });
+    const app = createBuilderService(builder, "builder-secret");
+    for (const mode of ["build", "plan"]) {
+      available = false;
+      const response = await app.request("/internal/builder/turn", {
+        method: "POST", headers: { authorization: "Bearer builder-secret", "content-type": "application/json" },
+        body: JSON.stringify({ account, projectId: "p1", userText: "Build", mode }),
+      });
+      expect(response.status).toBe(200);
+      expect(await response.text()).toContain("fresh providers");
+    }
+    expect(builder.reloadSettings).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not start a turn with stale configuration if refresh fails", async () => {
+    const builder = ports();
+    builder.reloadSettings.mockRejectedValueOnce(new Error("database unavailable"));
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const response = await createBuilderService(builder, "builder-secret").request("/internal/builder/turn", {
+        method: "POST", headers: { authorization: "Bearer builder-secret", "content-type": "application/json" },
+        body: JSON.stringify({ account, projectId: "p1", userText: "Build" }),
+      });
+      expect(response.status).toBe(503);
+      expect(builder.runTurn).not.toHaveBeenCalled();
+      expect(log).toHaveBeenCalled();
+    } finally { log.mockRestore(); }
+  });
+
 it("replays live builder events after a client disconnects without stopping the turn", async () => {
   const builder = ports();
   let finish!: () => void;
