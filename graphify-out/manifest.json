@@ -3288,9 +3288,9 @@
     "semantic_hash": ""
   },
   "test/studio.mjs": {
-    "mtime": 1793836872.8473287,
-    "seen": 1793836907.2888422,
-    "ast_hash": "dd46ca4e4860a43194310c6b0794cb4c",
+    "mtime": 1793842487.4054585,
+    "seen": 1793842512.8627806,
+    "ast_hash": "485a66c3434da061f59c5f1e37b28bd2",
     "semantic_hash": ""
   },
   "test/unit/modules/settings/coreComposition.test.ts": {
@@ -3372,9 +3372,9 @@
     "semantic_hash": ""
   },
   "server/bootstrap/http/adminApi.ts": {
-    "mtime": 1793834764.7968125,
-    "seen": 1793834791.8920145,
-    "ast_hash": "d29fa90e9b219f6cd562677b32b9cc76",
+    "mtime": 1793842626.4948337,
+    "seen": 1793842657.2181475,
+    "ast_hash": "94d253213c592cd13b8811ca9f2a26a2",
     "semantic_hash": ""
   },
   "test/unit/modules/builder/listTasks.test.ts": {
