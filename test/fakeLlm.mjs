@@ -37,6 +37,16 @@ function script(body) {
       return {
         role: "planner",
         res: reply(null, [
+          call("write_file", {
+            path: "static/__dev/plan.md",
+            content: ["Contexto", "Modelo de datos", "Backend", "Interfaz", "Archivos clave", "Verificación", "Capacidad/orden"].map((n) => `## ${n}\nNotas: ${n}.`).join("\n\n"),
+          }),
+        ]),
+      };
+    if (step === 1)
+      return {
+        role: "planner",
+        res: reply(null, [
           call("submit_plan", {
             summary: "Haré una app de notas con su tabla, su API y su página.",
             contract: [

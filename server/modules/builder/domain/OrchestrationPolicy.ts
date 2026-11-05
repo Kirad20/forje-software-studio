@@ -1,6 +1,6 @@
 import type { AgentExecutionResult } from "./AgentExecution.js";
 import { ROLE_FOLDERS, CONTRACT_FILE, covers, type PlanTask, type SpecialistRole } from "./Plan.js";
-export { ROLE_FOLDERS, validatePlan, type Plan, type PlanTask, type SpecialistRole } from "./Plan.js";
+export { ROLE_FOLDERS, PLAN_DOC, checkPlanDoc, validatePlan, type Plan, type PlanTask, type SpecialistRole } from "./Plan.js";
 
 export interface Review {
   ok: boolean;
