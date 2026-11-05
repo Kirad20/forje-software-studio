@@ -1,15 +1,6 @@
 import { one, q } from "../../../shared/database/index.js";
 import { ensureProviders, onProvidersChanged, OPENROUTER_URL, providerSecret } from "../providers.js";
-
-function tierFor(id: string, inPrice: number): number {
-  const families: [RegExp, number][] = [
-    [/claude-opus|gpt-5(?!.*mini|.*nano)|gemini-[\d.]+-pro|o\d-pro/i, 5],
-    [/claude-sonnet|gemini-[\d.]+-flash(?!-lite)|deepseek|qwen.*coder|kimi|glm|gpt-.*mini/i, 4],
-    [/claude-haiku|flash-lite|qwen|mistral|llama-?[34]|gpt-.*nano|gemma/i, 3],
-  ];
-  for (const [re, tier] of families) if (re.test(id)) return tier;
-  return inPrice >= 3 ? 4 : inPrice >= 0.5 ? 3 : 2;
-}
+import { speedFor, tierFor } from "../domain/classification.js";
 
 export function createCatalogSync() {
   let syncing: Promise<number> | null = null;
@@ -39,7 +30,7 @@ export function createCatalogSync() {
           if (!Number.isFinite(inPrice) || inPrice < 0 || !Number.isFinite(outPrice) || outPrice < 0) continue;
           const tools = (m.supported_parameters ?? []).includes("tools");
           const cacheRead = m.pricing?.input_cache_read ? Number(m.pricing.input_cache_read) * 1e6 : null;
-          const speed = /flash|mini|nano|haiku|lite|8b|7b/i.test(m.id) ? 5 : /opus|pro|405b|large/i.test(m.id) ? 2 : 3;
+          const speed = speedFor(m.id);
           await q(
             `insert into model_catalog (id, provider, model, label, in_price, out_price, cache_read_price, context, tools, vision, tier, speed, synced_at)
              values ($1, 'openrouter', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, now())

@@ -1,5 +1,6 @@
 import { creditsAtRate, matchesModelPolicy, ModelError, validateModelInput, type ModelInfo, type ModelInput, type ModelScope } from "../domain/models.js";
 import type { CatalogRepository } from "../ports/CatalogRepository.js";
+import { classifyProviderModel, type ProviderModel } from "../domain/classification.js";
 
 export function createCatalogService(repository: CatalogRepository) {
   const platformAllows = (model: ModelInfo) => matchesModelPolicy(model, repository.policy().allow);
@@ -67,9 +68,28 @@ export function createCatalogService(repository: CatalogRepository) {
     await repository.remove(id);
     await repository.audit(id, actorId, "delete");
   }
+  async function importProviderModels(provider: string, remote: ProviderModel[], actorId: string | null) {
+    if (provider === "openrouter") throw new ModelError("Usa la sincronización de OpenRouter.");
+    if (!await repository.hasProvider(provider)) throw new ModelError(`No existe el proveedor «${provider}».`);
+    const existing = new Set((await repository.list()).map(m => m.id));
+    const result = { created: 0, skipped: 0, errors: [] as { model: string; error: string }[] };
+    for (const model of remote) {
+      const input = classifyProviderModel(provider, model);
+      const id = `${provider}:${model.id.trim()}`;
+      if (existing.has(id)) { result.skipped++; continue; }
+      try {
+        await saveModel(input, actorId, { create: true });
+        existing.add(id);
+        result.created++;
+      } catch (error) {
+        result.errors.push({ model: model.id, error: (error as Error).message });
+      }
+    }
+    return result;
+  }
   const setAccountModels = (id: string, ids: string[] | null) => repository.replaceAccountModels(id, ids === null ? null : [...new Set(ids)]);
   const setProjectModels = (id: string, ids: string[]) => repository.replaceProjectModels(id, [...new Set(ids)]);
   const creditsForUsd = (usd: number) => creditsAtRate(usd, repository.policy().creditsPerUsd);
   const accountCustomized = (accountId: string) => repository.accountCustomized(accountId);
-  return { platformAllows, availableModels, listCatalog, allowedModels, modelReadiness, permitAccountModel, saveModel, deleteModel, setAccountModels, setProjectModels, creditsForUsd, accountCustomized };
+  return { platformAllows, availableModels, listCatalog, allowedModels, modelReadiness, permitAccountModel, saveModel, deleteModel, importProviderModels, setAccountModels, setProjectModels, creditsForUsd, accountCustomized };
 }

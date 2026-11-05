@@ -54,9 +54,9 @@
     "semantic_hash": ""
   },
   "test/fakeLlm.mjs": {
-    "mtime": 1793815408.6475334,
-    "seen": 1793815428.4781983,
-    "ast_hash": "56e71c1a81b614087d4e21a108b16ccd",
+    "mtime": 1793897164.6619418,
+    "seen": 1793897194.9645815,
+    "ast_hash": "bdb1ad52cad571ab526e92cf7a982bd0",
     "semantic_hash": ""
   },
   "test/github.mjs": {
@@ -288,9 +288,9 @@
     "semantic_hash": ""
   },
   "test/unit/catalog.test.ts": {
-    "mtime": 1793800981.7135653,
-    "seen": 1793802431.5467346,
-    "ast_hash": "2d54edd19a158172545a202db6e5f8fe",
+    "mtime": 1793902239.7329295,
+    "seen": 1793902272.9851983,
+    "ast_hash": "b25509e3c1515f1b45b5e90c5f048811",
     "semantic_hash": ""
   },
   "seed.local.example.json": {
@@ -858,9 +858,9 @@
     "semantic_hash": ""
   },
   "server/modules/builder/domain/OrchestrationPolicy.ts": {
-    "mtime": 1793800981.4729712,
-    "seen": 1793802431.5457344,
-    "ast_hash": "80ceb4875c8e4902679dd3c1721a61d9",
+    "mtime": 1793896751.2695148,
+    "seen": 1793896778.5188847,
+    "ast_hash": "aa6c884166ceb7a874eb23410d14a3c2",
     "semantic_hash": ""
   },
   "server/modules/builder/infrastructure/AgentExecutionAdapter.ts": {
@@ -876,9 +876,9 @@
     "semantic_hash": ""
   },
   "server/modules/builder/infrastructure/BuilderTurnAdapter.ts": {
-    "mtime": 1793813907.923065,
-    "seen": 1793814224.4928567,
-    "ast_hash": "164034c1c7d422da195657418b17c52a",
+    "mtime": 1793896858.8536408,
+    "seen": 1793896860.4821603,
+    "ast_hash": "9ec3b0ced2de2dcbba8e1ae78cd75379",
     "semantic_hash": ""
   },
   "server/modules/builder/infrastructure/FinishGateAdapter.ts": {
@@ -1260,9 +1260,9 @@
     "semantic_hash": ""
   },
   "server/modules/builder/domain/Plan.ts": {
-    "mtime": 1793800981.474497,
-    "seen": 1793802431.5457344,
-    "ast_hash": "09b1c2174e6d734c0845ecc551a15e7d",
+    "mtime": 1793896751.314043,
+    "seen": 1793896778.5198846,
+    "ast_hash": "d9487ec7cae29d347422847493bd6aaa",
     "semantic_hash": ""
   },
   "server/modules/builder/domain/Standards.ts": {
@@ -1530,9 +1530,9 @@
     "semantic_hash": ""
   },
   "server/modules/builder/infrastructure/roles.ts": {
-    "mtime": 1793809838.7636418,
-    "seen": 1793809860.378884,
-    "ast_hash": "2ff679ac5eeb341a9c864d91b86301b7",
+    "mtime": 1793896772.9682763,
+    "seen": 1793896778.5298862,
+    "ast_hash": "25279ec6e5082d70be7d37fe5d2e4593",
     "semantic_hash": ""
   },
   "server/modules/builder/infrastructure/securityReview.ts": {
@@ -1614,9 +1614,9 @@
     "semantic_hash": ""
   },
   "server/modules/model-management/infrastructure/probe.ts": {
-    "mtime": 1793840196.0201814,
-    "seen": 1793840206.0142994,
-    "ast_hash": "94af04308babeb489946878c712c4018",
+    "mtime": 1793902165.5166917,
+    "seen": 1793902193.788436,
+    "ast_hash": "ca10b99ce6342abc96db0567018df0c6",
     "semantic_hash": ""
   },
   "server/modules/project-observability/infrastructure/events.ts": {
@@ -1680,9 +1680,9 @@
     "semantic_hash": ""
   },
   "studio/src/features/administration/presentation/Providers.tsx": {
-    "mtime": 1793840196.4972844,
-    "seen": 1793840206.071048,
-    "ast_hash": "616f4bc7ceb23fcf887345dbf50baa28",
+    "mtime": 1793902238.7243793,
+    "seen": 1793902272.9442677,
+    "ast_hash": "cf4a6845ccb47c7aa624a1628de3609b",
     "semantic_hash": ""
   },
   "studio/src/features/administration/presentation/Router.tsx": {
@@ -2700,9 +2700,9 @@
     "semantic_hash": ""
   },
   "test/unit/modules/model-management/catalog.test.ts": {
-    "mtime": 1793834765.8880706,
-    "seen": 1793834792.151047,
-    "ast_hash": "86a41b8d97b625eb0c6001898865ab6f",
+    "mtime": 1793902239.2363858,
+    "seen": 1793902273.0142775,
+    "ast_hash": "716aca3ab20092e91e7a586a9c7e7bcb",
     "semantic_hash": ""
   },
   "server/bootstrap/settingReactions.ts": {
@@ -2754,9 +2754,9 @@
     "semantic_hash": ""
   },
   "server/modules/model-management/application/CatalogService.ts": {
-    "mtime": 1793834764.2590878,
-    "seen": 1793834792.0089672,
-    "ast_hash": "0887192ad56bc560bf2b9ad6537c7add",
+    "mtime": 1793902165.0086002,
+    "seen": 1793902193.7734437,
+    "ast_hash": "07ae4ab68f752d42ebb759b754af14a9",
     "semantic_hash": ""
   },
   "server/modules/model-management/infrastructure/PostgresCatalogRepository.ts": {
@@ -2838,9 +2838,9 @@
     "semantic_hash": ""
   },
   "server/modules/model-management/infrastructure/OpenRouterCatalogSync.ts": {
-    "mtime": 1793800981.7245657,
-    "seen": 1793802431.5457344,
-    "ast_hash": "0fe91fbad726b37f8a5d63430647457a",
+    "mtime": 1793902164.4916587,
+    "seen": 1793902193.7834363,
+    "ast_hash": "c39b40adcbe41926a463129341c97ce7",
     "semantic_hash": ""
   },
   "server/modules/app-runtime/factory.ts": {
@@ -3372,9 +3372,9 @@
     "semantic_hash": ""
   },
   "server/bootstrap/http/adminApi.ts": {
-    "mtime": 1793842626.4948337,
-    "seen": 1793842657.2181475,
-    "ast_hash": "94d253213c592cd13b8811ca9f2a26a2",
+    "mtime": 1793902166.0081372,
+    "seen": 1793902193.644655,
+    "ast_hash": "9ae299afcdd54f99ecd99eac3d2e32ef",
     "semantic_hash": ""
   },
   "test/unit/modules/builder/listTasks.test.ts": {
@@ -3825,6 +3825,30 @@
     "mtime": 1793896015.9220407,
     "seen": 1793896042.9830284,
     "ast_hash": "7f3ef68227cd097376b31fb4f8f5d47a",
+    "semantic_hash": ""
+  },
+  "test/unit/modules/builder/planDoc.test.ts": {
+    "mtime": 1793896831.221782,
+    "seen": 1793896860.6664016,
+    "ast_hash": "15c37a7f980117097a51b2155b39e1a0",
+    "semantic_hash": ""
+  },
+  "docs/builder-plan-document.md": {
+    "mtime": 1793896878.8060684,
+    "seen": 1793897195.13712,
+    "ast_hash": "b5d5f2ede947439ab43ea2f9e19aeafa",
+    "semantic_hash": ""
+  },
+  "server/modules/model-management/domain/classification.ts": {
+    "mtime": 1793902163.9620876,
+    "seen": 1793902193.779442,
+    "ast_hash": "4536bbd117029cf261bbdb3e01a8963b",
+    "semantic_hash": ""
+  },
+  "test/unit/modules/model-management/provider-discovery.test.ts": {
+    "mtime": 1793902283.5391018,
+    "seen": 1793902293.681133,
+    "ast_hash": "e0a6ecedb57f461ee664563b201bc477",
     "semantic_hash": ""
   },
   "package-lock.json": {

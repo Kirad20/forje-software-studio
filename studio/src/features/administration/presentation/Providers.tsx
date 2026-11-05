@@ -3,6 +3,7 @@ import { api } from "../application/controller.js";
 import { Switch } from "../../../shared/ui.js";
 import { EditDialog } from "../../../shared/EditDialog.js";
 import { useConfirmation } from "../../../shared/ConfirmDialog.js";
+import { WandSparkles } from "lucide-react";
 
 interface ProviderView {
   id: string;
@@ -59,6 +60,9 @@ export function Providers() {
       <p className="small muted" style={{ margin: 0 }}>
         Un proveedor se usa cuando está activado y tiene su clave (o su URL). Las claves se guardan cifradas y nunca vuelven al navegador.
       </p>
+      <p className="small muted" style={{ margin: 0 }}>
+        El alta mágica conserva los metadatos publicados y estima calidad/velocidad por familia: Opus 5/2, Sonnet 4/3, Haiku 3/5. Fable queda provisionalmente en 3/3, sin capacidades asumidas. Sin metadatos se usa contexto de 128 000 y precios de 0 como pendientes, no como tarifa gratuita. Los nuevos modelos quedan desactivados hasta tu revisión; no cambia permisos ni modelos existentes.
+      </p>
       <div className="admin-toolbar">
         <input type="search" name="provider-search" autoComplete="off" autoCorrect="off" spellCheck={false} aria-label="Buscar proveedores" placeholder="Buscar por nombre, identificador o URL…" value={filter} onChange={(e) => setFilter(e.target.value)} />
         <button className="primary" disabled={adding} onClick={() => setAdding(true)}>+ Añadir proveedor</button>
@@ -106,6 +110,21 @@ function ProviderCard({ p, onPatch, onDeleted }: { p: ProviderView; onPatch: (b:
       setTesting(false);
     }
   };
+  const importModels = async () => {
+    if (!await confirm(`¿Dar de alta y clasificar los modelos de ${p.label}? Los existentes no se modifican. Los nuevos quedan desactivados: revisa precios, contexto y capacidades antes de activarlos. La calidad y velocidad son estimaciones por familia, no mediciones.`)) return;
+    setBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      const result = await api<{ created: number; skipped: number; errors: { model: string; error: string }[] }>(
+        `/admin/providers/${encodeURIComponent(p.id)}/models/import`, { body: {} },
+      );
+      setNotice(`${result.created} modelos propios creados y desactivados para revisión · ${result.skipped} existentes sin cambios. Revisa y activa los nuevos en Administración → Modelos (desmarca «Solo utilizables»).`);
+      if (result.errors.length) setError(result.errors.map(e => `${e.model}: ${e.error}`).join(" · "));
+    } catch (e) {
+      setError((e as Error).message);
+    } finally { setBusy(false); }
+  };
   return (
     <section className="card stack" style={{ padding: 16, gap: 10 }}>
       <div className="row">
@@ -152,6 +171,9 @@ function ProviderCard({ p, onPatch, onDeleted }: { p: ProviderView; onPatch: (b:
         <button onClick={() => void test()} disabled={busy || testing || !p.available}>
           {testing ? <span className="spinner" /> : "Probar conexión"}
         </button>
+        {p.id !== "openrouter" && <button className="primary" onClick={() => void importModels()} disabled={busy || testing || !p.available}>
+          <WandSparkles size={16} aria-hidden="true" /> Dar de alta y clasificar modelos
+        </button>}
         {probe &&
           (probe.ok ? (
             <span className="pill ok">

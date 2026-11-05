@@ -97,6 +97,19 @@ describe("providers and models", () => {
     expect((await providers.listProviders()).find((p) => p.id === "anthropic")).toMatchObject({ available: false, keyBroken: true });
     expect(catalog.providers()).toEqual([]);
   });
+
+  it("persists classified provider imports disabled and preserves prior edits on repeat imports", async () => {
+    await providers.saveProvider({ id: "import-lab", baseUrl: "http://127.0.0.1:11434/v1" }, null, { create: true });
+    const service = monolith.models.catalog;
+    const remote = [{ id: "claude-opus-5", inPrice: 4, outPrice: 20 }];
+    expect(await service.importProviderModels("import-lab", remote, null)).toEqual({ created: 1, skipped: 0, errors: [] });
+    expect((await catalog.listCatalog()).find(m => m.id === "import-lab:claude-opus-5"))
+      .toMatchObject({ source: "custom", tier: 5, speed: 2, enabled: false, tools: true, vision: true, inPrice: 4, outPrice: 20 });
+    await catalog.saveModel({ provider: "import-lab", model: "claude-opus-5", tier: 4, enabled: true }, null);
+    expect(await service.importProviderModels("import-lab", remote, null)).toEqual({ created: 0, skipped: 1, errors: [] });
+    expect((await catalog.listCatalog()).find(m => m.id === "import-lab:claude-opus-5")).toMatchObject({ tier: 4, enabled: true });
+    await providers.deleteProvider("import-lab", null);
+  });
 });
 
 describe("seed.local.json", () => {
