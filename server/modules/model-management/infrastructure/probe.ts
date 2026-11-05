@@ -5,6 +5,8 @@ import { invoke } from "../router.js";
 import type { LlmResponse } from "../types.js";
 import { q } from "../../../shared/database/index.js";
 import { ollamaBaseUrl } from "./ollama.js";
+import type { ProviderModel } from "../domain/classification.js";
+export type { ProviderModel } from "../domain/classification.js";
 
 /**
  * Connection tests for the admin panel. They answer with what happened, never throw:
@@ -52,16 +54,6 @@ export async function probeProvider(id: string): Promise<ProviderProbe> {
   }
 }
 
-export interface ProviderModel {
-  /** Name in the provider's API. */
-  id: string;
-  label?: string;
-  context?: number;
-  /** USD per million tokens, when the provider publishes them. */
-  inPrice?: number;
-  outPrice?: number;
-}
-
 const perMillion = (v: unknown) => {
   const n = Number(v) * 1e6;
   return v !== undefined && v !== null && v !== "" && Number.isFinite(n) && n >= 0 ? n : undefined;
@@ -75,8 +67,11 @@ export async function listProviderModels(id: string): Promise<{ models: Provider
   try {
     if (view.kind === "anthropic") {
       const sdk = new Anthropic({ apiKey: providerSecret(id)!, maxRetries: 0, timeout: TIMEOUT_MS });
-      const page = await sdk.models.list({ limit: 1000 });
-      return { models: page.data.map((m) => ({ id: m.id, label: m.display_name })) };
+      const models: ProviderModel[] = [];
+      for await (const m of sdk.models.list({ limit: 1000 })) {
+        models.push({ id: m.id, label: m.display_name });
+      }
+      return { models };
     }
     const endpoint = providerOf(id)!.endpoint!;
     const res = await fetch(view.kind === "ollama" ? `${ollamaBaseUrl(endpoint.baseUrl)}/api/tags` : `${endpoint.baseUrl}/models`, {
@@ -86,13 +81,15 @@ export async function listProviderModels(id: string): Promise<{ models: Provider
     if (!res.ok) return { models: [], error: `HTTP ${res.status}: ${(await res.text().catch(() => "")).slice(0, 300)}` };
     const body = (await res.json()) as {
       models?: { name: string }[];
-      data?: { id?: unknown; name?: unknown; context_length?: unknown; pricing?: { prompt?: unknown; completion?: unknown } }[];
+      data?: { id?: unknown; name?: unknown; context_length?: unknown; pricing?: { prompt?: unknown; completion?: unknown; input_cache_read?: unknown };
+        architecture?: { input_modalities?: string[] }; supported_parameters?: string[] }[];
     };
     if (view.kind === "ollama") {
       if (!Array.isArray(body.models)) return { models: [], error: "Ollama no devolvió una lista de modelos válida." };
       return { models: body.models.map(m => ({ id: m.name, label: m.name, inPrice: 0, outPrice: 0 })).sort((a, b) => a.id.localeCompare(b.id)) };
     }
-    const models = (Array.isArray(body.data) ? body.data : [])
+    if (!Array.isArray(body.data)) return { models: [], error: "El proveedor no devolvió una lista de modelos válida." };
+    const models = body.data
       .filter((m) => typeof m.id === "string" && m.id)
       .map((m): ProviderModel => ({
         id: m.id as string,
@@ -100,6 +97,9 @@ export async function listProviderModels(id: string): Promise<{ models: Provider
         context: typeof m.context_length === "number" ? m.context_length : undefined,
         inPrice: perMillion(m.pricing?.prompt),
         outPrice: perMillion(m.pricing?.completion),
+        cacheReadPrice: perMillion(m.pricing?.input_cache_read),
+        tools: Array.isArray(m.supported_parameters) ? m.supported_parameters.includes("tools") : undefined,
+        vision: Array.isArray(m.architecture?.input_modalities) ? m.architecture.input_modalities.includes("image") : undefined,
       }))
       .sort((a, b) => a.id.localeCompare(b.id));
     return { models };

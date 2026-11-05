@@ -1,10 +1,60 @@
 import { describe, expect, it, vi } from "vitest";
 import { createCatalogService } from "../../../../server/modules/model-management/application/CatalogService.js";
 import { costUsd, creditsAtRate, matchesModelPolicy } from "../../../../server/modules/model-management/domain/models.js";
+import { classifyProviderModel } from "../../../../server/modules/model-management/domain/classification.js";
 const a = { id: "local:a", provider: "local", model: "a", label: "A", inPrice: 1, outPrice: 2,
   cacheReadPrice: 0.1, context: 128000, tools: true, vision: false, tier: 3, speed: 3, source: "custom" as const };
 const b = { ...a, id: "local:b", model: "b" };
 describe("catalog application and model policies", () => {
+  it.each([
+    ["claude-fable-5", 3, 3, false],
+    ["claude-fable-5-1", 3, 3, false],
+    ["claude-haiku-4-5-20251001", 3, 5, true],
+    ["claude-opus-4-5-20251101", 5, 2, true],
+    ["claude-opus-4-6", 5, 2, true],
+    ["claude-opus-4-7", 5, 2, true],
+    ["claude-opus-4-8", 5, 2, true],
+    ["claude-opus-5", 5, 2, true],
+    ["claude-opus-5-5", 5, 2, true],
+    ["claude-sonnet-4-5-20250929", 4, 3, true],
+    ["claude-sonnet-4-6", 4, 3, true],
+    ["claude-sonnet-5", 4, 3, true],
+    ["claude-sonnet-5-5", 4, 3, true],
+  ])("classifies %s by family without activating unreviewed models", (id, tier, speed, capabilities) => {
+    expect(classifyProviderModel("gateway", { id })).toMatchObject({
+      provider: "gateway", model: id, tier, speed, tools: capabilities, vision: capabilities, enabled: false,
+    });
+  });
+  it("preserves provider metadata over family assumptions and treats unknown capabilities conservatively", () => {
+    expect(classifyProviderModel("gateway", {
+      id: "anthropic/claude-opus-5", label: "Proxy Opus", tools: false, vision: false,
+      context: 240_000, inPrice: 1.5, outPrice: 7, cacheReadPrice: 0.15,
+    })).toMatchObject({
+      label: "Proxy Opus", tools: false, vision: false, context: 240_000,
+      inPrice: 1.5, outPrice: 7, cacheReadPrice: 0.15, tier: 5, speed: 2, enabled: false,
+    });
+    expect(classifyProviderModel("gateway", { id: "unknown" })).toMatchObject({ tools: false, vision: false, enabled: false });
+  });
+  it("imports only new unique models, audits them and reports individual failures", async () => {
+    const repository = {
+      list: vi.fn(async () => [{ ...a, enabled: true }]),
+      hasProvider: vi.fn(async () => true), find: vi.fn(async () => undefined),
+      create: vi.fn(async () => {}), audit: vi.fn(async () => {}), update: vi.fn(),
+    };
+    const catalog = createCatalogService(repository as never);
+    const result = await catalog.importProviderModels("local", [
+      { id: "a" }, { id: "claude-sonnet-5", inPrice: 2, outPrice: 10 },
+      { id: "claude-sonnet-5" }, { id: "invalid", context: -1 },
+    ], "admin");
+    expect(result).toEqual({ created: 1, skipped: 2, errors: [{ model: "invalid", error: "Contexto: entre 1000 y 100000000" }] });
+    expect(repository.create).toHaveBeenCalledExactlyOnceWith("local:claude-sonnet-5", "local", "claude-sonnet-5",
+      expect.objectContaining({ tier: 4, speed: 3, tools: true, vision: true, inPrice: 2, outPrice: 10, enabled: false }));
+    expect(repository.audit).toHaveBeenCalledExactlyOnceWith("local:claude-sonnet-5", "admin", "create");
+    expect(repository.update).not.toHaveBeenCalled();
+    await expect(catalog.importProviderModels("openrouter", [], "admin")).rejects.toThrow("sincronización");
+    repository.hasProvider.mockResolvedValue(false);
+    await expect(catalog.importProviderModels("missing", [], "admin")).rejects.toThrow("No existe el proveedor");
+  });
   it("explains each permission layer even when a visual model is active in administration", async () => {
     const repository = {
       policy: () => ({ allow: ["local:*"], creditsPerUsd: 10 }),

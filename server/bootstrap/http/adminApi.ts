@@ -95,6 +95,14 @@ export function createAdminApi({ identity, settings, models }: AdminApiModules) 
     await rateLimit(`probe:${me(c)}`, 30, 60_000);
     return c.json(await listProviderModels(c.req.param("id")!));
   });
+  modelRoutes.post("/providers/:id/models/import", async (c) => {
+    await rateLimit(`sync:${me(c)}`, 5, 60 * 60_000);
+    const provider = c.req.param("id")!;
+    if (provider === "openrouter") throw new ModelError("Usa la sincronización de OpenRouter.");
+    const remote = await listProviderModels(provider);
+    if (remote.error) return c.json({ error: remote.error }, 400);
+    return c.json(await models.catalog.importProviderModels(provider, remote.models, me(c)));
+  });
 
   modelRoutes.get("/models", async (c) =>
     c.json({
