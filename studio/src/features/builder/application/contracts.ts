@@ -1,4 +1,6 @@
 export type ChatStreamEvent =
+  | { type: "fusion_step"; taskId?: string; step: { id: string; phase: "draft" | "judge" | "critic" | "revision" | "escalation"; modelId: string; effort: string; ms: number; usd: number; credits: number; error?: string; context?: { estimatedInputTokens: number; messages: number; fileReadCalls: number; requestedFileCount: number } } }
+  | { type: "fusion_done"; taskId?: string; operationId: string; pattern: "single" | "cascade" | "critique"; warnings: string[]; usd: number; credits: number }
   | { type: "route"; fastPath?: boolean }
   | {
       type: "plan";

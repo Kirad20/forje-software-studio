@@ -29,6 +29,13 @@ describe("platform settings", () => {
     expect(config.models.allow).toEqual(DEFAULT_MODELS_ALLOW);
     const view = await store.listSettings();
     expect(view.find((s) => s.key === "signup")).toMatchObject({ value: "open", isDefault: true, default: "open" });
+    expect(view.filter((s) => s.key.startsWith("models.fusion.")).map((s) => s.key)).toHaveLength(12);
+    expect(config.models.fusion).toMatchObject({
+      fast: { maxCalls: 2, timeoutMs: 45_000, maxUsd: 0.05 },
+      standard: { maxCalls: 4, timeoutMs: 60_000, maxUsd: 0.10 },
+      high: { maxCalls: 6, timeoutMs: 120_000, maxUsd: 0.50 },
+      max: { maxCalls: 8, timeoutMs: 180_000, maxUsd: 1 },
+    });
   });
 
   it("write onto the live config, notify listeners, and reset to the default", async () => {
@@ -48,6 +55,8 @@ describe("platform settings", () => {
     const before = config.freeCredits;
     await expect(store.updateSettings({ freeCredits: 5, signup: "x" }, null)).rejects.toMatchObject({ field: "signup" });
     await expect(store.updateSettings({ "evals.concurrency": 9 }, null)).rejects.toMatchObject({ field: "evals.concurrency" });
+    await expect(store.updateSettings({ "models.fusion.high.maxCalls": 0 }, null))
+      .rejects.toMatchObject({ field: "models.fusion.high.maxCalls" });
     await expect(store.updateSettings({ nope: 1 }, null)).rejects.toMatchObject({ field: "nope" });
     expect(config.freeCredits).toBe(before);
   });

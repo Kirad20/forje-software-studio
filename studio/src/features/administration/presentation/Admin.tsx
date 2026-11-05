@@ -6,6 +6,7 @@ import { Router } from "./Router.js";
 import { Settings } from "./Settings.js";
 import { Users } from "./Users.js";
 import { ApiTokens } from "./ApiTokens.js";
+import { Audit } from "./Audit.js";
 import { Evals } from "../../evaluations/index.js";
 
 /** Platform administration: everything that used to be environment variables, and the tools to try it. */
@@ -15,6 +16,7 @@ const TABS = [
   ["models", "Modelos", Models],
   ["agents", "Agentes", Agents],
   ["router", "Enrutador", Router],
+  ["audit", "Auditoría", Audit],
   ["evals", "Evals", Evals],
   ["users", "Usuarios", Users],
   ["tokens", "API tokens", ApiTokens],

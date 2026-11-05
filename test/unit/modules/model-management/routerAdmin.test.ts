@@ -9,6 +9,7 @@ describe("router administration application", () => {
         { taskClass: "ui", modelId: "c", alpha: 2, beta: 2, uses: 4, usd: 1 },
       ]),
       decisions: vi.fn(async (_limit: number) => []),
+      fusionTraces: vi.fn(async (_limit: number) => []),
       reset: vi.fn(async (_taskClass: string | null, _modelId: string | null) => 2),
     };
     const service = createRouterAdministration(repository);
@@ -18,6 +19,8 @@ describe("router administration application", () => {
     expect(stats.classes[1]?.models[0]).toMatchObject({ mean: 0.75, usdPerUse: 0 });
     expect(stats.classes[1]?.models[1]).toMatchObject({ mean: 0.25, usdPerUse: 2 });
     expect(repository.decisions).toHaveBeenCalledWith(12);
+    expect(repository.fusionTraces).toHaveBeenCalledWith(12);
+    expect(stats.fusionTraces).toEqual([]);
     await service.routerStats();
     expect(repository.decisions).toHaveBeenLastCalledWith(100);
     expect(await service.resetRouter({ taskClass: "", modelId: "a" })).toBe(2);

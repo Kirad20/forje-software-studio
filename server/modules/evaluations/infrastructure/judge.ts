@@ -58,9 +58,9 @@ export function parseJudgement(raw: string, model: string): Judgement {
 /**
  * Judges one app with a fixed model: a judge that changed from case to case would add its own
  * variance to every score. The billing charges the eval account, so the run's budget sees the
- * judge's cost too. (`pinned` only yields to another model if this one fails.)
+ * judge's cost too. Only an explicit user choice forbids provider fallback.
  */
-export async function judgeDesign(scope: ModelScope, billing: Billing, model: ModelInfo, input: JudgeInput, signal: AbortSignal): Promise<{ judgement?: Judgement; error?: string; usd: number }> {
+export async function judgeDesign(scope: ModelScope, billing: Billing, model: ModelInfo, input: JudgeInput, signal: AbortSignal, explicit = false): Promise<{ judgement?: Judgement; error?: string; usd: number }> {
   const content: Block[] = [
     { type: "text", text: `Lo que pidió el dueño:\n${input.prompt}\n\nTexto visible (extracto):\n${input.text.slice(0, 1500) || "(vacío)"}\n\nCapturas, en orden:` },
   ];
@@ -78,7 +78,7 @@ export async function judgeDesign(scope: ModelScope, billing: Billing, model: Mo
         "qa",
         { complexity: 3, domains: ["ui"], needsVision: true, needsTools: false },
         { system: JUDGE_SYSTEM, messages: [{ role: "user", content }], maxTokens: 1200, signal },
-        { billing, pinned: model },
+        { billing, ...(explicit ? { explicit: model } : { pinned: model }), decisionBoundary: false },
       );
       usd += res.usd;
       try {

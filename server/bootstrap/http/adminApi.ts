@@ -24,6 +24,7 @@ import {
 import { EVAL_EMAIL } from "../../modules/evaluations/runner.js";
 import { createPlatformModelManagement } from "../../modules/model-management/index.js";
 import { rateLimit, RateLimitError, RateLimitStoreError } from "../../shared/security.js";
+import { auditWindow, readExecutionAudit, type AuditFilter } from "../../modules/execution-audit/index.js";
 
 type AdminApiModules = {
   identity: IdentityModule;
@@ -36,13 +37,30 @@ type AdminApiModules = {
 const me = (c: { get(k: "account"): PublicAccount }) => c.get("account").id;
 const body = async <T,>(c: { req: { json<X>(): Promise<X> } }) => ((await c.req.json<T>().catch(() => ({}))) ?? {}) as T;
 
-export function createAdminApi({ identity, settings, models }: AdminApiModules) {
+export function createAdminApi({ identity, settings, models }: AdminApiModules, auditQuery = readExecutionAudit) {
   const accountRoutes = new Hono<AdministrationEnv>();
   const settingsRoutes = new Hono<AdministrationEnv>();
   const modelRoutes = new Hono<AdministrationEnv>();
   const agentRoutes = new Hono<AdministrationEnv>();
   const routerRoutes = new Hono<AdministrationEnv>();
   const tokenRoutes = new Hono<AdministrationEnv>();
+  const auditRoutes = new Hono<AdministrationEnv>();
+
+  auditRoutes.use("/audit", async (c, next) => {
+    c.header("Cache-Control", "no-store");
+    const account = c.get("account");
+    if (!account) return c.json({ error: "No has iniciado sesión" }, 401);
+    if (account.disabled || account.platformRole !== "admin") return c.json({ error: "Solo administradores de la plataforma." }, 403);
+    await next();
+  });
+  auditRoutes.get("/audit", async (c) => {
+    const query = c.req.query();
+    const filter: AuditFilter = { ...query,
+      ...(query.limit === undefined ? {} : { limit: Number(query.limit) }),
+      ...(query.offset === undefined ? {} : { offset: Number(query.offset) }),
+    };
+    return c.json(await auditQuery(auditWindow(filter)));
+  });
 
   tokenRoutes.use("/tokens/*", async (c, next) => {
     c.header("Cache-Control", "no-store");
@@ -191,6 +209,7 @@ export function createAdminApi({ identity, settings, models }: AdminApiModules) 
     agents: agentRoutes,
     router: routerRoutes,
     tokens: tokenRoutes,
+    audit: auditRoutes,
   });
   api.onError((error, c) => {
     if (error instanceof AdminApiTokenError) return c.json({ error: error.message }, error.status);

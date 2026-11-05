@@ -2,11 +2,12 @@ import { describe, expect, it, vi } from "vitest";
 import { RunAgentUseCase } from "../../../../server/modules/builder/application/RunAgentUseCase.js";
 import { ScheduleTasksUseCase } from "../../../../server/modules/builder/application/ScheduleTasksUseCase.js";
 import { validatePlan, rewardOf } from "../../../../server/modules/builder/domain/OrchestrationPolicy.js";
+import type { BuilderFusionTrace } from "../../../../server/modules/builder/domain/AgentExecution.js";
 
 const usage = { input: 10, output: 2, cacheRead: 3, cacheWrite: 1 };
 const model = { id: "m", model: "model", vision: true };
 const response = (content: any[]) => ({ model, failed: [], response: { content, usage }, usd: 0.01, credits: 1 });
-function fixture(responses: ReturnType<typeof response>[]) {
+function fixture(responses: (ReturnType<typeof response> & { totalUsage?: typeof usage; fusion?: BuilderFusionTrace })[]) {
   const messages: any[] = [];
   const events: any[] = [];
   const ports = {
@@ -17,6 +18,7 @@ function fixture(responses: ReturnType<typeof response>[]) {
     now: () => 10,
     recordStep: vi.fn(),
     recordToolCall: vi.fn(),
+    recordContextEvent: vi.fn(),
   };
   const spec = {
     role: "fast", messages: [{ role: "user" as const, content: "build" }],
@@ -28,6 +30,67 @@ function fixture(responses: ReturnType<typeof response>[]) {
 }
 
 describe("agent execution through ports", () => {
+  it("accounts for every physical call but executes only the accepted proposal and emits metadata only", async () => {
+    const totalUsage = { input: 50, output: 20, cacheRead: 9, cacheWrite: 4 };
+    const step = { id: "critic-1", phase: "critic" as const, modelId: "reviewer", effort: "high" as const, usage, usd: 0.03, credits: 3, ms: 20 };
+    const accepted = {
+      ...response([{ type: "tool_use", id: "final", name: "write_file", input: {} }]),
+      usd: 0.06, credits: 6, totalUsage,
+      fusion: { operationId: "op", effort: "high" as const, pattern: "critique" as const, warnings: ["budget limit"], steps: [step] },
+    };
+    const f = fixture([accepted]);
+    f.spec.maxSteps = 1;
+    const write = vi.fn(async () => "written");
+    f.spec.tools.push({ name: "write_file", description: "", input_schema: {}, run: write });
+    const original = f.ports.callModel.getMockImplementation()!;
+    f.ports.callModel.mockImplementation(async request => {
+      (request as any).onFusionStep({ ...step, reasoning: "private critic reasoning", content: [{ type: "tool_use", name: "write_file" }] });
+      return original(request);
+    });
+
+    const result = await f.useCase.execute(f.spec);
+    expect(result).toMatchObject({ usage: totalUsage, usd: 0.06, credits: 6 });
+    expect(write).toHaveBeenCalledOnce();
+    expect(f.ports.countAction).toHaveBeenCalledOnce();
+    expect(f.ports.recordStep).toHaveBeenCalledWith(expect.objectContaining({ usage: totalUsage, usd: 0.06 }));
+    expect(f.events.find(e => e.type === "fusion_step")).toMatchObject({ taskId: "task", step });
+    expect(f.events.find(e => e.type === "fusion_done")).toMatchObject({ pattern: "critique", warnings: ["budget limit"], usd: 0.06 });
+    expect(JSON.stringify(f.events)).not.toContain("private critic reasoning");
+    expect(f.messages[0].content).toEqual(accepted.response.content);
+  });
+
+  it("never executes or persists an unaccepted draft when Fusion exhausts its review budget", async () => {
+    const f = fixture([]);
+    const write = vi.fn(async () => "written");
+    f.spec.tools.push({ name: "write_file", description: "", input_schema: {}, run: write });
+    f.ports.callModel.mockImplementation(async request => {
+      (request as any).onFusionStep({ id: "draft", phase: "draft", modelId: "author", effort: "low", ms: 10, usage, usd: 0.01, credits: 1,
+        content: [{ type: "tool_use", id: "draft-tool", name: "write_file", input: {} }] });
+      throw new Error("Review budget exhausted");
+    });
+    await expect(f.useCase.execute(f.spec)).rejects.toThrow("Review budget exhausted");
+    expect(write).not.toHaveBeenCalled();
+    expect(f.ports.countAction).not.toHaveBeenCalled();
+    expect(f.ports.save).not.toHaveBeenCalled();
+    expect(f.events.map(e => e.type)).toEqual(["fusion_step"]);
+    expect(JSON.stringify(f.events)).not.toContain("draft-tool");
+  });
+
+  it("audits measured file-result bytes and correlation IDs without leaking paths or contents", async () => {
+    const f = fixture([{
+      ...response([{ type: "tool_use", id: "read", name: "read_files", input: { paths: ["private.ts"] } }]),
+      fusion: { operationId: "trace", effort: "standard", pattern: "single", warnings: [], steps: [] },
+    }]);
+    f.spec.maxSteps = 1;
+    f.spec.tools.push({ name: "read_files", description: "", input_schema: {}, run: async () => "á💡private source" });
+    await f.useCase.execute(f.spec);
+    expect(f.ports.recordContextEvent).toHaveBeenCalledExactlyOnceWith({
+      projectId: "p", turnId: "turn", taskId: "task", agentId: "run", traceId: "trace",
+      kind: "file_read", measured: true, bytes: new TextEncoder().encode("á💡private source").length, count: 1,
+    });
+    expect(JSON.stringify(f.ports.recordContextEvent.mock.calls)).not.toContain("private");
+  });
+
   it("runs tools concurrently, keeps thinking blocks, persists text results, bills every model response", async () => {
     const thinking = { type: "thinking", thinking: "reason", signature: "sig" };
     const f = fixture([
@@ -81,6 +144,7 @@ describe("agent execution through ports", () => {
     const result = await f.useCase.execute({ ...f.spec, finishGate: { check } });
     expect(result).toMatchObject({ gate: "failed", gateFixes: 2 });
     expect(check).toHaveBeenCalledTimes(3);
+    expect(f.ports.callModel.mock.calls.every(([request]) => (request as any).decisionBoundary)).toBe(true);
   });
 
   it("records a gate infrastructure failure visibly without claiming a pass", async () => {

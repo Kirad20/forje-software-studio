@@ -19,7 +19,7 @@ describe("model management queries", () => {
   it("returns project defaults and both account and effective model lists", async () => {
     const { service, catalog } = setup();
     expect(await service.projectModels("project", "owner")).toMatchObject({
-      mode: "balanced", concurrency: 3, restricted: true, accountAllowed: [{ id: "a" }], effective: [{ id: "a" }],
+      mode: "standard", concurrency: 3, restricted: true, accountAllowed: [{ id: "a" }], effective: [{ id: "a" }],
     });
     expect(catalog.allowedModels.mock.calls).toEqual([[{ accountId: "owner" }], [{ accountId: "owner", projectId: "project" }]]);
   });
@@ -27,8 +27,8 @@ describe("model management queries", () => {
     const { service, repository, catalog } = setup();
     await expect(service.updateProjectModels("project", { mode: "invalid" })).rejects.toThrow("Modo no válido");
     expect(repository.updateProjectSettings).not.toHaveBeenCalled();
-    await service.updateProjectModels("project", { mode: "quality", concurrency: 8.6, enabled: ["a"] });
-    expect(repository.updateProjectSettings).toHaveBeenLastCalledWith("project", "quality", 5);
+    await service.updateProjectModels("project", { mode: "max", concurrency: 8.6, enabled: ["a"] });
+    expect(repository.updateProjectSettings).toHaveBeenLastCalledWith("project", "max", 5);
     expect(catalog.setProjectModels).toHaveBeenCalledWith("project", ["a"]);
     await service.updateProjectModels("project", { concurrency: 0 });
     expect(repository.updateProjectSettings).toHaveBeenLastCalledWith("project", null, null);
@@ -44,10 +44,10 @@ describe("model management queries", () => {
     expect(repository.spend).toHaveBeenCalledWith("project");
   });
   it("keeps project setting updates and bounded builder-only audit SQL inside the adapter", async () => {
-    await postgresModelManagementRepository.updateProjectSettings("project", "saving", 2);
+    await postgresModelManagementRepository.updateProjectSettings("project", "standard", 2);
     expect(database.q).toHaveBeenLastCalledWith(
       "update projects set model_mode = coalesce($2, model_mode), agent_concurrency = coalesce($3, agent_concurrency) where id = $1",
-      ["project", "saving", 2],
+      ["project", "standard", 2],
     );
     await postgresModelManagementRepository.decisions("project");
     expect(database.q).toHaveBeenLastCalledWith(expect.stringContaining("order by id desc limit 40"), ["project"]);
@@ -55,7 +55,7 @@ describe("model management queries", () => {
     expect(database.q).toHaveBeenLastCalledWith(
       expect.stringContaining("source = 'builder' group by model, role order by sum(usd) desc"), ["project"],
     );
-    database.one.mockResolvedValueOnce({ model_mode: "quality", agent_concurrency: 4 });
-    expect(await postgresModelManagementRepository.projectSettings("project")).toEqual({ mode: "quality", concurrency: 4 });
+    database.one.mockResolvedValueOnce({ model_mode: "max", agent_concurrency: 4 });
+    expect(await postgresModelManagementRepository.projectSettings("project")).toEqual({ mode: "max", concurrency: 4 });
   });
 });

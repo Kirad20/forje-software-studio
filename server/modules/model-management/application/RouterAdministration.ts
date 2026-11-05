@@ -12,7 +12,11 @@ export function createRouterAdministration(repository: RouterAdministrationRepos
       byClass.set(row.taskClass, group);
     }
     for (const group of byClass.values()) group.models.sort((a, b) => b.mean - a.mean);
-    return { classes: [...byClass.values()].sort((a, b) => b.uses - a.uses), decisions: await repository.decisions(limit) };
+    return {
+      classes: [...byClass.values()].sort((a, b) => b.uses - a.uses),
+      decisions: await repository.decisions(limit),
+      fusionTraces: await repository.fusionTraces(limit),
+    };
   }
   const resetRouter = (filter: { taskClass?: string; modelId?: string }) =>
     repository.reset(filter.taskClass || null, filter.modelId || null);

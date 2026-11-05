@@ -1,6 +1,8 @@
 import type { EvaluationAccount } from "./resources.js";
 
 export type AgentEvent =
+  | { type: "fusion_step"; taskId?: string; step: { id: string; phase: "draft" | "judge" | "critic" | "revision" | "escalation"; modelId: string; servedBy?: string; effort: "low" | "medium" | "high"; ms: number; usage: { input: number; output: number; cacheRead: number; cacheWrite: number }; usd: number; credits: number; error?: string; context?: { estimatedInputTokens: number; messages: number; toolCalls: number; toolResults: number; fileReadCalls: number; requestedFileCount: number } } }
+  | { type: "fusion_done"; taskId?: string; operationId: string; pattern: "single" | "cascade" | "critique"; warnings: string[]; usd: number; credits: number }
   | { type: "route"; fastPath: boolean; features: unknown; mode?: string }
   | { type: "plan"; summary: string; tasks: { id: string; role: string; goal: string; files: string[]; dependsOn: string[]; doneWhen?: string[] }[] }
   | { type: "task_start"; taskId: string; role: string; model: string; reason: string }
@@ -43,6 +45,7 @@ type Role = "router" | "planner" | "data" | "backend" | "ui" | "qa" | "fast" | "
 type PlaygroundRole = "fast" | "data" | "backend" | "ui" | "chat";
 
 export interface EvaluationAgentSpec {
+  explicitModelId?: string;
   scope: { accountId: string; projectId?: string | null };
   billing: { payerId: string; projectId: string | null; source: "builder" | "app" | "playground" };
   role: Role;
@@ -55,6 +58,7 @@ export interface EvaluationAgentSpec {
   signal: AbortSignal;
   emit(event: AgentEvent): void;
   taskId?: string;
+  agentId?: string;
   turnId: string;
   persist?: { projectId: string };
   requiredTool?: string;
@@ -80,7 +84,7 @@ export interface EvaluationBuilderPort {
   isBuilding(projectId: string): boolean;
   runBuilderTurn(
     account: EvaluationAccount, projectId: string, userText: string, emit: (event: AgentEvent) => void,
-    attachments?: string[], mode?: "build" | "chat" | "plan", implementPlan?: boolean, opts?: { synthetic?: boolean },
+    attachments?: string[], mode?: "build" | "chat" | "plan", implementPlan?: boolean, opts?: { synthetic?: boolean; explicitModelId?: string },
   ): Promise<void>;
   stopBuilding(projectId: string): void;
   runAgent(spec: EvaluationAgentSpec): Promise<AgentResult>;

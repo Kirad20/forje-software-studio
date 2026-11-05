@@ -130,6 +130,13 @@ export const config = {
   models: {
     /** Platform whitelist: globs over "provider:model" ids. Each account and project can narrow it. */
     allow: [...DEFAULT_MODELS_ALLOW],
+    /** Per-effort finite Fusion execution budgets; prices not known by the catalog still count as unknown, not free. */
+    fusion: {
+      fast: { maxCalls: 2, timeoutMs: 45_000, maxUsd: 0.05 },
+      standard: { maxCalls: 4, timeoutMs: 60_000, maxUsd: 0.10 },
+      high: { maxCalls: 6, timeoutMs: 120_000, maxUsd: 0.50 },
+      max: { maxCalls: 8, timeoutMs: 180_000, maxUsd: 1 },
+    },
   },
   github: {
     /** REST API base (GitHub Enterprise: https://host/api/v3). */

@@ -1,3 +1,5 @@
+import { isFusionCapability, type FusionCapability } from "./fusion.js";
+
 export interface CompatEndpoint {
   baseUrl: string;
   apiKey?: string;
@@ -19,6 +21,9 @@ export interface ModelInfo {
   tier: number;
   speed: number;
   source: "builtin" | "openrouter" | "custom";
+  capabilities?: FusionCapability;
+  /** Only set when this model/endpoint is verified to accept reasoning-effort parameters. */
+  reasoningEffort?: boolean;
 }
 
 export interface ModelScope {
@@ -45,6 +50,8 @@ export interface ModelInput {
   tier?: number;
   speed?: number;
   enabled?: boolean;
+  capabilities?: FusionCapability;
+  reasoningEffort?: boolean;
 }
 export class ModelError extends Error {}
 export type ModelChanges = Partial<Omit<ModelInput, "provider" | "model">>;
@@ -56,6 +63,8 @@ export function validateModelInput(input: ModelInput): { id: string; model: stri
     if (typeof v !== "number" || !Number.isFinite(v) || v < min || v > max) throw new ModelError(`${what}: entre ${min} y ${max}`);
     return v;
   };
+  if (input.capabilities !== undefined && !isFusionCapability(input.capabilities)) throw new ModelError("Perfil de capacidades inválido");
+  if (input.reasoningEffort !== undefined && typeof input.reasoningEffort !== "boolean") throw new ModelError("Soporte de esfuerzo inválido");
   return {
     id: `${input.provider}:${input.model.trim()}`, model: input.model.trim(),
     changes: {
@@ -69,6 +78,8 @@ export function validateModelInput(input: ModelInput): { id: string; model: stri
       tier: num(input.tier, 1, 5, "Calidad"),
       speed: num(input.speed, 1, 5, "Velocidad"),
       enabled: input.enabled === undefined ? undefined : !!input.enabled,
+      capabilities: input.capabilities,
+      reasoningEffort: input.reasoningEffort,
     },
   };
 }

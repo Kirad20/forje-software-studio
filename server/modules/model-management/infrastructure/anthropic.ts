@@ -8,7 +8,7 @@ const getClient = () => {
   const key = providerSecret("anthropic");
   if (!key) throw new ModelCallError("Anthropic no está configurado (Administración → Proveedores)", false);
   // A new key from the admin panel takes effect on the next call.
-  if (client?.key !== key) client = { key, sdk: new Anthropic({ apiKey: key, maxRetries: 2 }) };
+  if (client?.key !== key) client = { key, sdk: new Anthropic({ apiKey: key, maxRetries: 0 }) };
   return client.sdk;
 };
 
@@ -51,11 +51,10 @@ export async function anthropicChat(model: string, req: LlmRequest): Promise<Llm
     }
     throw e;
   }
-  if (res.stop_reason === "refusal") throw new ModelCallError("El modelo declinó la petición", true);
   const content = (res.content as Block[]).filter((b) => ["text", "tool_use", "thinking", "redacted_thinking"].includes(b.type));
   return {
     content,
-    stopReason: res.stop_reason === "tool_use" ? "tool_use" : res.stop_reason === "max_tokens" ? "max_tokens" : "end",
+    stopReason: res.stop_reason === "tool_use" ? "tool_use" : res.stop_reason === "max_tokens" ? "max_tokens" : res.stop_reason === "refusal" ? "refusal" : "end",
     usage: {
       input: res.usage.input_tokens,
       output: res.usage.output_tokens,

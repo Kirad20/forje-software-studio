@@ -60,7 +60,7 @@ function req(method, p, body, { stream = false } = {}) {
   return new Promise((resolve, reject) => {
     const data = body === undefined ? undefined : JSON.stringify(body);
     const r = http.request(
-      { host: "127.0.0.1", port: PORT, method, path: p, headers: { host: `localhost:${PORT}`, cookie, ...(data ? { "content-type": "application/json" } : {}) } },
+      { host: "127.0.0.1", port: PORT, method, path: p, agent: false, headers: { host: `localhost:${PORT}`, cookie, ...(data ? { "content-type": "application/json" } : {}) } },
       (res) => {
         for (const sc of res.headers["set-cookie"] ?? []) cookie = sc.split(";")[0];
         let text = "";
@@ -75,7 +75,7 @@ function req(method, p, body, { stream = false } = {}) {
         });
       },
     );
-    r.on("error", reject);
+    r.on("error", error => reject(new Error(`${method} ${p}: ${error.message}`, { cause: error })));
     if (data) r.write(data);
     r.end();
   });
@@ -322,6 +322,9 @@ try {
   ok(stats.classes.length > 0 && stats.classes[0].models[0].mean > 0 && stats.decisions.length > 0, "router: the panel shows what it learned and its decisions", JSON.stringify(stats.classes[0]));
   const reset = await req("POST", "/api/admin/router/reset", {});
   ok(reset.json.removed > 0 && (await req("GET", "/api/admin/router/stats")).json.classes.length === 0, "router: what it learned can be forgotten", reset.text);
+} catch (error) {
+  process.exitCode = 1;
+  throw error;
 } finally {
   console.log(process.exitCode ? "\nSOME CHECKS FAILED" : "\nALL CHECKS PASSED");
   if (process.exitCode) console.log("\n--- server log ---\n" + serverLog.slice(-5000));

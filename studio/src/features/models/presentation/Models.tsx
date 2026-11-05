@@ -81,7 +81,7 @@ export function AccountModels() {
       <div>
         <div className="section-title" style={{ margin: 0 }}>Modelos</div>
         <div className="small muted">
-          El enrutador elige, para cada agente y tarea, el modelo con mejor calidad por precio entre los que marques aquí, y aprende de los resultados.
+          Fusion elige modelos entre los que marques aquí; los resultados históricos se conservan como feedback, no como un objetivo de selección aleatorio.
           {data.customized ? " Usas una lista propia." : " Ahora se permiten todos los que ofrece la plataforma."}
         </div>
       </div>
@@ -143,12 +143,12 @@ interface RouterInfo {
 
 const ROLE_LABEL: Record<string, string> = { planner: "Planificador", data: "Datos", backend: "Backend", ui: "Interfaz", qa: "Revisión", fast: "Cambios rápidos", summarizer: "Resumen", router: "Análisis" };
 const MODES = [
-  { id: "saving", label: "Ahorro", hint: "Modelos baratos salvo cuando la tarea lo exige." },
-  { id: "balanced", label: "Equilibrado", hint: "Calidad y precio a partes iguales." },
-  { id: "quality", label: "Calidad", hint: "Los mejores modelos permitidos; cuesta más." },
+  { id: "standard", label: "Standard", hint: "Ejecución Fusion estándar con presupuesto acotado." },
+  { id: "high", label: "High", hint: "Más pasos de revisión; puede usar más llamadas y coste." },
+  { id: "max", label: "Max", hint: "La revisión más amplia; puede usar más llamadas y coste." },
 ] as const;
 
-/** Project settings → Modelos: cost/quality mode, parallel agents, project whitelist and what the router learnt. */
+/** Project settings → Modelos: Fusion effort, parallel agents, project whitelist and execution history. */
 export function ProjectModels({ projectId, canEdit }: { projectId: string; canEdit: boolean }) {
   const [cfg, setCfg] = useState<{ mode: string; concurrency: number; restricted: boolean; models: ModelRow[] } | null>(null);
   const [enabled, setEnabled] = useState<Set<string>>(new Set());
@@ -270,8 +270,8 @@ export function ProjectModels({ projectId, canEdit }: { projectId: string; canEd
       )}
       {info && info.learnt.some((l) => l.models.some((m) => m.uses > 0)) && (
         <div className="stack" style={{ gap: 6 }}>
-          <strong>Lo que ha aprendido el enrutador</strong>
-          <div className="small muted">Calidad estimada de cada modelo por agente, según compilaciones, pruebas, revisiones y deshacer.</div>
+          <strong>Feedback histórico por agente</strong>
+          <div className="small muted">Señales históricas de calidad por agente; no determinan por sí solas la selección actual de modelos.</div>
           {info.learnt
             .filter((l) => l.models.some((m) => m.uses > 0))
             .map((l) => (

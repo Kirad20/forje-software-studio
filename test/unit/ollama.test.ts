@@ -15,7 +15,7 @@ describe("native Ollama transport", () => {
     }));
     vi.stubGlobal("fetch", fetchMock);
     const result = await ollamaChat({ baseUrl: "http://localhost:11434/v1", apiKey: "test-key", headers: { "x-test": "yes" } }, "local", 32768, {
-      system: "Build an app", maxTokens: 2000,
+      system: "Build an app", maxTokens: 2000, effort: "high",
       tools: [{ name: "check_build", description: "Check", input_schema: { type: "object" } }],
       messages: [
         { role: "assistant", content: [{ type: "tool_use", id: "previous", name: "check_build", input: {} }] },

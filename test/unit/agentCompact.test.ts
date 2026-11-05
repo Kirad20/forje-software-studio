@@ -1,15 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Block, LlmMessage } from "../../server/modules/model-management/types.js";
 
-const calls: { role: string; messages: LlmMessage[] }[] = [];
+const calls: { role: string; messages: LlmMessage[]; affinityKey?: string; pinned?: typeof model; decisionBoundary?: boolean }[] = [];
 let mainSteps = 0;
 const usage = { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 };
 const model = { id: "m", model: "m", context: 20_000, vision: false };
+const recordContextEvent = vi.hoisted(() => vi.fn(async (_event: unknown) => {}));
+vi.mock("../../server/modules/execution-audit/index.js", () => ({ recordContextEvent }));
 
 vi.mock("../../server/modules/model-management/router.js", () => ({
   maxTokensFor: () => 4000,
-  callModel: async (_scope: unknown, role: string, _f: unknown, req: { messages: LlmMessage[] }) => {
-    calls.push({ role, messages: structuredClone(req.messages) });
+  callModel: async (_scope: unknown, role: string, _f: unknown, req: { messages: LlmMessage[] }, opts: { affinityKey?: string; pinned?: typeof model; decisionBoundary?: boolean }) => {
+    calls.push({ role, messages: structuredClone(req.messages), affinityKey: opts.affinityKey, pinned: opts.pinned, decisionBoundary: opts.decisionBoundary });
     let content: Block[];
     if (role === "summarizer") content = [{ type: "text", text: "RESUMEN: leí varios archivos" }];
     else if (mainSteps++ < 10) content = [{ type: "tool_use", id: `u${mainSteps}`, name: "read_files", input: { path: `f${mainSteps}.ts` } }];
@@ -30,6 +32,7 @@ const uses = (m: LlmMessage) => (typeof m.content === "string" ? [] : m.content.
 beforeEach(() => {
   calls.length = 0;
   mainSteps = 0;
+  recordContextEvent.mockClear();
 });
 
 describe("runAgent context compaction", () => {
@@ -55,6 +58,17 @@ describe("runAgent context compaction", () => {
     expect(summaries.length).toBeGreaterThan(0);
 
     const main = calls.filter((c) => c.role !== "summarizer");
+    expect(main[0].pinned).toBeUndefined();
+    expect(main[0].decisionBoundary).toBe(true);
+    expect(main[1].pinned).toBe(model);
+    expect(main[1].decisionBoundary).toBe(false);
+    expect(new Set(main.map(c => c.affinityKey)).size).toBeGreaterThan(1);
+    for (let i = 1; i < main.length; i++) {
+      if (main[i].affinityKey !== main[i - 1].affinityKey) {
+        expect(main[i].pinned).toBeUndefined();
+        expect(main[i].decisionBoundary).toBe(true);
+      }
+    }
     const after = main.find((c) => JSON.stringify(c.messages[0]).includes("RESUMEN"))!;
     expect(after).toBeDefined();
     expect(JSON.stringify(after.messages[0])).toContain("Haz la tarea");
@@ -69,5 +83,11 @@ describe("runAgent context compaction", () => {
     const raw = main.length * 10_000;
     const last = JSON.stringify(main[main.length - 1]!.messages).length;
     expect(last).toBeLessThan(raw / 2);
+    const events = recordContextEvent.mock.calls.map(([event]) => event as any);
+    expect(events.filter(e => e.kind === "file_read")).toHaveLength(10);
+    const compactions = events.filter(e => e.kind === "compaction");
+    expect(compactions.length).toBeGreaterThan(0);
+    expect(compactions.every(e => !e.measured && e.beforeTokens > e.afterTokens && e.projectId === "p" && e.turnId === "t" && e.agentId === "r")).toBe(true);
+    expect(JSON.stringify(events)).not.toContain("yyyy");
   });
 });

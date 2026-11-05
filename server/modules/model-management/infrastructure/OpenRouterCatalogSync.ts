@@ -32,13 +32,14 @@ export function createCatalogSync() {
           const cacheRead = m.pricing?.input_cache_read ? Number(m.pricing.input_cache_read) * 1e6 : null;
           const speed = speedFor(m.id);
           await q(
-            `insert into model_catalog (id, provider, model, label, in_price, out_price, cache_read_price, context, tools, vision, tier, speed, synced_at)
-             values ($1, 'openrouter', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, now())
+            `insert into model_catalog (id, provider, model, label, in_price, out_price, cache_read_price, context, tools, vision, tier, speed, synced_at, reasoning_effort)
+             values ($1, 'openrouter', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, now(), $12)
              on conflict (id) do update set label = excluded.label, in_price = excluded.in_price, out_price = excluded.out_price,
                cache_read_price = excluded.cache_read_price, context = excluded.context, tools = excluded.tools, vision = excluded.vision,
-               speed = excluded.speed, synced_at = now()`,
+               speed = excluded.speed, reasoning_effort = excluded.reasoning_effort, synced_at = now()`,
             [`openrouter:${m.id}`, m.id, m.name ?? m.id, inPrice, outPrice, cacheRead, m.context_length ?? 32_000,
-              tools, (m.architecture?.input_modalities ?? []).includes("image"), tierFor(m.id, inPrice), speed],
+              tools, (m.architecture?.input_modalities ?? []).includes("image"), tierFor(m.id, inPrice), speed,
+              m.supported_parameters === undefined ? null : m.supported_parameters.includes("reasoning_effort")],
           );
           n++;
         }

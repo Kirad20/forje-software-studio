@@ -94,6 +94,7 @@ export interface RunConfiguration {
   models: string[] | null;
   judge: boolean;
   judgeModel: string | null;
+  judgeExplicit?: boolean;
   total: number;
   evalSetVersion: number;
 }
@@ -103,7 +104,7 @@ export interface AdmissionPorts<M extends JudgeModel> {
   defaultJudge(models: M[]): M | undefined;
   spent(): Promise<number>;
   save(run: ActiveRun, config: RunConfiguration, budget: number): Promise<unknown>;
-  launch(run: ActiveRun, cases: EvalCase[], config: { repeats: number; models: string[] | null; judge: M | null }, budget: number): void;
+  launch(run: ActiveRun, cases: EvalCase[], config: { repeats: number; models: string[] | null; judge: M | null; judgeExplicit?: boolean }, budget: number): void;
 }
 
 export async function startEvaluation<M extends JudgeModel>(
@@ -136,9 +137,10 @@ export async function startEvaluation<M extends JudgeModel>(
       if (run.abort.signal.aborted) throw new EvalError(409, "El servidor se está apagando.");
       await ports.save(run, {
         cases: cases.map((c) => c.id), repeats, models, judge: !!judge, judgeModel: judge?.id ?? null,
+        judgeExplicit: !!req.judgeModel,
         total: jobs, evalSetVersion: EVAL_SET_VERSION,
       }, budgetUsd);
-      ports.launch(run, cases, { repeats, models, judge }, budgetUsd);
+      ports.launch(run, cases, { repeats, models, judge, judgeExplicit: !!req.judgeModel }, budgetUsd);
       return { runId: run.runId, jobs, budgetUsd };
     } catch (e) {
       state.release(run);

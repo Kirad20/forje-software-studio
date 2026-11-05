@@ -123,6 +123,16 @@ describe("administrative MCP transport", () => {
     expect(models.catalog.saveModel).not.toHaveBeenCalled();
     expect((await call(handle, "update_model", { modelId: model.id, patch: { tools: false } })).isError).toBe(false);
     expect(models.catalog.saveModel).toHaveBeenCalledWith({ provider: "gateway", model: "claude", tools: false }, "admin");
+    const profile = { reasoning: 4, coding: 4.5, debugging: 3, toolUse: 4, confidence: 0.8, source: "classification" };
+    expect((await call(handle, "update_model", {
+      modelId: model.id, patch: { capabilities: profile, reasoningEffort: true },
+    })).isError).toBe(false);
+    expect(models.catalog.saveModel).toHaveBeenLastCalledWith({
+      provider: "gateway", model: "claude", capabilities: profile, reasoningEffort: true,
+    }, "admin");
+    expect((await call(handle, "update_model", {
+      modelId: model.id, patch: { capabilities: { ...profile, coding: 5.1 } },
+    })).isError).toBe(true);
   });
   it("changes account/project allowlists only for existing entities and model IDs and records actor", async () => {
     const { handle, settings, models } = setup();

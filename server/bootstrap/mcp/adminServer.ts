@@ -6,16 +6,26 @@ import type { IdentityModule, PublicAccount } from "../../modules/identity/index
 import type { SettingsModule } from "../../modules/settings/index.js";
 import type { ProjectsModule } from "../../modules/projects/index.js";
 import type { createPlatformModelManagement } from "../../modules/model-management/index.js";
+import { auditWindow, readExecutionAudit, type AuditFilter, type AuditReport } from "../../modules/execution-audit/index.js";
 
 interface AdminMcpModules {
   identity: IdentityModule;
   settings: SettingsModule;
   projects: ProjectsModule;
   models: ReturnType<typeof createPlatformModelManagement>;
+  auditQuery?: (filter: AuditFilter) => Promise<AuditReport>;
 }
 
 const id = z.string().trim().min(1).max(200);
 const modelIds = z.array(id).max(1000);
+const fusionCapability = z.object({
+  reasoning: z.number().min(1).max(5),
+  coding: z.number().min(1).max(5),
+  debugging: z.number().min(1).max(5),
+  toolUse: z.number().min(1).max(5),
+  confidence: z.number().min(0).max(1),
+  source: z.enum(["declared", "classification", "evaluation"]),
+}).strict();
 const modelPatch = z.object({
   label: z.string().trim().min(1).max(120).optional(),
   inPrice: z.number().min(0).max(1000).optional(),
@@ -24,6 +34,8 @@ const modelPatch = z.object({
   context: z.number().int().min(1000).max(100_000_000).optional(),
   tools: z.boolean().optional(), vision: z.boolean().optional(),
   tier: z.number().int().min(1).max(5).optional(), speed: z.number().int().min(1).max(5).optional(),
+  capabilities: fusionCapability.optional(),
+  reasoningEffort: z.boolean().optional(),
   enabled: z.boolean().optional(),
 }).strict().refine(patch => Object.keys(patch).length > 0, "Falta un cambio.");
 const schemas = {
@@ -44,6 +56,10 @@ const schemas = {
   set_account_models: z.object({ accountId: id, enabled: modelIds.nullable() }).strict(),
   set_project_models: z.object({ projectId: id, enabled: modelIds }).strict(),
   router_stats: z.object({}).strict(),
+  execution_audit: z.object({
+    projectId: id.optional(), from: z.string().max(40).optional(), to: z.string().max(40).optional(),
+    limit: z.number().int().min(1).max(100).optional(), offset: z.number().int().min(0).max(10000).optional(),
+  }).strict(),
 };
 type ToolName = keyof typeof schemas;
 const descriptions: Record<ToolName, string> = {
@@ -54,11 +70,12 @@ const descriptions: Record<ToolName, string> = {
   list_providers: "Lista disponibilidad de proveedores sin claves, cabeceras ni fragmentos de secretos.",
   update_provider: "Cambia únicamente nombre visible o activación de un proveedor existente. Las credenciales se gestionan en Administración.",
   list_models: "Catálogo y estado de los modelos de plataforma; permite filtrar por proveedor.",
-  update_model: "Ajusta activación, precios, contexto, capacidades, calidad o velocidad de un modelo existente.",
+  update_model: "Ajusta activación, precios, contexto, capacidades generales, perfil Fusion con fuente/confianza, soporte verificado de reasoning effort, calidad o velocidad de un modelo existente.",
   diagnose_model_access: "Diagnostica permisos de modelos. Con projectId usa al propietario del proyecto, igual que el constructor, y muestra causas del bloqueo.",
   set_account_models: "Configura modelos permitidos para una cuenta existente. enabled=null hereda todos los de plataforma; [] bloquea todos.",
   set_project_models: "Configura modelos de un proyecto existente. enabled=[] elimina la restricción de proyecto, pero conserva permisos de su propietario.",
-  router_stats: "Estadísticas y decisiones recientes del enrutador de modelos.",
+  router_stats: "Hasta 50 ejecuciones Fusion recientes con patrón, pasos, modelos, avisos y costes, más feedback histórico; nunca incluye borradores ni razonamiento privado.",
+  execution_audit: "Auditoría de ejecución: uso/coste medidos, fases y modelos solicitados/servidos, contexto estimado, bytes de herramientas y compactación, y cambios administrativos sin valores. Filtra por projectId y ventana de hasta 31 días (7 por defecto); páginas de hasta 100 con offset. Datos ausentes se indican como no registrados; los deltas totales no prueban causas.",
 };
 const writes = new Set<ToolName>(["update_settings", "reset_setting", "update_provider", "update_model", "set_account_models", "set_project_models"]);
 
@@ -172,14 +189,19 @@ export function createAdminMcpHandler(modules: AdminMcpModules) {
         await settings.audit(`mcp:project-models:${projectId}`, account.id, "set");
         return { projectId, enabled };
       }
-      case "router_stats": schemas[name].parse(input); return await models.management.routerStats();
+      case "router_stats": schemas[name].parse(input); return await models.management.routerStats(50);
+      case "execution_audit": {
+        const filter = schemas[name].parse(input);
+        if (filter.projectId) await projectExists(filter.projectId);
+        return await (modules.auditQuery ?? readExecutionAudit)(auditWindow(filter));
+      }
     }
   }
   return async (req: Request): Promise<Response> => {
     const match = /^Bearer ([^\s]+)$/i.exec(req.headers.get("authorization") ?? "");
     if (!match) return Response.json({ error: "Se requiere un token administrativo Bearer." }, { status: 401 });
     const account = await identity.accountFromAdminApiToken(match[1]);
-    if (!account) return Response.json({ error: "Token administrativo inválido, caducado o revocado." }, { status: 401 });
+    if (!account || account.disabled) return Response.json({ error: "Token administrativo inválido, caducado o revocado." }, { status: 401 });
     if (account.platformRole !== "admin") return Response.json({ error: "Solo administradores de plataforma." }, { status: 403 });
     const server = new Server({ name: "forja-admin", version: "0.1.0" }, {
       capabilities: { tools: {} }, instructions: ADMIN_MCP_INSTRUCTIONS,

@@ -3,6 +3,7 @@ import { createModelRouter } from "../../../../server/modules/model-management/a
 import { ModelCallError } from "../../../../server/modules/model-management/domain/messages.js";
 import type { LlmRequest } from "../../../../server/modules/model-management/domain/messages.js";
 import type { ModelInfo } from "../../../../server/modules/model-management/domain/models.js";
+import { validateToolInput } from "../../../../server/modules/model-management/infrastructure/ToolProposalValidation.js";
 
 const model = (id: string) => ({
   id, provider: "test", model: id, label: id, inPrice: 1, outPrice: 2, cacheReadPrice: 0,
@@ -16,13 +17,15 @@ const features = { complexity: 2, domains: ["ui"], needsVision: false };
 function setup() {
   const ports = {
     allowedModels: vi.fn(async () => [a, b]),
-    projectMode: vi.fn(async () => "balanced" as const),
+    projectMode: vi.fn(async () => "high" as const),
     posteriors: vi.fn(async () => new Map([a, b].map(m => [m.id, { alpha: 3, beta: 1, uses: 4 }]))),
     recordOutcome: vi.fn(async () => {}),
     invoke: vi.fn(async (_model: ModelInfo, _request: LlmRequest) => response),
     charge: vi.fn(async () => ({ usd: 0.01, credits: 1 })),
     logDecision: vi.fn(async () => {}),
     requestKey: (value: string) => value,
+    recordModelHealth: vi.fn(async (_id: string, _provider: string, _ms: number, _error?: { message: string; status?: number }) => {}),
+    validateToolInput,
   };
   return { ports, router: createModelRouter(ports) };
 }
@@ -45,14 +48,15 @@ describe("model routing application", () => {
       .rejects.toThrow("No hay modelos habilitados y permitidos");
     expect(ports.invoke).not.toHaveBeenCalled();
   });
-  it("retries a pinned provider failure, excludes it, records the weak signal and bills only the success", async () => {
+  it("retries a pinned provider failure, excludes it, records health and bills only the success", async () => {
     const { ports, router } = setup();
     ports.invoke.mockRejectedValueOnce(new ModelCallError("overloaded", true));
     const result = await router.callModel(scope, "ui", features, { messages: [] }, {
       pinned: a, billing: { payerId: "owner", projectId: "project", source: "builder" },
     });
     expect(ports.invoke.mock.calls.map(([m]) => m.id)).toEqual(["a", "b"]);
-    expect(ports.recordOutcome).toHaveBeenCalledWith("ui:low:ui", a, 0, 0, 0.25);
+    expect(ports.recordModelHealth).toHaveBeenCalledWith("a", "test", expect.any(Number), { message: "Fallo de transporte del proveedor.", status: undefined });
+    expect(ports.recordOutcome).not.toHaveBeenCalled();
     expect(ports.charge).toHaveBeenCalledTimes(1);
     expect(result).toMatchObject({ model: b, credits: 1, failed: ["a: overloaded"] });
   });
@@ -65,7 +69,7 @@ describe("model routing application", () => {
     const aborted = Object.assign(new Error("cancel"), { name: "AbortError" });
     ports.invoke.mockRejectedValueOnce(aborted);
     await expect(router.callModel(scope, "chat", features, { messages: [] }, { pinned: a })).rejects.toBe(aborted);
-    expect(ports.recordOutcome).toHaveBeenCalledTimes(1);
+    expect(ports.recordOutcome).not.toHaveBeenCalled();
   });
   it("filters tool, vision, context and excluded candidates before choosing", async () => {
     const { ports, router } = setup();
@@ -99,9 +103,10 @@ describe("model routing application", () => {
   });
   it("switches away from a pinned model that no longer fits without penalizing it", async () => {
     const { ports, router } = setup();
+    ports.allowedModels.mockResolvedValue([{ ...a, context: 32768 }, b]);
     const result = await router.callModel(scope, "fast", features, {
       messages: [{ role: "user", content: "x".repeat(80_000) }],
-    }, { pinned: { ...a, context: 32_768 } });
+    }, { pinned: { ...a, context: 32_768 }, budget: { maxUsd: 0.1 } });
     expect(result.model.id).toBe("b");
     expect(ports.invoke.mock.calls.map(([m]) => m.id)).toEqual(["b"]);
     expect(ports.recordOutcome).not.toHaveBeenCalled();
@@ -125,7 +130,7 @@ describe("model routing application", () => {
   });
   it("allows vision-only judges on fallback without relaxing the QA role default", async () => {
     const { ports, router } = setup();
-    ports.allowedModels.mockResolvedValue([{ ...b, tools: false }]);
+    ports.allowedModels.mockResolvedValue([{ ...a, tools: false }, { ...b, tools: false }]);
     ports.invoke.mockRejectedValueOnce(new ModelCallError("overloaded", true));
     const result = await router.callModel(scope, "qa", { ...features, needsVision: true, needsTools: false },
       { messages: [] }, { pinned: a });

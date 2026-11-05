@@ -1,14 +1,17 @@
-import type { Block, ExecutionModel, Message, ToolDefinition, Usage } from "../domain/AgentExecution.js";
+import type { Block, BuilderFusionStep, BuilderFusionTrace, ContextAuditEvent, ExecutionModel, Message, ToolDefinition, Usage } from "../domain/AgentExecution.js";
 
 export interface AgentExecutionPorts<M extends ExecutionModel> {
-  summarize?(transcript: string): Promise<{ text: string; usage: Usage; usd: number; credits: number }>;
+  recordContextEvent?(event: ContextAuditEvent): void;
+  summarize?(transcript: string, context: { agentId: string }): Promise<{ text: string; usage: Usage; usd: number; credits: number }>;
   compactionFailed?(error: unknown): void;
-  callModel(request: { messages: Message[]; tools?: ToolDefinition[]; pinned?: M }): Promise<{
+  callModel(request: { messages: Message[]; tools?: ToolDefinition[]; pinned?: M; affinityKey: string; agentId: string; decisionBoundary: boolean; onFusionStep(step: BuilderFusionStep): void }): Promise<{
     model: M;
     failed: string[];
     response: { content: Block[]; usage: Usage };
     usd: number;
     credits: number;
+    totalUsage?: Usage;
+    fusion?: BuilderFusionTrace;
   }>;
   save(projectId: string, message: Message, turnId: string): Promise<void>;
   countAction(accountId: string): Promise<void>;

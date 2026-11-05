@@ -16,6 +16,57 @@ export interface Usage {
   cacheRead: number;
   cacheWrite: number;
 }
+export interface BuilderFusionStep {
+  id: string;
+  phase: "draft" | "judge" | "critic" | "revision" | "escalation";
+  modelId: string;
+  servedBy?: string;
+  effort: "low" | "medium" | "high";
+  ms: number;
+  usage: Usage;
+  usd: number;
+  credits: number;
+  error?: string;
+  context?: BuilderContextMetrics;
+}
+export interface BuilderContextMetrics {
+  estimatedInputTokens: number;
+  systemTokens: number;
+  historyTokens: number;
+  toolSchemaTokens: number;
+  framingTokens: number;
+  systemBytes: number;
+  historyBytes: number;
+  toolSchemaBytes: number;
+  messages: number;
+  images: number;
+  toolCalls: number;
+  toolResults: number;
+  toolResultBytes: number;
+  fileReadCalls: number;
+  requestedFileCount: number;
+  fileToolResultBytes: number;
+}
+export interface ContextAuditEvent {
+  projectId: string;
+  taskId?: string;
+  turnId?: string;
+  traceId?: string;
+  agentId?: string;
+  kind: "file_read" | "compaction";
+  measured: boolean;
+  beforeTokens?: number;
+  afterTokens?: number;
+  bytes?: number;
+  count?: number;
+}
+export interface BuilderFusionTrace {
+  operationId: string;
+  effort: "standard" | "high" | "max" | "fast";
+  pattern: "single" | "cascade" | "critique";
+  warnings: string[];
+  steps: BuilderFusionStep[];
+}
 export interface ExecutionModel {
   id: string;
   model: string;
@@ -39,6 +90,8 @@ export interface ExecutionTool<C extends ExecutionContext> extends ToolDefinitio
   run(input: Record<string, unknown>, context: C): Promise<string | { text: string; images: { media_type: string; data: string }[] }>;
 }
 export type AgentEvent =
+  | { type: "fusion_step"; taskId?: string; step: BuilderFusionStep }
+  | { type: "fusion_done"; taskId?: string; operationId: string; pattern: BuilderFusionTrace["pattern"]; warnings: string[]; usd: number; credits: number }
   | { type: "route"; fastPath: boolean; features: unknown; mode?: string }
   | { type: "plan"; summary: string; tasks: { id: string; role: string; goal: string; files: string[]; dependsOn: string[]; doneWhen?: string[] }[] }
   | { type: "task_start"; taskId: string; role: string; model: string; reason: string }
@@ -60,6 +113,7 @@ export interface AgentExecutionSpec<M extends ExecutionModel, C extends Executio
   signal: { readonly aborted: boolean };
   emit(event: AgentEvent): void;
   taskId?: string;
+  agentId?: string;
   turnId: string;
   persist?: { projectId: string };
   requiredTool?: string;

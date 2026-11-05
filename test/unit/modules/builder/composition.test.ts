@@ -10,12 +10,17 @@ const mocks = vi.hoisted(() => ({
   readFile: vi.fn(async () => "base64:pixels"),
   recordStep: vi.fn(),
   recordToolCall: vi.fn(),
+  allowedModels: vi.fn(),
 }));
 vi.mock("../../../../server/shared/database/index.js", async importOriginal => ({
   ...await importOriginal<any>(), q: mocks.q, one: vi.fn(),
 }));
 vi.mock("../../../../server/modules/model-management/router.js", () => ({ callModel: mocks.callModel, maxTokensFor: () => 4000 }));
+vi.mock("../../../../server/modules/model-management/catalog.js", async importOriginal => ({
+  ...await importOriginal<any>(), allowedModels: mocks.allowedModels,
+}));
 vi.mock("../../../../server/modules/usage/usage.js", () => ({ countAction: mocks.countAction }));
+vi.mock("../../../../server/modules/execution-audit/index.js", () => ({ recordContextEvent: vi.fn(async () => {}) }));
 vi.mock("../../../../server/modules/builder/infrastructure/CoreModulesAdapter.js", async importOriginal => ({
   ...await importOriginal<any>(), readFile: mocks.readFile,
 }));
@@ -41,12 +46,33 @@ describe("production builder module composition", () => {
     } as unknown as AgentSpec;
     const result = await runAgent(spec);
     expect(result).toMatchObject({ text: "done", usd: 0.03, credits: 3 });
-    expect(mocks.callModel.mock.calls[0]!.slice(0, 3)).toEqual([spec.scope, spec.role, spec.routing]);
+    expect(mocks.callModel.mock.calls[0]!.slice(0, 3)).toEqual([spec.scope, spec.role, { ...spec.routing, needsTools: true }]);
     expect(mocks.callModel.mock.calls[1]![4]).toMatchObject({ billing: spec.billing, pinned: model, log: { turnId: "turn" } });
+    expect(mocks.callModel.mock.calls[0]![4].decisionBoundary).toBe(true);
+    expect(mocks.callModel.mock.calls[1]![4].decisionBoundary).toBe(false);
+    expect(mocks.callModel.mock.calls[1]![4].explicit).toBeUndefined();
     expect(mocks.countAction).toHaveBeenCalledWith("a");
     expect(mocks.recordStep).toHaveBeenCalledTimes(2);
     expect(mocks.recordToolCall).toHaveBeenCalledWith(expect.objectContaining({ tool: "get_problems", ok: true }));
     expect(mocks.q.mock.calls.filter(([sql]) => sql.startsWith("insert into chat_messages"))).toHaveLength(3);
+  });
+
+  it("forwards a user-selected playground model as explicit without trusting its supplied id", async () => {
+    const model = { id: "selected", model: "chosen", vision: false };
+    mocks.allowedModels.mockResolvedValue([model]);
+    mocks.callModel.mockResolvedValueOnce({ model, failed: [], response: { usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, content: [] }, usd: 0, credits: 0 });
+    const spec: AgentSpec = {
+      scope: { accountId: "a", projectId: "p" }, billing: { payerId: "a", projectId: "p", source: "playground" },
+      explicitModelId: "selected", role: "chat", routing: { complexity: 1, domains: [], needsVision: false },
+      system: "", messages: [], tools: [], ctx: { account: { id: "a", email: "a@example.com", name: "Tester", credits: 100, platformRole: "admin" }, projectId: "p", author: "builder" },
+      maxSteps: 1, signal: new AbortController().signal, emit: vi.fn(), turnId: "playground",
+    };
+    await runAgent(spec);
+    expect(mocks.callModel).toHaveBeenLastCalledWith(spec.scope, "chat", expect.objectContaining({ needsTools: false }), expect.any(Object),
+      expect.objectContaining({ explicit: model, affinityKey: expect.any(String), onFusionStep: expect.any(Function) }));
+    const calls = mocks.callModel.mock.calls.length;
+    await expect(runAgent({ ...spec, explicitModelId: "forbidden" })).rejects.toThrow("no está permitido");
+    expect(mocks.callModel.mock.calls).toHaveLength(calls);
   });
 
   it("normalizes saved messages, maps raw history and resolves attachment bytes at the infrastructure edge", async () => {

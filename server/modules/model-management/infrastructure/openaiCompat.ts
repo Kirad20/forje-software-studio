@@ -46,7 +46,7 @@ function toOpenAi(system: string | undefined, messages: LlmMessage[]): OpenAiMes
   return out;
 }
 
-export async function compatChat(endpoint: CompatEndpoint, model: string, req: LlmRequest): Promise<LlmResponse> {
+export async function compatChat(endpoint: CompatEndpoint, model: string, req: LlmRequest, reasoningEffort = false): Promise<LlmResponse> {
   let res: Response;
   try {
     res = await fetch(`${endpoint.baseUrl.replace(/\/$/, "")}/chat/completions`, {
@@ -60,6 +60,7 @@ export async function compatChat(endpoint: CompatEndpoint, model: string, req: L
       body: JSON.stringify({
         model,
         max_tokens: req.maxTokens ?? 8192,
+        ...(reasoningEffort && req.effort ? { reasoning_effort: req.effort } : {}),
         messages: toOpenAi(req.system, req.messages),
         tools: req.tools?.length ? req.tools.map((t) => ({ type: "function", function: { name: t.name, description: t.description, parameters: t.input_schema } })) : undefined,
         // OpenRouter: report real usage, including cached tokens.

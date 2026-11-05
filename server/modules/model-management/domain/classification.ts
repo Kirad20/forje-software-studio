@@ -1,4 +1,5 @@
 import { ModelError, type ModelInput } from "./models.js";
+import { isFusionCapability, type FusionCapability } from "./fusion.js";
 
 export interface ProviderModel {
   id: string;
@@ -9,11 +10,13 @@ export interface ProviderModel {
   cacheReadPrice?: number;
   tools?: boolean;
   vision?: boolean;
+  reasoningEffort?: boolean;
 }
 
 export interface ClassifiedProviderModel extends ProviderModel {
   tier: number;
   speed: number;
+  capabilities?: FusionCapability;
 }
 
 export function parseModelClassifications(text: string): ClassifiedProviderModel[] {
@@ -37,10 +40,18 @@ export function parseModelClassifications(text: string): ClassifiedProviderModel
     if (!record(value) || typeof value.id !== "string" || !value.id.trim()) throw invalid();
     const tier = number(value.tier, 1, 5, true), speed = number(value.speed, 1, 5, true);
     if (tier === undefined || speed === undefined) throw invalid();
+    let capabilities: FusionCapability | undefined;
+    if (value.capabilities !== undefined && value.capabilities !== null) {
+      if (!record(value.capabilities)) throw invalid();
+      const profile = { ...value.capabilities, source: "classification" };
+      if (!isFusionCapability(profile)) throw invalid();
+      capabilities = profile;
+    }
     return {
       id: value.id, tier, speed, context: number(value.context, 1000, 100_000_000, true),
       inPrice: number(value.inPrice, 0, 1000), outPrice: number(value.outPrice, 0, 1000),
       cacheReadPrice: number(value.cacheReadPrice, 0, 1000), tools: boolean(value.tools), vision: boolean(value.vision),
+      capabilities,
     };
   });
 }
@@ -65,6 +76,7 @@ export function importedModelInput(provider: string, remote: ClassifiedProviderM
     cacheReadPrice: remote.cacheReadPrice ?? 0, context: remote.context ?? 128_000,
     tools: remote.tools ?? false, vision: remote.vision ?? false,
     tier: remote.tier, speed: remote.speed,
+    capabilities: remote.capabilities, reasoningEffort: remote.reasoningEffort,
     enabled: false,
   };
 }
