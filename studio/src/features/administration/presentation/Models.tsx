@@ -20,6 +20,8 @@ interface CatalogModel {
   tier: number;
   speed: number;
   source: "builtin" | "openrouter" | "custom";
+  capabilities?: { reasoning: number; coding: number; debugging: number; toolUse: number; confidence: number; source: "declared" | "classification" | "evaluation" };
+  reasoningEffort?: boolean;
   enabled: boolean;
   available: boolean;
   allowed: boolean;
@@ -176,8 +178,9 @@ export function Models() {
                       {!m.available ? <span className="pill">{m.enabled ? "proveedor no disponible" : "desactivado"}</span> : m.allowed ? <span className="pill ok">en uso</span> : <span className="pill warn">fuera de la lista blanca</span>}
                     </td>
                     <td data-label="Capacidades">
-                      {m.source === "custom" ? (
-                        <div className="stack small" style={{ gap: 4 }}>
+                      <div className="stack small" style={{ gap: 4 }}>
+                        {m.source === "custom" ? (
+                          <>
                           <div className="row" style={{ flexWrap: "nowrap" }}>
                             <Switch on={m.vision} disabled={pending !== null} onChange={(vision) => void patch(m, { vision })} label={`Imágenes: ${m.label}`} />
                             <span>Imágenes</span>
@@ -186,10 +189,16 @@ export function Models() {
                             <Switch on={m.tools} disabled={pending !== null} onChange={(tools) => void patch(m, { tools })} label={`Herramientas: ${m.label}`} />
                             <span>Herramientas</span>
                           </div>
-                        </div>
-                      ) : (
-                        <span className="small muted">{[m.vision && "Imágenes", m.tools && "Herramientas"].filter(Boolean).join(" · ") || "Texto"}</span>
-                      )}
+                          </>
+                        ) : (
+                          <span className="small muted">{[m.vision && "Imágenes", m.tools && "Herramientas"].filter(Boolean).join(" · ") || "Texto"}</span>
+                        )}
+                        {m.capabilities && <span title={`${m.capabilities.source}; confianza ${Math.round(m.capabilities.confidence * 100)}%`}>
+                          Fusion R{m.capabilities.reasoning} · C{m.capabilities.coding} · D{m.capabilities.debugging} · H{m.capabilities.toolUse}
+                          <span className="muted"> · {m.capabilities.source} {Math.round(m.capabilities.confidence * 100)}%</span>
+                        </span>}
+                        <span className="muted">{m.reasoningEffort === undefined ? "Esfuerzo de razonamiento sin verificar" : `Esfuerzo de razonamiento ${m.reasoningEffort ? "verificado" : "no compatible"}`}</span>
+                      </div>
                     </td>
                     <td data-label="Precio entrada / salida (MTok)">
                       {m.inPrice === 0 && m.outPrice === 0 ? "gratis" : `$${m.inPrice} / $${m.outPrice}`}
@@ -264,9 +273,18 @@ function ModelEditor({ model: m, onClose, onSaved }: { model: CatalogModel; onCl
     label: m.label, context: m.context, inPrice: m.inPrice, outPrice: m.outPrice, cacheReadPrice: m.cacheReadPrice,
     tier: m.tier, speed: m.speed, tools: m.tools, vision: m.vision, enabled: m.enabled,
   });
+  const [capabilities, setCapabilities] = useState(() => m.capabilities ?? {
+    reasoning: 3, coding: 3, debugging: 3, toolUse: 3, confidence: 0.5, source: "declared" as const,
+  });
+  const [capabilitiesTouched, setCapabilitiesTouched] = useState(false);
+  const [reasoningEffort, setReasoningEffort] = useState<"unverified" | "supported" | "unsupported">(
+    m.reasoningEffort === undefined ? "unverified" : m.reasoningEffort ? "supported" : "unsupported",
+  );
+  const [reasoningEffortTouched, setReasoningEffortTouched] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const dirty = Object.entries(draft).some(([key, value]) => value !== m[key as keyof CatalogModel]);
+  const dirty = Object.entries(draft).some(([key, value]) => value !== m[key as keyof CatalogModel])
+    || capabilitiesTouched || reasoningEffortTouched;
   return (
     <EditDialog title="Editar modelo" description={m.id} onClose={onClose} busy={busy}>
       <form className="stack" onSubmit={async (event) => {
@@ -274,7 +292,9 @@ function ModelEditor({ model: m, onClose, onSaved }: { model: CatalogModel; onCl
         setBusy(true);
         setError("");
         try {
-          const changes = Object.fromEntries(Object.entries(draft).filter(([key, value]) => value !== m[key as keyof CatalogModel]));
+          const changes: Record<string, unknown> = Object.fromEntries(Object.entries(draft).filter(([key, value]) => value !== m[key as keyof CatalogModel]));
+          if (capabilitiesTouched) changes.capabilities = capabilities;
+          if (reasoningEffortTouched) changes.reasoningEffort = reasoningEffort === "supported";
           await api(`/admin/models/item/${enc(m.id)}`, { method: "PATCH", body: changes });
           await onSaved();
         } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
@@ -302,6 +322,44 @@ function ModelEditor({ model: m, onClose, onSaved }: { model: CatalogModel; onCl
             </label>
           ))}
         </div>
+        <fieldset disabled={busy} className="stack" style={{ border: "1px solid var(--border)", borderRadius: 8, padding: 12 }}>
+          <strong>Perfil de Fusion</strong>
+          <div className="small muted">Solo guarda valores fundamentados; la confianza y la fuente se conservan para mostrar su procedencia.</div>
+          <div className="row" style={{ flexWrap: "wrap" }}>
+            {(["reasoning", "coding", "debugging", "toolUse"] as const).map((key) => (
+              <label className="small" key={key}>{({ reasoning: "Razonamiento", coding: "Código", debugging: "Depuración", toolUse: "Uso de herramientas" })[key]}
+                <input type="number" min={1} max={5} step="0.1" value={capabilities[key]} onChange={(e) => {
+                  setCapabilities({ ...capabilities, [key]: Number(e.target.value) });
+                  setCapabilitiesTouched(true);
+                }} />
+              </label>
+            ))}
+            <label className="small">Confianza (0–1)
+              <input type="number" min={0} max={1} step="0.05" value={capabilities.confidence} onChange={(e) => {
+                setCapabilities({ ...capabilities, confidence: Number(e.target.value) });
+                setCapabilitiesTouched(true);
+              }} />
+            </label>
+            <label className="small">Fuente
+              <Select label="Fuente del perfil" value={capabilities.source} onValueChange={(source) => {
+                setCapabilities({ ...capabilities, source: source as typeof capabilities.source });
+                setCapabilitiesTouched(true);
+              }} searchable={false} options={[
+                { value: "declared", label: "Declarada" }, { value: "classification", label: "Clasificación" },
+                { value: "evaluation", label: "Evaluación" },
+              ]} />
+            </label>
+          </div>
+          <label className="small">Soporte verificado de reasoning effort
+            <Select label="Soporte de reasoning effort" value={reasoningEffort} onValueChange={(value) => {
+              setReasoningEffort(value as typeof reasoningEffort);
+              setReasoningEffortTouched(true);
+            }} searchable={false} options={[
+              ...(m.reasoningEffort === undefined ? [{ value: "unverified", label: "Sin verificar" }] : []),
+              { value: "supported", label: "Compatible" }, { value: "unsupported", label: "No compatible" },
+            ]} />
+          </label>
+        </fieldset>
         {m.source === "openrouter" && <div className="small muted">La próxima sincronización puede actualizar las capacidades, el contexto y los precios de OpenRouter.</div>}
         {error && <div className="error-box" role="alert">{error}</div>}
         <div className="row"><button className="primary" disabled={busy || !dirty}>{busy ? "Guardando…" : "Guardar cambios"}</button><button type="button" disabled={busy} onClick={onClose}>Cancelar</button></div>

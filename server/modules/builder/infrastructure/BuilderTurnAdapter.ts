@@ -223,6 +223,7 @@ interface TurnState {
   credits: number;
   /** An eval turn: see runBuilderTurn. */
   synthetic: boolean;
+  explicit?: ModelInfo;
 }
 
 function projectSection(s: TurnState) {
@@ -277,6 +278,7 @@ async function runLane(
         ...hooks,
         scope: s.scope,
         billing: s.billing,
+        explicitModelId: s.explicit?.id,
         role: lane.role,
         maxSteps: MAX_STEPS[lane.role],
         signal: s.signal,
@@ -699,9 +701,17 @@ async function runTeam(s: TurnState, opts: { given?: Plan; planOnly?: boolean } 
         ],
         maxTokens: 1200,
       },
-      { billing: s.billing },
+      { billing: s.billing, explicit: s.explicit, log: { turnId: s.turnId }, affinityKey: JSON.stringify([s.project.id, s.turnId, "final-summary"]),
+        onFusionStep: step => s.emit({ type: "fusion_step", step: {
+          id: step.id, phase: step.phase, modelId: step.modelId, servedBy: step.servedBy,
+          effort: step.effort, ms: step.ms, usage: step.usage, usd: step.usd, credits: step.credits,
+          context: step.context,
+          ...(step.error ? { error: "La llamada al modelo falló." } : {}),
+        } }),
+      },
     );
-    s.usage = addUsage(s.usage, res.response.usage);
+    if (res.fusion) s.emit({ type: "fusion_done", operationId: res.fusion.operationId, pattern: res.fusion.pattern, warnings: res.fusion.warnings, usd: res.usd, credits: res.credits });
+    s.usage = addUsage(s.usage, res.totalUsage ?? res.response.usage);
     s.usd += res.usd;
     s.credits += res.credits;
     reply = textOf(res.response.content).trim();
@@ -724,7 +734,7 @@ export function runBuilderTurn(
   mode: ChatMode = "build",
   implementPlan = false,
   /** `synthetic`: an eval turn (server/evals). It teaches the router nothing and does not touch GitHub or the chat summary. */
-  opts: { synthetic?: boolean } = {},
+  opts: { synthetic?: boolean; explicitModelId?: string } = {},
 ) {
   const abort = new AbortController();
   return active.run(projectId, () => abort.abort(), () => executeBuilderTurn(account, projectId, userText, emit, attachments, mode, implementPlan, opts, abort));
@@ -738,7 +748,7 @@ async function executeBuilderTurn(
   attachments: string[],
   mode: ChatMode,
   implementPlan: boolean,
-  opts: { synthetic?: boolean },
+  opts: { synthetic?: boolean; explicitModelId?: string },
   abort: AbortController,
 ) {
   const project = await getProject(projectId);
@@ -748,6 +758,8 @@ async function executeBuilderTurn(
   const payer = project.ownerId;
   const scope = { accountId: payer, projectId };
   const billing: Billing = { payerId: payer, projectId, source: "builder" };
+  const explicit = opts.explicitModelId ? (await allowedModels(scope)).find(model => model.id === opts.explicitModelId) : undefined;
+  if (opts.explicitModelId && !explicit) throw new Error("El modelo seleccionado no está permitido.");
   const s: TurnState = {
     account,
     project,
@@ -767,6 +779,7 @@ async function executeBuilderTurn(
     usd: 0,
     credits: 0,
     synthetic: !!opts.synthetic,
+    explicit,
   };
   await new BuilderWorkflowUseCase<Features, Plan>({
     signal: abort.signal,

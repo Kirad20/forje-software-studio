@@ -2,6 +2,7 @@ import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "
 import { MousePointer2, Paperclip } from "lucide-react";
 import { api, streamGet, streamPost } from "../application/controller.js";
 import type { ChatStreamEvent } from "../application/contracts.js";
+import { fusionDisplay } from "../application/fusionTrace.js";
 import { browser } from "../../../shared/infrastructure/browser.js";
 import { AgentLanes, type Lane, type TeamTurn } from "./AgentLanes.js";
 import { ToolStep } from "./ToolStep.js";
@@ -145,6 +146,8 @@ function markId(text: string) {
 }
 
 const TOOL_LABEL: Record<string, string> = {
+  fusion_step: "Fusion",
+  fusion_done: "Resultado Fusion",
   list_files: "Revisó los archivos",
   read_files: "Leyó",
   write_file: "Escribió",
@@ -266,6 +269,15 @@ function liveTurn(onChange: (items: Item[]) => void, setError: (message: string)
     else if (e.type === "done" && team) team.metrics = { usd: e.usd, baselineUsd: e.baselineUsd, cachedTokens: e.cachedTokens };
     else if (e.type === "text" && e.taskId && e.taskId !== "fast" && e.taskId !== "chat") lane(e.taskId).note = e.text;
     else if (e.type === "text") items.push({ kind: "ai", text: e.text });
+    else if (e.type === "fusion_step" || e.type === "fusion_done") {
+      const step = fusionDisplay(e);
+      if (e.taskId) lane(e.taskId).steps.push(step);
+      else {
+        const last = items[items.length - 1];
+        if (last?.kind === "steps") last.steps.push(step);
+        else items.push({ kind: "steps", steps: [step] });
+      }
+    }
     else if (e.type === "tool_start" && e.taskId) lane(e.taskId).steps.push({ id: e.id, name: e.name, summary: e.summary, state: "running" });
     else if (e.type === "tool_end" && e.taskId) {
       const step = lane(e.taskId).steps.find((x) => x.id === e.id);

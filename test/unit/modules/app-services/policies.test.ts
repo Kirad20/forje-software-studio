@@ -28,6 +28,35 @@ describe("app service capability boundaries", () => {
     expect(callModel).not.toHaveBeenCalled();
   });
 
+  it("uses explicit selection, requires actual tools and returns total Fusion usage with the final content", async () => {
+    const model = { id: "selected", model: "chosen", label: "Chosen" };
+    const usage = { input: 50, output: 12, cacheRead: 10, cacheWrite: 2 };
+    const fusion = { operationId: "op", effort: "high", pattern: "critique", warnings: ["budget limit"], steps: [] };
+    const callModel = vi.fn(async () => ({ model, credits: 8, usd: 0.08, totalUsage: usage, fusion,
+      response: { content: [{ type: "text", text: "accepted" }], stopReason: "end", usage: { input: 10, output: 2, cacheRead: 0 } } }));
+    const log = vi.fn();
+    const api = createAi({ one: async () => ({ owner_id: "a", ai_enabled: true, credits: 50 }), q: vi.fn(),
+      log, allowedModels: async () => [model], callModel } as any);
+    const tools = [{ name: "read", description: "", input_schema: {} }];
+    expect(await api.appAiChat("p", { model: "chosen", messages: [], tools }))
+      .toMatchObject({ text: "accepted", model: model.id, credits: 8, usd: 0.08, usage, fusion });
+    expect(callModel).toHaveBeenCalledWith({ accountId: "a", projectId: "p" }, "app", expect.objectContaining({ needsTools: true }),
+      expect.objectContaining({ tools }), { billing: { payerId: "a", projectId: "p", source: "app" }, explicit: model });
+    expect(log).toHaveBeenCalledWith("p", expect.objectContaining({ message: expect.stringContaining("62+12 tokens") }));
+    await expect(api.appAiChat("p", { model: "forbidden", messages: [] })).rejects.toThrow("no está permitido");
+    expect(callModel).toHaveBeenCalledOnce();
+  });
+
+  it("falls back to final response usage for non-Fusion app callers", async () => {
+    const usage = { input: 5, output: 2, cacheRead: 1 };
+    const callModel = vi.fn(async () => ({ model: { id: "m", label: "M" }, credits: 1,
+      response: { content: [], stopReason: "end", usage } }));
+    const api = createAi({ one: async () => ({ owner_id: "a", ai_enabled: true, credits: 1 }),
+      q: vi.fn(), log: vi.fn(), allowedModels: vi.fn(), callModel } as any);
+    expect(await api.appAiChat("p", { messages: [] })).toMatchObject({ usage });
+    expect(callModel.mock.calls[0]).toBeDefined();
+  });
+
   it("redirects unverified sending domains to the project owner", async () => {
     const sendMail = vi.fn();
     const q = vi.fn();

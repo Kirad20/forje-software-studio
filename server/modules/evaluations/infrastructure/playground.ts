@@ -133,6 +133,7 @@ async function execute(run: InternalRun, accountId: string, files: [string, stri
     const text = [specialist ? `# Tu tarea (${run.role}, id playground)\n${run.prompt}` : `## Petición\n${run.prompt}`, map].join("\n\n");
     const gated = run.role !== "chat";
     const result = await evaluationBuilder().runAgent({
+      explicitModelId: run.modelId,
       scope: { accountId, projectId: pid },
       billing: { payerId: accountId, projectId: pid, source: "playground" },
       role: run.role,

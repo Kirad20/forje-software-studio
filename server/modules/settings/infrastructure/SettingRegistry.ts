@@ -45,6 +45,11 @@ const defs: Def[] = [
     type: "list",
     help: "Patrones sobre «proveedor:modelo» (con * como comodín). «custom:*» son los modelos propios. Cada cuenta y cada proyecto pueden restringirla más.",
   },
+  ...(["fast", "standard", "high", "max"] as const).flatMap((effort) => [
+    { key: `models.fusion.${effort}.maxCalls`, group: "models" as const, label: `Fusion ${effort}: máximo de llamadas`, type: "number" as const, min: 1, max: 20, integer: true },
+    { key: `models.fusion.${effort}.timeoutMs`, group: "models" as const, label: `Fusion ${effort}: tiempo máximo (ms)`, type: "number" as const, min: 1_000, max: 600_000, integer: true },
+    { key: `models.fusion.${effort}.maxUsd`, group: "models" as const, label: `Fusion ${effort}: presupuesto máximo (USD)`, type: "number" as const, min: 0, max: 100, help: "Un precio desconocido se contabiliza como desconocido, no como gratis." },
+  ]),
   { key: "smtpUrl", group: "email", label: "Servidor SMTP", type: "secret", help: "smtp://usuario:clave@host:587. Sin él, los correos solo quedan en el registro del proyecto y los códigos de acceso salen en el log." },
   { key: "emailFrom", group: "email", label: "Remitente", type: "string" },
   { key: "stripeKey", group: "payments", label: "Clave secreta de Stripe", type: "secret", help: "La usan las apps que no definen su propia STRIPE_SECRET_KEY." },

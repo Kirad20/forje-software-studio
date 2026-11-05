@@ -35,6 +35,19 @@ function setup() {
 }
 
 describe("AI provider model classification", () => {
+  it("does not duplicate Fusion accounting and attributes all classifiers and total cost", async () => {
+    const { ports, service } = setup();
+    const output = answer({ models: [prediction("new")] });
+    const step = { id: "draft", phase: "draft" as const, modelId: "draft-model", effort: "low" as const, ms: 1, usage: output.response.usage, usd: 0.004, credits: 0 };
+    ports.callModel.mockResolvedValueOnce({
+      ...output, usd: 0.01, totalUsage: { input: 300, output: 200, cacheRead: 0, cacheWrite: 0 },
+      fusion: { operationId: "classify", effort: "standard", pattern: "cascade", warnings: [], steps: [step, { ...step, id: "judge", phase: "judge", modelId: model.id, usd: 0.006 }] },
+    });
+    expect(await service.importProviderModels(scope, "gateway", [{ id: "new" }]))
+      .toMatchObject({ classifiedBy: ["draft-model", model.id], usd: 0.01, usage: { input: 300, output: 200, cacheRead: 0, cacheWrite: 0 } });
+    expect(ports.recordUsage).not.toHaveBeenCalled();
+  });
+
   it("uses the router with account scope and persists AI scores instead of fixed family scores", async () => {
     const { ports, service } = setup();
     const result = await service.importProviderModels(scope, "gateway", [{ id: "claude-opus-5" }]);
@@ -67,6 +80,14 @@ describe("AI provider model classification", () => {
     expect(ports.catalog.importProviderModels).toHaveBeenCalledWith("gateway", [expect.objectContaining({
       tools: true, vision: true, context: 200000, inPrice: 2, outPrice: 10, cacheReadPrice: 0.2,
     })], "admin");
+  });
+  it("forwards independently scored capabilities but only trusts provider declarations of reasoning effort", async () => {
+    const { ports, service } = setup();
+    const capabilities = { reasoning: 4.5, coding: 4, debugging: 3, toolUse: 2, confidence: 0.7 };
+    ports.callModel.mockResolvedValueOnce(answer({ models: [{ ...prediction("new"), capabilities, reasoningEffort: true }] }));
+    await service.importProviderModels(scope, "gateway", [{ id: "new", reasoningEffort: false }]);
+    expect(ports.catalog.importProviderModels).toHaveBeenCalledWith("gateway",
+      [expect.objectContaining({ capabilities: { ...capabilities, source: "classification" }, reasoningEffort: false })], "admin");
   });
   it("skips existing models and deduplicates before spending tokens", async () => {
     const { ports, service } = setup();
@@ -123,7 +144,7 @@ describe("AI provider model classification", () => {
     const { ports } = setup();
     const routerPorts = {
       allowedModels: vi.fn(async () => [model]),
-      projectMode: vi.fn(async () => "balanced" as const),
+      projectMode: vi.fn(async () => "high" as const),
       posteriors: vi.fn(async () => new Map([[model.id, { alpha: 3, beta: 1, uses: 4 }]])),
       invoke: vi.fn(async (_m: ModelInfo, _req: LlmRequest) => answer({ models: [prediction("new")] }).response),
       recordOutcome: vi.fn(async () => {}), charge: vi.fn(async () => ({ usd: 0, credits: 0 })),

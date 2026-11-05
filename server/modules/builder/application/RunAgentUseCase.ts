@@ -1,4 +1,4 @@
-import { addUsage, emptyUsage, type AgentEvent, type AgentExecutionResult, type AgentExecutionSpec, type Block, type ExecutionContext, type ExecutionModel, type Message } from "../domain/AgentExecution.js";
+import { addUsage, emptyUsage, type AgentEvent, type AgentExecutionResult, type AgentExecutionSpec, type Block, type ContextAuditEvent, type ExecutionContext, type ExecutionModel, type Message } from "../domain/AgentExecution.js";
 import type { AgentExecutionPorts } from "../ports/AgentExecutionPorts.js";
 import { applySummary, estimateTokens, pruneToolResults, renderTranscript, splitForSummary, textTokens, thresholds } from "../domain/ContextCompaction.js";
 
@@ -26,11 +26,19 @@ export class RunAgentUseCase<M extends ExecutionModel> {
     const fixedTokens = textTokens(spec.system ?? "") + textTokens(JSON.stringify(tools));
     spec.ctx.reads ??= new Map();
     const result: AgentExecutionResult<M> = { text: "", model: null, usage: emptyUsage(), usd: 0, credits: 0, steps: [], buildOk: null, testsOk: null, toolErrors: 0, hitStepLimit: false, written: [], gate: null, gateFixes: 0 };
-    const emit = (e: AgentEvent) => spec.emit(spec.taskId && ["text", "tool_start", "tool_end"].includes(e.type) ? ({ ...e, taskId: spec.taskId } as AgentEvent) : e);
+    const emit = (e: AgentEvent) => spec.emit(spec.taskId && ["text", "tool_start", "tool_end", "fusion_step", "fusion_done"].includes(e.type) ? ({ ...e, taskId: spec.taskId } as AgentEvent) : e);
     const runId = this.ports.newRunId();
+    const agentId = spec.agentId ?? runId;
+    let traceId: string | undefined;
+    const audit = (event: Pick<ContextAuditEvent, "kind" | "measured" | "beforeTokens" | "afterTokens" | "bytes" | "count">) => this.ports.recordContextEvent?.({
+      projectId: spec.ctx.projectId, taskId: spec.taskId, turnId: spec.turnId, agentId, traceId, ...event,
+    });
     let maxSteps = spec.maxSteps;
     let reminded = false;
     let gatedAt = -1;
+    let affinityGeneration = 0;
+    let author: M | undefined;
+    let lastCallGeneration = -1;
     const runGate = async (): Promise<string | null> => {
       const id = `gate-${runId}-${result.gateFixes}`;
       emit({ type: "tool_start", id, name: "finish_gate", summary: "Comprobación automática antes de terminar" });
@@ -52,22 +60,30 @@ export class RunAgentUseCase<M extends ExecutionModel> {
         const limit = thresholds(result.model.context);
         const size = () => fixedTokens + estimateTokens(history);
         if (size() > limit.prune) {
+          const beforePrune = size();
           const pruned = pruneToolResults(history, opening);
           if (pruned.pruned) {
             history.splice(0, history.length, ...pruned.messages);
             spec.ctx.reads.clear();
+            affinityGeneration++;
+            author = undefined;
+            audit({ kind: "compaction", measured: false, beforeTokens: beforePrune, afterTokens: size(), count: pruned.pruned });
           }
           if (size() > limit.summarize && this.ports.summarize) {
             const cut = splitForSummary(history, opening);
             if (cut !== null) {
               try {
-                const summary = await this.ports.summarize(renderTranscript(history.slice(opening, cut)));
+                const beforeSummary = size();
+                const summary = await this.ports.summarize(renderTranscript(history.slice(opening, cut)), { agentId });
                 if (summary.text.trim()) {
                   result.usage = addUsage(result.usage, summary.usage);
                   result.usd += summary.usd;
                   result.credits += summary.credits;
                   history.splice(0, history.length, ...applySummary(history, opening, cut, summary.text.trim()));
                   spec.ctx.reads.clear();
+                  affinityGeneration++;
+                  author = undefined;
+                  audit({ kind: "compaction", measured: false, beforeTokens: beforeSummary, afterTokens: size(), count: cut - opening });
                 }
               } catch (error) {
                 this.ports.compactionFailed?.(error);
@@ -77,14 +93,33 @@ export class RunAgentUseCase<M extends ExecutionModel> {
         }
       }
       const callStarted = this.ports.now();
-      const call = await this.ports.callModel({ messages: history, tools: tools.length ? tools : undefined, pinned: result.model ?? undefined });
+      const last = history.at(-1);
+      const toolContinuation = last?.role === "user" && Array.isArray(last.content) && last.content.some(block => block.type === "tool_result");
+      const call = await this.ports.callModel({
+        messages: history, tools: tools.length ? tools : undefined,
+        pinned: author,
+        affinityKey: JSON.stringify([spec.ctx.projectId, spec.turnId, spec.taskId ?? spec.role, affinityGeneration]),
+        agentId,
+        decisionBoundary: lastCallGeneration !== affinityGeneration || !toolContinuation,
+        onFusionStep: step => emit({ type: "fusion_step", step: {
+          id: step.id, phase: step.phase, modelId: step.modelId, servedBy: step.servedBy,
+          effort: step.effort, ms: step.ms, usage: step.usage, usd: step.usd, credits: step.credits,
+          context: step.context,
+          ...(step.error ? { error: "La llamada al modelo falló." } : {}),
+        } }),
+      });
+      author = call.model;
+      lastCallGeneration = affinityGeneration;
+      traceId = call.fusion?.operationId;
+      if (call.fusion) emit({ type: "fusion_done", operationId: call.fusion.operationId, pattern: call.fusion.pattern, warnings: call.fusion.warnings, usd: call.usd, credits: call.credits });
       if (!result.model || result.model.id !== call.model.id) {
         result.model = call.model;
         spec.ctx.actor = `${spec.role}@${call.model.model}`;
         await spec.onModel?.(call.model, call.failed.length ? `tras fallar ${call.failed.join("; ")}` : "");
       }
-      result.usage = addUsage(result.usage, call.response.usage);
-      this.ports.recordStep({ runId, projectId: spec.ctx.projectId, turnId: spec.turnId, taskId: spec.taskId, role: spec.role, step, modelId: call.model.id, usage: call.response.usage, ms: this.ports.now() - callStarted, usd: call.usd });
+      const usage = call.totalUsage ?? call.response.usage;
+      result.usage = addUsage(result.usage, usage);
+      this.ports.recordStep({ runId, projectId: spec.ctx.projectId, turnId: spec.turnId, taskId: spec.taskId, role: spec.role, step, modelId: call.model.id, usage, ms: this.ports.now() - callStarted, usd: call.usd });
       result.usd += call.usd;
       result.credits += call.credits;
       const assistant: Message = { role: "assistant", content: call.response.content };
@@ -137,6 +172,7 @@ export class RunAgentUseCase<M extends ExecutionModel> {
         if (c.name === "check_build") result.buildOk = ok && output.startsWith("Compila sin errores");
         if (c.name === "run_tests") result.testsOk = ok && output.startsWith("Todo en verde");
         if (!ok) result.toolErrors++;
+        if (c.name === "read_files" || c.name === "read_file") audit({ kind: "file_read", measured: true, bytes: ok ? new TextEncoder().encode(output).length : 0, count: 1 });
         this.ports.recordToolCall({ runId, projectId: spec.ctx.projectId, source: "builder", role: spec.role, step, tool: c.name, inputChars: JSON.stringify(c.input ?? {}).length, resultChars: output.length, ok, ms: this.ports.now() - started });
         result.steps.push({ tool: c.name, summary, ok, ...(!ok ? { output: output.slice(0, 2000) } : {}) });
         emit({ type: "tool_end", id: c.id, ok, output: output.slice(0, 2000) });

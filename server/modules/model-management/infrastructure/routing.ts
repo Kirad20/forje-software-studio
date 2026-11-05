@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { one, q } from "../../../shared/database/index.js";
 import { prior } from "../domain/bandit.js";
 import { ModelCallError } from "../domain/messages.js";
@@ -7,14 +7,20 @@ import { anthropicChat } from "./anthropic.js";
 import { allowedModels, costUsd, creditsForUsd, providerOf } from "../catalog.js";
 import { compatChat } from "./openaiCompat.js";
 import { ollamaChat } from "./ollama.js";
+import { FUSION_BUDGETS } from "../domain/fusion.js";
+import type { Mode } from "../domain/routing.js";
+import { recordFusionStep, recordFusionTrace } from "./FusionLedger.js";
+import { modelHealth, recordModelHealth } from "./ModelHealth.js";
+import { config } from "../../../shared/config.js";
+import { validateToolInput } from "./ToolProposalValidation.js";
 
 export const routingPorts: ModelRouterPorts = {
   allowedModels,
   async projectMode(projectId) {
-    if (!projectId) return "balanced";
-    return (await one<{ model_mode: "saving" | "balanced" | "quality" }>(
+    if (!projectId) return "standard";
+    return (await one<{ model_mode: Mode }>(
       `select model_mode from projects where id = $1`, [projectId],
-    ))?.model_mode ?? "balanced";
+    ))?.model_mode ?? "standard";
   },
   async posteriors(taskClass, models) {
     const rows = await q<{ model_id: string; alpha: number; beta: number; uses: number }>(
@@ -39,7 +45,7 @@ export const routingPorts: ModelRouterPorts = {
     const provider = providerOf(model.provider);
     if (!provider?.endpoint) throw new ModelCallError(`Proveedor no configurado: ${model.provider}`, false);
     if (provider.kind === "ollama") return ollamaChat(provider.endpoint, model.model, model.context, request);
-    return compatChat(provider.endpoint, model.model, request);
+    return compatChat(provider.endpoint, model.model, request, model.reasoningEffort === true);
   },
   async charge(billing, role, model, usage) {
     const usd = costUsd(model, usage), credits = creditsForUsd(usd);
@@ -58,4 +64,11 @@ export const routingPorts: ModelRouterPorts = {
     );
   },
   requestKey: value => createHash("sha256").update(value).digest("hex"),
+  nextOperationId: () => randomUUID(),
+  fusionBudget: effort => ({ ...FUSION_BUDGETS[effort], ...config.models.fusion[effort] }),
+  recordFusionStep,
+  recordFusionTrace,
+  modelHealth,
+  recordModelHealth,
+  validateToolInput,
 };

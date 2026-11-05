@@ -548,6 +548,38 @@ async function main() {
     await page.getByRole("navigation", { name: "Secciones de administración" }).waitFor();
   });
 
+  await step("admin: auditoría filtra el proyecto y muestra uso, contexto y vacíos sin contenido privado", async () => {
+    const sandbox = await context.newPage();
+    try {
+      const loaded = sandbox.waitForResponse(response => new URL(response.url()).pathname === "/api/admin/audit");
+      await sandbox.goto("/admin/audit");
+      const response = await loaded;
+      assert(response.status() === 200, "la consulta administrativa de auditoría falló");
+      await sandbox.getByRole("heading", { name: "Uso y cobertura", exact: true }).waitFor();
+      const filtered = sandbox.waitForResponse(response => new URL(response.url()).searchParams.get("projectId") === projectUrl.split("/")[2]);
+      await sandbox.getByLabel("Proyecto (ID; vacío = plataforma)").fill(projectUrl.split("/")[2]);
+      await sandbox.getByRole("button", { name: "Consultar", exact: true }).click();
+      const report = await (await filtered).json();
+      assert(report.summary.fusionCalls > 0 && report.summary.contextRecordedCalls > 0, "el turno del constructor no registró contexto ni llamadas");
+      assert(report.summary.inputTokens > 0 && report.timeline.every(step => step.projectId === projectUrl.split("/")[2]), "el filtro de proyecto no se aplicó");
+      assert(!JSON.stringify(report).includes("input_schema"), "la auditoría expone esquemas o contenido de petición");
+      const timeline = sandbox.locator("section").filter({ has: sandbox.getByRole("heading", { name: "Turnos y crecimiento de contexto", exact: true }) });
+      await timeline.locator("details").first().locator("summary").first().click();
+      await timeline.locator("details details").first().locator("summary").click();
+      await timeline.getByText("Contexto estimado:", { exact: false }).first().waitFor();
+      await sandbox.setViewportSize({ width: 390, height: 844 });
+      assert(await sandbox.evaluate(() => document.documentElement.scrollWidth) <= 391, "el panel de auditoría desborda en móvil");
+      await screenshot(sandbox, "admin-execution-audit-mobile");
+      const empty = sandbox.waitForResponse(response => new URL(response.url()).searchParams.get("projectId") === "missing-audit-project");
+      await sandbox.getByLabel("Proyecto (ID; vacío = plataforma)").fill("missing-audit-project");
+      await sandbox.getByRole("button", { name: "Consultar", exact: true }).click();
+      assert((await (await empty).json()).summary.calls === 0, "el proyecto vacío conserva llamadas del filtro anterior");
+      await sandbox.getByText("Sin peticiones con detalle registrado.", { exact: true }).waitFor();
+    } finally {
+      await sandbox.close();
+    }
+  });
+
   await step("admin: ajustes buscables, cambios reversibles y guardado persistente", async () => {
     await page.goto("/admin/general");
     const search = page.getByRole("textbox", { name: "Buscar ajustes" });

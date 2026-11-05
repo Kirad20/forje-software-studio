@@ -107,7 +107,7 @@ export async function startRun(admin: Account, req: RunRequest): Promise<{ runId
 
 // --- Executing ---------------------------------------------------------------------------------------
 
-async function execute(run: Active, admin: Account, cases: EvalCase[], cfg: { repeats: number; models: string[] | null; judge: ModelInfo | null }, budgetUsd: number) {
+async function execute(run: Active, admin: Account, cases: EvalCase[], cfg: { repeats: number; models: string[] | null; judge: ModelInfo | null; judgeExplicit?: boolean }, budgetUsd: number) {
   let evalAccount: Account;
   await executeRun(run, cases, cfg.repeats, config.evals.concurrency, budgetUsd, {
     prepare: async () => {
@@ -118,7 +118,7 @@ async function execute(run: Active, admin: Account, cases: EvalCase[], cfg: { re
     },
     measure: spentOn,
     saveSpent: (r, usd) => q(`update eval_runs set spent_usd = $2 where id = $1`, [r.runId, usd]),
-    runCase: (r, job, over, ledger) => runCase(r, admin, evalAccount, job.c, job.repeat, cfg.judge, over, ledger),
+    runCase: (r, job, over, ledger) => runCase(r, admin, evalAccount, job.c, job.repeat, cfg.judge, over, ledger, cfg.models?.length === 1 ? cfg.models[0] : undefined, cfg.judgeExplicit),
     failedResult: (job, error) => failedResult(job.c, job.repeat, error),
     saveResult: (r, job, result) => q(`insert into eval_results (run_id, case_id, repeat, result) values ($1, $2, $3, $4)`, [r.runId, job.c.id, job.repeat, JSON.stringify(result)]),
     trace: (r, job, result) => {
@@ -169,6 +169,8 @@ async function runCase(
   judgeModel: ModelInfo | null,
   isOverBudget: () => boolean,
   ledger: { update(id: string, usd: number): void; settle(id: string, usd: number): void },
+  explicitModelId?: string,
+  judgeExplicit = false,
 ): Promise<CaseResult> {
   if (run.abort.signal.aborted) return emptyResult(c, repeat, isOverBudget() ? "over_budget" : "aborted");
   const project = await evaluationResources().projects.createProject(evalAccount.id, `eval ${c.id} #${repeat}`, "Proyecto efímero de los evals de calidad.");
@@ -200,7 +202,7 @@ async function runCase(
       [],
       "build",
       false,
-      { synthetic: true },
+      { synthetic: true, ...(explicitModelId ? { explicitModelId } : {}) },
     );
     const buildUsd = await spentOn(project.id);
     costSoFar = buildUsd;
@@ -229,6 +231,7 @@ async function runCase(
             judgeModel,
             { prompt: c.prompt, shots, text: preview.text },
             run.abort.signal,
+            judgeExplicit,
           );
           judgeUsd = r.usd;
           judge = r.judgement ?? { error: r.error ?? "sin veredicto" };

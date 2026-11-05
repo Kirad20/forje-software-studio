@@ -1,8 +1,8 @@
-import { meanOf, sampleBeta } from "../domain/bandit.js";
-import { costUsd, type ModelInfo, type ModelScope } from "../domain/models.js";
-import { estimateRequestTokens, ModelCallError, textOf, type Effort, type LlmRequest } from "../domain/messages.js";
-import { NoModelError, type Role, type Mode, type Intent, type Domain, type Features, type AnalysisContext, type PickInput, type Candidate, type Pick, type CallOptions, type CallResult } from "../domain/routing.js";
+import { type ModelScope } from "../domain/models.js";
+import { estimateRequestTokens, textOf, type Effort } from "../domain/messages.js";
+import { type Role, type Intent, type Domain, type Features, type AnalysisContext, type PickInput, type Pick } from "../domain/routing.js";
 import type { ModelRouterPorts } from "../ports/ModelRouterPorts.js";
+import { createFusionOrchestrator } from "./FusionOrchestrator.js";
 
 // --- Roles ------------------------------------------------------------------------------------
 
@@ -31,9 +31,6 @@ export const ROLES: Record<Role, RoleProfile> = {
   chat: { minTier: 1, effort: "low", needsTools: true, estIn: 25_000, estOut: 1_500 },
   app: { minTier: 1, effort: "low", needsTools: false, estIn: 2_000, estOut: 500 },
 };
-
-/** How much cost weighs against quality, per project mode. */
-const LAMBDA: Record<Mode, number> = { saving: 0.75, balanced: 0.35, quality: 0.08 };
 
 // --- Request analysis ------------------------------------------------------------------------------
 
@@ -89,7 +86,9 @@ export const taskClassOf = (role: Role, f: PickInput) =>
   `${role}:${f.complexity <= 2 ? "low" : f.complexity <= 3 ? "mid" : "high"}:${f.domains[0] ?? "general"}`;
 
 export function createModelRouter(ports: ModelRouterPorts) {
-const { allowedModels, projectMode, posteriors, recordOutcome, invoke, charge, logDecision } = ports;
+const { recordOutcome, invoke, charge, logDecision } = ports;
+const fusion = createFusionOrchestrator(ports);
+const callModel = fusion.callModel;
 const analysisCache = new Map<string, Features>();
 
 /**
@@ -128,114 +127,11 @@ async function analyzeRequest(scope: ModelScope, text: string, ctx: AnalysisCont
   return features;
 }
 
-// --- Choosing a model --------------------------------------------------------------------------------
-
-/**
- * score = quality (Thompson sample of the bandit) − λ(mode)·normalised cost − latency − tier gap.
- * Expensive models only explore once they have a few uses, so sampling noise alone never
- * picks a pricey model for cheap work.
- */
 async function pick(scope: ModelScope, role: Role, f: PickInput, opts: { exclude?: Set<string>; rand?: () => number; requiredContext?: number } = {}): Promise<Pick> {
-  const profile = ROLES[role];
-  const needsTools = f.needsTools ?? profile.needsTools;
-  const mode = await projectMode(scope.projectId);
-  const estIn = profile.estIn * (f.complexity >= 4 ? 1.6 : 1);
-  // Role estimates describe a whole task, not the prompt of one call.
-  const requiredContext = opts.requiredContext ?? maxTokensFor(role) + 1024;
-  const allowed = await allowedModels(scope);
-  const candidates = allowed.filter(
-    (m) => !opts.exclude?.has(m.id) && (!needsTools || m.tools) && (!f.needsVision || m.vision) && m.context >= requiredContext,
-  );
-  if (!candidates.length) {
-    throw new NoModelError(
-      `No hay ningún modelo permitido que sirva para «${role}»${f.needsVision ? " con imágenes" : ""}. ${
-        !allowed.length ? "No hay modelos habilitados y permitidos con un proveedor disponible." : allowed.map((m) => {
-          const reasons = [
-            opts.exclude?.has(m.id) ? "excluido tras un fallo o por la petición" : "",
-            needsTools && !m.tools ? "sin herramientas" : "",
-            f.needsVision && !m.vision ? "sin visión" : "",
-            m.context < requiredContext ? `contexto ${m.context}; se necesitan al menos ${requiredContext} tokens, incluida la respuesta` : "",
-          ].filter(Boolean);
-          return `${m.label}: ${reasons.join(", ")}`;
-        }).join(" · ")
-      } Revisa proveedores, capacidades, contexto y permisos en Ajustes → Modelos.`,
-    );
-  }
-  const taskClass = taskClassOf(role, f);
-  const post = await posteriors(taskClass, candidates);
-  const usd = new Map(candidates.map((m) => [m.id, costUsd(m, { input: estIn * 0.4, cacheRead: estIn * 0.6, cacheWrite: 0, output: profile.estOut })]));
-  const maxUsd = Math.max(...usd.values(), 1e-9);
-  const minUsd = Math.min(...usd.values());
-  const required = Math.max(1, profile.minTier + (f.complexity >= 4 ? 1 : 0) - (mode === "saving" ? 1 : 0) + (mode === "quality" ? 1 : 0));
-  const rand = opts.rand ?? Math.random;
-
-  const scored: Candidate[] = candidates.map((m) => {
-    const p = post.get(m.id)!;
-    const cost = usd.get(m.id)!;
-    // Limit exploration of models far pricier than the cheapest option until they have history.
-    const quality = cost > minUsd * 4 + 0.001 && p.uses < 3 ? meanOf(p) : sampleBeta(p, rand);
-    const gap = Math.max(0, required - m.tier) * 0.25;
-    const latency = ((5 - m.speed) / 4) * 0.05;
-    const score = quality - LAMBDA[mode] * (cost / maxUsd) - latency - gap;
-    return { id: m.id, label: m.label, score, quality, usd: cost, tier: m.tier };
-  });
-  scored.sort((a, b) => b.score - a.score);
-  const best = candidates.find((m) => m.id === scored[0]!.id)!;
-  const top = scored[0]!;
-  const reason = `${best.label} para ${role} (${taskClass}): calidad ${top.quality.toFixed(2)}, ~$${top.usd.toFixed(3)} por tarea, modo ${mode}`;
-  return { model: best, taskClass, reason, candidates: scored.slice(0, 6) };
-}
-
-// --- Calling, with fallback and billing ---------------------------------------------------------------
-
-/**
- * Calls the best model for the role; on a retryable failure (rate limit, overload,
- * timeout, refusal) records it and moves to the next best. Non-retryable errors (a bad
- * request) are raised, since another model would fail the same way.
- */
-async function callModel(scope: ModelScope, role: Role, f: PickInput, req: LlmRequest, opts: CallOptions = {}): Promise<CallResult> {
-  const exclude = new Set(opts.exclude ?? []);
-  const failed: string[] = [];
-  let next: ModelInfo | undefined = opts.pinned;
-  // Reserve the largest transport default without changing provider-specific output budgets.
-  const maxTokens = req.maxTokens ?? 16_000;
-  const requiredContext = estimateRequestTokens(req) + maxTokens;
-  if (next && next.context < requiredContext) {
-    exclude.add(next.id);
-    next = undefined;
-  }
-  for (let attempt = 0; attempt < 4; attempt++) {
-    let model = next;
-    if (!model) {
-      let p: Pick;
-      try {
-        p = await pick(scope, role, f, { exclude, requiredContext });
-      } catch (error) {
-        if (!(error instanceof NoModelError) || !failed.length) throw error;
-        throw new ModelCallError(
-          `Ningún modelo pudo responder: ${failed.join(" · ")}. No quedan candidatos para «${role}». ${error.message}`,
-          false,
-        );
-      }
-      model = p.model;
-      if (model.id !== opts.pinned?.id || attempt > 0) await logDecision(scope.projectId ?? null, role, p, opts.log);
-    }
-    next = undefined;
-    try {
-      const response = await invoke(model, { ...req, effort: req.effort ?? ROLES[role].effort });
-      const bill = opts.billing ? await charge(opts.billing, role, model, response.usage) : { usd: costUsd(model, response.usage), credits: 0 };
-      return { response, model, usd: bill.usd, credits: bill.credits, failed };
-    } catch (e) {
-      if (req.signal?.aborted || (e as Error).name === "AbortError") throw e;
-      const retryable = e instanceof ModelCallError ? e.retryable : true;
-      // A provider error is a weak signal about the model, so it counts for a quarter.
-      await recordOutcome(taskClassOf(role, f), model, 0, 0, 0.25).catch(() => {});
-      failed.push(`${model.label}: ${(e as Error).message.slice(0, 160)}`);
-      if (!retryable) throw e;
-      exclude.add(model.id);
-    }
-  }
-  throw new ModelCallError(`Ningún modelo pudo responder: ${failed.join(" · ")}`, false);
+  const required = opts.requiredContext ?? maxTokensFor(role) + 1024;
+  return fusion.rank(scope, role, { ...f, needsTools: f.needsTools ?? ROLES[role].needsTools },
+    role === "fast" ? "fast" : await ports.projectMode(scope.projectId),
+    { messages: [], maxTokens: Math.max(0, required - estimateRequestTokens({ messages: [] })) }, opts.exclude);
 }
 
 return { analyzeRequest, pick, callModel, invoke, charge, logDecision, recordOutcome };

@@ -118,7 +118,7 @@ describe("evaluation admission", () => {
     const request = { cases: [EVAL_CASES[0].id], judgeModel: model.id };
     await expect(startEvaluation("admin", request, limits, state, ports)).resolves.toMatchObject({ runId: "r" });
     expect(ports.launch).toHaveBeenCalledWith(expect.anything(), expect.anything(),
-      { repeats: 1, models: null, judge: model }, 5);
+      { repeats: 1, models: null, judge: model, judgeExplicit: true }, 5);
     for (const judgeModel of [blind.id, "not-allowed"]) {
       await expect(startEvaluation("admin", { ...request, judgeModel }, limits, state, ports))
         .rejects.toThrow("debe estar permitido y tener Imágenes activado");
