@@ -48,6 +48,20 @@ describe("project service topology", () => {
     expect(() => readProjectServices({ ...entries, "forja.services.json": source })).toThrow("forja.services.json");
   });
 
+  it("supports dozens of microservices but caps the manifest at 64", () => {
+    const build = (count: number) => {
+      const sources: Record<string, string> = {};
+      const services: Record<string, unknown> = {};
+      for (let i = 0; i < count; i++) {
+        sources[`endpoints/s${i}/list_GET.ts`] = "export default async () => ({});";
+        services[`svc-${i}`] = { kind: "service", endpoints: [`endpoints/s${i}/list_GET.ts`] };
+      }
+      return { ...sources, "forja.services.json": JSON.stringify({ version: 1, services }) };
+    };
+    expect(Object.keys(readProjectServices(build(64))!.services)).toHaveLength(64);
+    expect(() => readProjectServices(build(65))).toThrow("entre 1 y 64");
+  });
+
   it("blocks publication of a topology referring to nonexistent code", async () => {
     const problems = await checkProject({ ...entries, "forja.services.json": '{"version":1,"services":{"bad":{"kind":"worker","jobs":["jobs/missing.ts"]}}}' });
     expect(problems).toEqual([expect.objectContaining({ file: "forja.services.json", text: expect.stringContaining("inexistente") })]);

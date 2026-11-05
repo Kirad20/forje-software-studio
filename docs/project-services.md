@@ -75,7 +75,7 @@ Assignments name existing executable files exactly, not routes, folders or globs
 Each file can belong to one service only; workers cannot expose endpoints.
 Service names start with a lowercase letter, contain lowercase letters, digits or
 hyphens, have at most 40 characters, and cannot be `monolith`. Unknown fields are
-rejected. Replicas are integers from 1–8 per service, at most 16 total;
+rejected. A manifest holds 1–64 services. Replicas are integers from 1–8 per service, at most 64 total;
 `maxConcurrency` is 1–32 per replica. Omitted values default to one replica and
 concurrency 8 for services / 1 for workers. Unassigned endpoints/jobs remain in
 the monolith, so extract one module at a time. A malformed manifest fails build
