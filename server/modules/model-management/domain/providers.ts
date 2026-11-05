@@ -1,7 +1,7 @@
 export const OPENROUTER_URL = "https://openrouter.ai/api/v1";
 export interface ProviderRecord {
   id: string;
-  kind: "anthropic" | "openai";
+  kind: "anthropic" | "openai" | "ollama";
   label: string;
   baseUrl: string | null;
   headers: Record<string, string>;
@@ -15,7 +15,7 @@ export type ProviderView = Omit<ProviderRecord, "apiKey" | "headers"> & {
 };
 export interface ProviderInput {
   id: string;
-  kind?: "anthropic" | "openai";
+  kind?: "anthropic" | "openai" | "ollama";
   label?: string;
   baseUrl?: string | null;
   apiKey?: string | null;
@@ -27,6 +27,6 @@ export function missingProvider(p: ProviderRecord): string | null {
   if (!p.enabled) return "Desactivado";
   if (p.keyBroken) return "La clave guardada no se puede descifrar: vuelve a introducirla";
   if ((p.id === "anthropic" || p.id === "openrouter") && !p.apiKey) return "Falta la clave de API";
-  if (p.kind === "openai" && p.id !== "openrouter" && !p.baseUrl) return "Falta la URL base";
+  if (p.kind !== "anthropic" && p.id !== "openrouter" && !p.baseUrl) return "Falta la URL base";
   return null;
 }

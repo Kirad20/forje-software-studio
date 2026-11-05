@@ -6,7 +6,7 @@ import { useConfirmation } from "../../../shared/ConfirmDialog.js";
 
 interface ProviderView {
   id: string;
-  kind: "anthropic" | "openai";
+  kind: "anthropic" | "openai" | "ollama";
   label: string;
   baseUrl: string | null;
   headerNames: string[];
@@ -30,6 +30,7 @@ const KIND_HINT: Record<string, string> = {
   anthropic: "Modelos Claude con la API de Anthropic.",
   openrouter: "Cientos de modelos con una sola clave; su catálogo se sincroniza a diario.",
   openai: "OpenAI o cualquier servidor compatible (Ollama, vLLM, LM Studio…).",
+  ollama: "API nativa de Ollama: herramientas, imágenes y contexto configurado por modelo.",
 };
 
 /** Admin → Proveedores: keys, URLs and a connection test for each model provider. */
@@ -119,7 +120,7 @@ function ProviderCard({ p, onPatch, onDeleted }: { p: ProviderView; onPatch: (b:
         <span className="muted">Clave de API</span>
         <div className="row">
           {p.keySet && <code>{p.keyBroken ? "no se puede descifrar" : (p.keyHint ?? "••••")}</code>}
-          <input className="grow" name={`provider-key-${p.id}`} aria-label={`Clave de API de ${p.label}`} disabled={busy} type="password" autoComplete="new-password" placeholder={p.keySet ? "Reemplazar clave" : p.kind === "openai" && p.id !== "openrouter" ? "Opcional en servidores locales" : "Pega la clave"} value={key} onChange={(e) => setKey(e.target.value)} />
+          <input className="grow" name={`provider-key-${p.id}`} aria-label={`Clave de API de ${p.label}`} disabled={busy} type="password" autoComplete="new-password" placeholder={p.keySet ? "Reemplazar clave" : p.kind !== "anthropic" && p.id !== "openrouter" ? "Opcional en servidores locales" : "Pega la clave"} value={key} onChange={(e) => setKey(e.target.value)} />
           <button
             disabled={busy || !key.trim()}
             onClick={async () => {
@@ -134,7 +135,7 @@ function ProviderCard({ p, onPatch, onDeleted }: { p: ProviderView; onPatch: (b:
             </button>
           )}
         </div>
-        {p.kind === "openai" && p.id !== "openrouter" && (
+        {p.kind !== "anthropic" && p.id !== "openrouter" && (
           <>
             <span className="muted">URL base</span>
             <div className="row">
@@ -198,7 +199,7 @@ function ProviderEditor({ p, onClose, onSave }: {
   const [headers, setHeaders] = useState("{}");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const editableUrl = p.kind === "openai" && p.id !== "openrouter";
+  const editableUrl = p.kind !== "anthropic" && p.id !== "openrouter";
   const dirty = label !== p.label || (editableUrl && url !== (p.baseUrl ?? "")) || replaceHeaders;
   return (
     <EditDialog title="Editar proveedor" description={`Identificador: ${p.id}. Las claves y los valores de cabeceras no se muestran por seguridad.`} onClose={onClose} busy={busy}>
@@ -225,7 +226,7 @@ function ProviderEditor({ p, onClose, onSave }: {
       }}>
         <fieldset disabled={busy} className="stack">
           <label>Nombre visible<input required maxLength={80} value={label} onChange={(e) => setLabel(e.target.value)} /></label>
-          {editableUrl && <label>URL base<input required type="url" maxLength={500} placeholder="http://localhost:11434/v1" value={url} onChange={(e) => setUrl(e.target.value)} /></label>}
+          {editableUrl && <label>URL base<input required type="url" maxLength={500} placeholder={p.kind === "ollama" ? "http://localhost:11434" : "http://localhost:11434/v1"} value={url} onChange={(e) => setUrl(e.target.value)} /></label>}
           <label className="row small"><input type="checkbox" checked={replaceHeaders} onChange={(e) => setReplaceHeaders(e.target.checked)} style={{ width: "auto" }} />Reemplazar cabeceras personalizadas</label>
           {replaceHeaders && <>
             <div className="small muted">Reemplaza todas las cabeceras existentes{p.headerNames.length ? ` (${p.headerNames.join(", ")})` : ""}. Usa {"{}"} para quitarlas; desmarca para conservarlas.</div>
@@ -241,6 +242,7 @@ function ProviderEditor({ p, onClose, onSave }: {
 }
 
 function AddProvider({ onDone }: { onDone: (list?: ProviderView[]) => void }) {
+  const [kind, setKind] = useState<"openai" | "ollama">("openai");
   const [id, setId] = useState("");
   const [label, setLabel] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
@@ -256,7 +258,7 @@ function AddProvider({ onDone }: { onDone: (list?: ProviderView[]) => void }) {
         setError("");
         setBusy(true);
         try {
-          const r = await api<{ providers: ProviderView[] }>("/admin/providers", { body: { id, label: label || id, baseUrl, apiKey: apiKey || undefined, enabled: true } });
+          const r = await api<{ providers: ProviderView[] }>("/admin/providers", { body: { id, kind, label: label || id, baseUrl, apiKey: apiKey || undefined, enabled: true } });
           onDone(r.providers);
         } catch (x) {
           setError((x as Error).message);
@@ -265,11 +267,12 @@ function AddProvider({ onDone }: { onDone: (list?: ProviderView[]) => void }) {
         }
       }}
     >
-      <strong>Nuevo proveedor compatible con OpenAI</strong>
+      <strong>Nuevo proveedor</strong>
       <fieldset disabled={busy} className="admin-form-grid">
+        <label>Tipo<select value={kind} onChange={(e) => setKind(e.target.value === "ollama" ? "ollama" : "openai")}><option value="openai">Compatible con OpenAI</option><option value="ollama">Ollama nativo</option></select></label>
         <label>Identificador<input required placeholder="p. ej. ollama" pattern="[a-z0-9-]{2,32}" value={id} onChange={(e) => setId(e.target.value.toLowerCase())} /></label>
         <label>Nombre visible<input maxLength={80} placeholder="p. ej. Ollama local" value={label} onChange={(e) => setLabel(e.target.value)} /></label>
-        <label>URL base<input required type="url" maxLength={500} placeholder="http://localhost:11434/v1" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} /></label>
+        <label>URL base<input required type="url" maxLength={500} placeholder={kind === "ollama" ? "http://localhost:11434" : "http://localhost:11434/v1"} value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} /></label>
         <label>Clave (opcional)<input name="new-provider-api-key" type="password" autoComplete="new-password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} /></label>
       </fieldset>
       {error && <div className="error-box">{error}</div>}

@@ -6,6 +6,7 @@ import type { ModelRouterPorts } from "../ports/ModelRouterPorts.js";
 import { anthropicChat } from "./anthropic.js";
 import { allowedModels, costUsd, creditsForUsd, providerOf } from "../catalog.js";
 import { compatChat } from "./openaiCompat.js";
+import { ollamaChat } from "./ollama.js";
 
 export const routingPorts: ModelRouterPorts = {
   allowedModels,
@@ -37,6 +38,7 @@ export const routingPorts: ModelRouterPorts = {
     if (model.provider === "anthropic") return anthropicChat(model.model, request);
     const provider = providerOf(model.provider);
     if (!provider?.endpoint) throw new ModelCallError(`Proveedor no configurado: ${model.provider}`, false);
+    if (provider.kind === "ollama") return ollamaChat(provider.endpoint, model.model, model.context, request);
     return compatChat(provider.endpoint, model.model, request);
   },
   async charge(billing, role, model, usage) {

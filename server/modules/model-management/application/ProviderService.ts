@@ -39,7 +39,7 @@ export function createProviderService(repository: ProviderRepository) {
     if (p.id === "openrouter" && p.baseUrl) throw new ProviderError("La URL de OpenRouter es fija.");
     const baseUrl = p.baseUrl === undefined ? undefined : p.baseUrl?.replace(/\/$/, "") ?? null;
     if (!existing) {
-      if (!baseUrl) throw new ProviderError("Un proveedor compatible con OpenAI necesita la URL base (https://…/v1).");
+      if (!baseUrl) throw new ProviderError("El proveedor necesita una URL base.");
       await repository.create({ ...p, baseUrl });
       if (!opts.seed) await repository.audit(p.id, actorId, "create");
     } else {
