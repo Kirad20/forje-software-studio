@@ -201,8 +201,8 @@ async function main() {
     const nav = page.getByRole("navigation", { name: "Herramientas del proyecto" });
     await nav.waitFor();
     await page.getByRole("heading", { name: "Todo para darle vida a tu app" }).waitFor();
-    assert(await page.locator(".tool-card").count() === 14, "la vista general no muestra las 14 herramientas");
-    for (const name of ["Datos", "Usuarios", "IA", "Integraciones", "Analítica", "SEO", "Docs", "Tareas", "Archivos", "Correo", "Pagos", "Registros", "Seguridad", "Código"]) {
+    assert(await page.locator(".tool-card").count() === 15, "la vista general no muestra las 15 herramientas");
+    for (const name of ["Centro de control", "Datos", "Usuarios", "IA", "Integraciones", "Analítica", "SEO", "Docs", "Tareas", "Archivos", "Correo", "Pagos", "Registros", "Seguridad", "Código"]) {
       await nav.getByRole("button", { name, exact: true }).waitFor();
     }
     const search = nav.getByRole("searchbox", { name: "Buscar herramientas" });

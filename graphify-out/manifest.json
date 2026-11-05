@@ -6,9 +6,9 @@
     "semantic_hash": ""
   },
   ".github/workflows/ci.yml": {
-    "mtime": 1793829303.9510827,
-    "seen": 1793829334.1165776,
-    "ast_hash": "848f98ab8307519e3c20a1e45e47b7d0",
+    "mtime": 1793866686.1058917,
+    "seen": 1793866739.1152208,
+    "ast_hash": "6e7b50d94bf5385df93c1ae5ca727e55",
     "semantic_hash": ""
   },
   "package.json": {
@@ -3288,9 +3288,9 @@
     "semantic_hash": ""
   },
   "test/studio.mjs": {
-    "mtime": 1793842487.4054585,
-    "seen": 1793842512.8627806,
-    "ast_hash": "485a66c3434da061f59c5f1e37b28bd2",
+    "mtime": 1793867085.4597878,
+    "seen": 1793867109.3036485,
+    "ast_hash": "3f672ca8377090cf0848b309be9d3f8f",
     "semantic_hash": ""
   },
   "test/unit/modules/settings/coreComposition.test.ts": {
