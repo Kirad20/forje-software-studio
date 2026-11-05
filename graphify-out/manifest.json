@@ -1704,9 +1704,9 @@
     "semantic_hash": ""
   },
   "studio/src/features/app-services/presentation/ServicePanels.tsx": {
-    "mtime": 1793822578.978102,
-    "seen": 1793822608.871448,
-    "ast_hash": "3a8e3f9d06ad7e3841182591b71daabe",
+    "mtime": 1793836832.9453206,
+    "seen": 1793836861.7450643,
+    "ast_hash": "17fb3ae1b4d55259117e6640e362dba4",
     "semantic_hash": ""
   },
   "studio/src/features/billing/presentation/Plan.tsx": {
@@ -3288,9 +3288,9 @@
     "semantic_hash": ""
   },
   "test/studio.mjs": {
-    "mtime": 1793835274.8414927,
-    "seen": 1793835309.6892536,
-    "ast_hash": "8a442556ac25726f003054060db13b18",
+    "mtime": 1793836872.8473287,
+    "seen": 1793836907.2888422,
+    "ast_hash": "dd46ca4e4860a43194310c6b0794cb4c",
     "semantic_hash": ""
   },
   "test/unit/modules/settings/coreComposition.test.ts": {

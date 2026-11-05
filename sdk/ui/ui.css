@@ -83,7 +83,23 @@ textarea.fj-control { resize: vertical; }
 .fj-field-hint { margin: 0; font-size: 0.8125rem; color: var(--muted); }
 .fj-field-error { margin: 0; font-size: 0.8125rem; color: var(--danger); }
 .fj-check { display: inline-flex; align-items: center; gap: 10px; min-height: 40px; cursor: pointer; }
-.fj-check input { width: 18px; height: 18px; accent-color: var(--primary); }
+.fj-check input[type="checkbox"] {
+  appearance: none; width: 18px; min-width: 18px; max-width: 18px; height: 18px; padding: 0; margin: 0;
+  flex-shrink: 0; vertical-align: middle; border: 1.5px solid var(--border); border-radius: 5px;
+  background: var(--surface); cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
+}
+.fj-check input[type="checkbox"]:hover:not(:disabled) { border-color: var(--primary); }
+.fj-check input[type="checkbox"]:checked, .fj-check input[type="checkbox"]:indeterminate {
+  border-color: var(--primary); background-color: var(--primary);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 18 18'%3E%3Cpath d='m4 9 3 3 7-7' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-position: center; background-repeat: no-repeat;
+}
+.fj-check input[type="checkbox"]:indeterminate { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 18 18'%3E%3Cpath d='M4 9h10' stroke='white' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E"); }
+.fj-check input[type="checkbox"]:focus-visible { outline: 2px solid var(--primary); outline-offset: 3px; }
+.fj-check input[type="checkbox"]:disabled { opacity: .45; cursor: not-allowed; }
+@media (prefers-reduced-motion: reduce) { .fj-check input[type="checkbox"] { transition: none; } }
+@media (forced-colors: active) { .fj-check input[type="checkbox"] { appearance: auto; background-image: none; } }
 
 /* Containers */
 .fj-card { background: var(--surface); border: 1px solid var(--border); border-radius: calc(var(--radius) + 2px); padding: 20px; }
