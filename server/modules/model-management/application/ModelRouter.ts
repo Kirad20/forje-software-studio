@@ -207,7 +207,16 @@ async function callModel(scope: ModelScope, role: Role, f: PickInput, req: LlmRe
   for (let attempt = 0; attempt < 4; attempt++) {
     let model = next;
     if (!model) {
-      const p = await pick(scope, role, f, { exclude, requiredContext });
+      let p: Pick;
+      try {
+        p = await pick(scope, role, f, { exclude, requiredContext });
+      } catch (error) {
+        if (!(error instanceof NoModelError) || !failed.length) throw error;
+        throw new ModelCallError(
+          `Ningún modelo pudo responder: ${failed.join(" · ")}. No quedan candidatos para «${role}». ${error.message}`,
+          false,
+        );
+      }
       model = p.model;
       if (model.id !== opts.pinned?.id || attempt > 0) await logDecision(scope.projectId ?? null, role, p, opts.log);
     }

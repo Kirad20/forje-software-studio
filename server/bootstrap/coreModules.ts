@@ -81,6 +81,12 @@ export function createCoreModules(dependencies: CoreModulesDependencies) {
   const lifecycleRepository = new PostgresAccountLifecycleRepository(
     (tx, id, name) => collaboration.createPersonalOrg(tx, id, name),
   );
+  const settingsService = createPlatformSettings();
+  const settings = createSettingsModule({
+    service: settingsService,
+    registry: new PlatformSettingsRegistryAdapter(),
+    store: new PostgresPlatformSettingsStoreAdapter(settingsService),
+  });
   const identity = createIdentityModule({
     accounts: {
       accounts: lifecycleRepository,
@@ -99,6 +105,7 @@ export function createCoreModules(dependencies: CoreModulesDependencies) {
         get signup() { return config.signup; },
         get freeCredits() { return config.freeCredits; },
       },
+      audit: settings.audit,
     },
     accountRepository,
     loginCodes: new PostgresLoginCodeRepository(),
@@ -107,13 +114,6 @@ export function createCoreModules(dependencies: CoreModulesDependencies) {
     claimInvites: async (accountId, email) => {
       await collaboration.claimInvites(accountId, email);
     },
-  });
-
-  const settingsService = createPlatformSettings();
-  const settings = createSettingsModule({
-    service: settingsService,
-    registry: new PlatformSettingsRegistryAdapter(),
-    store: new PostgresPlatformSettingsStoreAdapter(settingsService),
   });
 
   return { identity, collaboration, projects, settings };

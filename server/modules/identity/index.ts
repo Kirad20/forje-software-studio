@@ -26,7 +26,7 @@ export { BcryptArgonPasswordHasher } from "./infrastructure/BcryptArgonPasswordH
 export { PlatformMailerService } from "./infrastructure/PlatformMailerService.js";
 export { NodeBootstrapCrypto } from "./infrastructure/NodeBootstrapCrypto.js";
 export { BootstrapService, SetupError } from "./application/BootstrapService.js";
-export { IdentityAccountsService } from "./application/IdentityAccountsService.js";
+export { IdentityAccountsService, AdminApiTokenError } from "./application/IdentityAccountsService.js";
 
 export interface IdentityModuleDependencies {
   accounts: IdentityAccountsDependencies;
@@ -91,6 +91,10 @@ export function createIdentityModule(dependencies: IdentityModuleDependencies) {
     accountFromSession: (token: string | undefined) => service.accountFromSession(token),
     endSession: (token: string) => service.endSession(token),
     accountFromApiToken: (token: string | undefined) => service.accountFromApiToken(token),
+    accountFromAdminApiToken: (token: string | undefined) => service.accountFromAdminApiToken(token),
+    createAdminApiToken: (accountId: string, name: string, expiresAt?: Date) => service.createAdminApiToken(accountId, name, expiresAt),
+    listAdminApiTokens: (accountId: string) => service.listAdminApiTokens(accountId),
+    revokeAdminApiToken: (accountId: string, id: string) => service.revokeAdminApiToken(accountId, id),
     createApiToken: (accountId: string, name: string, orgId: string | null = null) =>
       service.createApiToken(accountId, name, orgId),
     listApiTokens: (accountId: string) => service.listApiTokens(accountId),

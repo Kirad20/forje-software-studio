@@ -12,6 +12,9 @@ export default defineConfig({
   build: { outDir: path.resolve(here, "../dist/studio"), emptyOutDir: true },
   server: {
     port: 5173,
-    proxy: { "/api": { target: "http://localhost:4100", changeOrigin: false } },
+    proxy: {
+      "/api": { target: "http://localhost:4100", changeOrigin: false },
+      "/admin/mcp": { target: "http://localhost:4100", changeOrigin: false },
+    },
   },
 });

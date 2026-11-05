@@ -11,6 +11,7 @@ import { startJobRunner, stopJobRunner } from "../modules/app-services/jobs.js";
 import { closeAll } from "../modules/app-services/projectDb.js";
 import { attachSocket, stopRealtime } from "../modules/app-services/realtime.js";
 import { createMcpHandler } from "./mcp/server.js";
+import { createAdminMcpHandler } from "./mcp/adminServer.js";
 import { closePlatformDb, platformDb } from "../shared/database/index.js";
 import { createLocalSeed } from "./database/localSeed.js";
 import { reloadProviders } from "../modules/model-management/providers.js";
@@ -18,7 +19,7 @@ import { createSettingReactions } from "./settingReactions.js";
 import { warnMovedEnv } from "../modules/settings/index.js";
 import { cookie, serveApp } from "../modules/app-runtime/index.js";
 import { startGithubSync, stopGithubSync } from "../modules/integrations/github.js";
-import { rateLimit, RateLimitError, RateLimitStoreError, STUDIO_HEADERS, startRateLimitCleanup, stopRateLimitCleanup } from "../shared/security.js";
+import { rateLimit, RateLimitError, RateLimitStoreError, STUDIO_HEADERS, startRateLimitCleanup, stopRateLimitCleanup, studioOrigins } from "../shared/security.js";
 import { BuilderServiceClient, langfuse, metricsIdle, stopBuilder, reloadLangfuse } from "../modules/builder/index.js";
 import { stopAppRuntime } from "../modules/app-runtime/index.js";
 import { checkShareToken, parseAppHost } from "../modules/app-runtime/index.js";
@@ -35,8 +36,9 @@ const monolith = createMonolith();
 const builderClient = config.builderServiceUrl ? new BuilderServiceClient(config.builderServiceUrl, config.builderServiceToken) : undefined;
 const studioApi = createStudioApi(monolith, builderClient);
 const handleMcp = createMcpHandler(monolith, builderClient);
+const handleAdminMcp = createAdminMcpHandler(monolith);
 const { getProject, getProjectBySlug } = monolith.projects;
-const { accountFromApiToken } = monolith.identity;
+const { accountFromApiToken, accountFromAdminApiToken } = monolith.identity;
 const seedLocal = createLocalSeed(monolith.settings);
 const reactions = createSettingReactions(monolith.settings, {
   resetTransport,
@@ -118,6 +120,24 @@ app.all("/mcp", async (c) => {
   return handleMcp(c.req.raw, account);
 });
 
+app.all("/admin/mcp", async (c) => {
+  const origin = c.req.header("origin");
+  if (origin && !studioOrigins().includes(origin)) return c.json({ error: "Origen no permitido." }, 403);
+  const bearer = /^Bearer\s+(\S+)$/i.exec(c.req.header("authorization") ?? "")?.[1];
+  const account = await accountFromAdminApiToken(bearer);
+  if (!account || account.platformRole !== "admin" || account.disabled) {
+    return c.json({ error: "Usa un token de Administración → API tokens como Authorization: Bearer." }, 401);
+  }
+  try {
+    await rateLimit(`admin-mcp:${account.id}`, 30, 60_000);
+  } catch (e) {
+    if (e instanceof RateLimitError) return c.json({ error: e.message }, 429, { "retry-after": String(e.retryAfterSec) });
+    if (e instanceof RateLimitStoreError) return c.json({ error: e.message }, 503);
+    throw e;
+  }
+  return handleAdminMcp(c.req.raw);
+});
+
 app.get("/healthz", (c) => c.json({ ok: true }));
 
 // The built studio (npm run build). In development Vite serves it and proxies /api here.
@@ -154,6 +174,7 @@ function listening(info: { port: number }) {
       "[forja] PUBLIC_URL apunta a localhost en producción: las vistas previas, los enlaces de los correos, GitHub y MCP usarán esa dirección. En Coolify: pon el dominio en Domains del servicio forja (https://dominio:4100) y FORJA_DOMAIN en Environment Variables, y vuelve a desplegar. Fuera de Coolify: define PUBLIC_URL.",
     );
   console.log(`[forja] MCP en ${config.publicUrl}/mcp`);
+  console.log(`[forja] MCP de administración en ${config.publicUrl}/admin/mcp`);
 }
 
 async function startHttp() {

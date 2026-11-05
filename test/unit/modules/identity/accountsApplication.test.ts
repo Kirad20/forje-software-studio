@@ -11,16 +11,18 @@ describe("identity account lifecycle application", () => {
         create: vi.fn().mockResolvedValue("account"), passwordHash: vi.fn().mockResolvedValue(null),
         setPassword: vi.fn(), findResetAccount: vi.fn().mockResolvedValue({ id: "account", email: "user@example.test", disabled: false }),
         getAccount: vi.fn(), delete: vi.fn(),
+        getAccountAccess: vi.fn().mockResolvedValue({ platformRole: "admin", disabled: false }),
       },
       sessions: { createSession: vi.fn(), deleteSession: vi.fn(), deleteAllSessions: vi.fn(), findAccountBySessionToken: vi.fn(), deleteOtherSessions: vi.fn(), countActiveSessions: vi.fn() },
       resets: { save: vi.fn(), find: vi.fn().mockResolvedValue({ codeHash: "hash:correct", attempts: 0, expired: false }), incrementAttempts: vi.fn(), delete: vi.fn() },
-      tokens: { create: vi.fn(), findAccount: vi.fn(), list: vi.fn(), delete: vi.fn() },
+      tokens: { create: vi.fn(), findAccount: vi.fn(), list: vi.fn(), delete: vi.fn(), listAdmin: vi.fn(), revokeAdmin: vi.fn().mockResolvedValue(true) },
       hasher: { hash: vi.fn().mockResolvedValue("password-hash"), verify: vi.fn().mockResolvedValue(false) },
       random: { id: () => "account", token: () => "token", code: () => "12345678", hash: (value: string) => `hash:${value}` },
       mailer: { sendPasswordReset: vi.fn().mockResolvedValue(true) },
       collaboration: { hasInvite: vi.fn().mockResolvedValue(false), deletePersonalOrg: vi.fn() },
       projects: { ownedProjectIds: vi.fn().mockResolvedValue(["project"]) },
       policy: { signup: "invite", freeCredits: 123 },
+      audit: vi.fn(),
     };
     service = new IdentityAccountsService(deps);
   });
@@ -102,6 +104,57 @@ describe("identity account lifecycle application", () => {
     expect(deps.tokens.create).toHaveBeenCalledWith("account", "account", "build", "hash:fj_token", "org");
     expect(await service.accountFromApiToken(undefined)).toBeNull();
     expect(deps.tokens.findAccount).not.toHaveBeenCalled();
+  });
+
+  it("creates a bounded admin token with a digest and secret-free audit event", async () => {
+    const before = Date.now();
+    const result = await service.createAdminApiToken("account", " Diagnostics ");
+    expect(result.token).toBe("fj_admin_token");
+    expect(result.expiresAt.getTime()).toBeGreaterThanOrEqual(before + 30 * 86_400_000);
+    expect(deps.tokens.create).toHaveBeenCalledWith("account", "account", "Diagnostics", "hash:fj_admin_token", null, "admin", result.expiresAt);
+    expect(deps.audit).toHaveBeenCalledWith("admin_api_token:account", "account", "create");
+    expect(JSON.stringify(deps.audit.mock.calls)).not.toContain(result.token);
+  });
+
+  it.each([{ platformRole: "user", disabled: false }, { platformRole: "admin", disabled: true }, undefined])(
+    "forbids admin token management for inactive or non-admin accounts: %o", async (access) => {
+      deps.accounts.getAccountAccess.mockResolvedValue(access);
+      await expect(service.createAdminApiToken("account", "Diagnostics")).rejects.toMatchObject({ status: 403 });
+      await expect(service.listAdminApiTokens("account")).rejects.toMatchObject({ status: 403 });
+      await expect(service.revokeAdminApiToken("account", "token")).rejects.toMatchObject({ status: 403 });
+      expect(deps.tokens.create).not.toHaveBeenCalled();
+      expect(deps.tokens.listAdmin).not.toHaveBeenCalled();
+      expect(deps.tokens.revokeAdmin).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([new Date(0), new Date("bad"), new Date(Date.now() + 91 * 86_400_000)])(
+    "rejects expired, invalid, and excessive admin token lifetime: %o", async (expiry) => {
+      await expect(service.createAdminApiToken("account", "Diagnostics", expiry)).rejects.toMatchObject({ status: 400 });
+      expect(deps.tokens.create).not.toHaveBeenCalled();
+    },
+  );
+
+  it("resolves only the admin purpose and fails closed for role changes without a session fallback", async () => {
+    expect(await service.accountFromAdminApiToken(undefined)).toBeNull();
+    expect(deps.tokens.findAccount).not.toHaveBeenCalled();
+    for (const account of [null, { platformRole: "user" }, { platformRole: "admin", disabled: true }]) {
+      deps.tokens.findAccount.mockResolvedValue(account);
+      expect(await service.accountFromAdminApiToken("secret")).toBeNull();
+    }
+    deps.tokens.findAccount.mockResolvedValue({ id: "account", platformRole: "admin", disabled: false });
+    expect(await service.accountFromAdminApiToken("secret")).toMatchObject({ id: "account" });
+    expect(deps.tokens.findAccount).toHaveBeenLastCalledWith("hash:secret", "admin");
+    expect(deps.sessions.findAccountBySessionToken).not.toHaveBeenCalled();
+  });
+
+  it("scopes revocation to the current admin and audits only a newly revoked token", async () => {
+    expect(await service.revokeAdminApiToken("account", "token")).toBe(true);
+    expect(deps.tokens.revokeAdmin).toHaveBeenCalledWith("account", "token");
+    expect(deps.audit).toHaveBeenCalledWith("admin_api_token:token", "account", "delete");
+    deps.tokens.revokeAdmin.mockResolvedValue(false);
+    expect(await service.revokeAdminApiToken("account", "token")).toBe(false);
+    expect(deps.audit).toHaveBeenCalledOnce();
   });
 
   it("projects sessions without credential material and retains the thirty-day lifetime", async () => {
