@@ -10,6 +10,7 @@ import { SecurityPanel, type Problem } from "../../observability/index.js";
 import { External, Refresh } from "../../../shared/Icons.js";
 import { AiPanel, CodePanel, EmailPanel, JobsPanel, LogsPanel, UsersPanel } from "../../files/index.js";
 import { AnalyticsPanel, DataPanel, DocsPanel, IntegrationsPanel, PaymentsPanel, SeoPanel, StoragePanel } from "../../app-services/index.js";
+import { ServiceControlPanel } from "../../service-control/index.js";
 import { Avatar, copyText, Menu, MenuItem, useDismiss } from "../../../shared/ui.js";
 import { CheckpointPanel, Collaborators, DEVICES, PagePalette, PreviewCanvas, ProjectSettings, PublishPanel, type Device, type PreviewHandle, type TextEdit } from "./Workspace.js";
 
@@ -24,8 +25,9 @@ const TEXT_EDIT_WHY: Record<string, string> = {
 };
 
 type View = "preview" | "services" | "settings" | "details";
-type ServiceKey = "data" | "users" | "ai" | "integrations" | "analytics" | "seo" | "docs" | "jobs" | "storage" | "email" | "payments" | "logs" | "security" | "code";
+type ServiceKey = "control" | "data" | "users" | "ai" | "integrations" | "analytics" | "seo" | "docs" | "jobs" | "storage" | "email" | "payments" | "logs" | "security" | "code";
 const SERVICE_GUIDES: Record<ServiceKey, { description: string; prompt: string }> = {
+  control: { description: "Gestiona servicios, workers, réplicas y la cola reciente del proyecto.", prompt: "Ayúdame a organizar los servicios y workers de mi app: " },
   data: { description: "Explora tablas y registros de tu aplicación.", prompt: "Ayúdame a diseñar los datos de mi app. Necesito guardar: " },
   users: { description: "Gestiona cuentas, acceso y permisos.", prompt: "Quiero mejorar el acceso de usuarios de mi app. Necesito: " },
   ai: { description: "Configura la inteligencia artificial de tu app.", prompt: "Quiero agregar una función de IA a mi app para: " },
@@ -43,6 +45,7 @@ const SERVICE_GUIDES: Record<ServiceKey, { description: string; prompt: string }
 };
 
 const SERVICES: { key: ServiceKey; label: string; icon: LucideIcon; search: string }[] = [
+  { key: "control", label: "Centro de control", icon: LayoutGrid, search: "microservicios workers replicas concurrencia cola runtime" },
   { key: "data", label: "Datos", icon: Database, search: "base de datos postgres sql tablas" },
   { key: "users", label: "Usuarios", icon: UsersRound, search: "cuentas autenticacion login" },
   { key: "ai", label: "IA", icon: Sparkles, search: "inteligencia artificial modelos" },
@@ -59,7 +62,7 @@ const SERVICES: { key: ServiceKey; label: string; icon: LucideIcon; search: stri
 ];
 const normalizeServiceSearch = (value: string) => value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
 /** Always listed among the used ones. */
-const ALWAYS_USED = new Set<ServiceKey>(["seo", "logs", "security"]);
+const ALWAYS_USED = new Set<ServiceKey>(["control", "seo", "logs", "security"]);
 
 const readDrawer = () => {
   try {
@@ -639,6 +642,7 @@ export function ProjectView({
                     )}
                   </div>
                 )}
+                {service === "control" && <ServiceControlPanel projectId={id} reloadKey={filesKey} />}
                 {service === "data" && <DataPanel projectId={id} projectName={project.name} reloadKey={filesKey} />}
                 {service === "users" && <UsersPanel projectId={id} />}
                 {service === "ai" && <AiPanel project={project} onChange={load} />}

@@ -1,5 +1,6 @@
 import type { BuildProblem, FileMap } from "../domain/publication.js";
 import { endpointRoutes, exampleFiles, jobFiles, readJobSettings } from "../domain/routes.js";
+import { readProjectServices, SERVICES_MANIFEST } from "../domain/services.js";
 
 export interface ProjectCompilerPort {
   client(files: FileMap): Promise<unknown>;
@@ -10,6 +11,9 @@ export interface ProjectCompilerPort {
 export function createProjectCheck(compiler: ProjectCompilerPort) {
   return async (files: FileMap): Promise<BuildProblem[]> => {
     const problems: BuildProblem[] = [];
+    try { readProjectServices(files); } catch (error) {
+      problems.push({ file: SERVICES_MANIFEST, text: (error as Error).message });
+    }
     try { await compiler.client(files); } catch (error) {
       const known = compiler.problems(error);
       if (!known) throw error;

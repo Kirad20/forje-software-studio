@@ -11,6 +11,8 @@
     "dev:studio": "vite --config studio/vite.config.ts",
     "build": "vite build --config studio/vite.config.ts",
     "start": "tsx --env-file-if-exists=.env server/bootstrap/server.ts",
+    "start:worker": "tsx --env-file-if-exists=.env server/bootstrap/jobWorkerServer.ts",
+    "dev:worker": "tsx watch --env-file-if-exists=.env server/bootstrap/jobWorkerServer.ts",
     "db:migrate": "tsx --env-file-if-exists=.env server/bootstrap/database/cli.ts migrate",
     "db:seed": "tsx --env-file-if-exists=.env server/bootstrap/database/cli.ts seed",
     "db:seed:dev": "tsx --env-file-if-exists=.env server/bootstrap/database/cli.ts seed:dev",

@@ -73,6 +73,7 @@ function services(run, input) {
     ai: { chat: (req) => rpc(run, "ai.chat", req) },
     jobs: {
       run: (name, payload) => rpc(run, "jobs.run", name, payload ?? null),
+      enqueue: (name, payload) => rpc(run, "jobs.enqueue", name, payload ?? null),
       runAt: (name, payload, when) => rpc(run, "jobs.runAt", name, payload ?? null, when instanceof Date ? when.toISOString() : when),
     },
     realtime: { publish: (channel, data) => rpc(run, "realtime.publish", channel, data) },

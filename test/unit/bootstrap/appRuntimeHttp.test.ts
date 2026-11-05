@@ -43,8 +43,29 @@ function runtimePorts() {
     emitProject: vi.fn(),
     reloadSettings: vi.fn(async () => {}),
     serveApp,
+    getSandboxServices: vi.fn(() => [{ env: "preview" as const, service: "orders", replicas: [{ pid: 123, active: 1, ready: true }] }]),
+    restartSandboxService: vi.fn(),
   };
 }
+
+it("authenticates runtime service snapshots and targeted restart, validates names and environments", async () => {
+  const ports = runtimePorts();
+  const app = createAppRuntimeHttpApp(ports);
+  const root = "http://app-runtime:4200/internal/runtime/service-control";
+  expect((await app.request(`${root}/snapshot`, { method: "POST", body: '{"projectId":"p1"}' })).status).toBe(401);
+  expect((await app.request(`${root}/restart`, { method: "POST", body: '{"projectId":"p1","service":"orders"}' })).status).toBe(401);
+  const headers = { authorization: `Bearer ${ports.internalToken}`, "content-type": "application/json" };
+  const snapshot = await app.request(`${root}/snapshot`, { method: "POST", headers, body: '{"projectId":"p1"}' });
+  expect(snapshot.status).toBe(200);
+  expect(await snapshot.json()).toMatchObject({ available: true, scope: "app-runtime", services: [{ service: "orders" }] });
+  const restart = await app.request(`${root}/restart`, { method: "POST", headers, body: '{"projectId":"p1","service":"orders","env":"preview"}' });
+  expect(restart.status).toBe(200);
+  expect(ports.restartSandboxService).toHaveBeenCalledWith("p1", "orders", "preview");
+  for (const body of ['{"projectId":"p1","service":"../orders"}', '{"projectId":"p1","service":"orders","env":"other"}', '{']) {
+    expect((await app.request(`${root}/restart`, { method: "POST", headers, body })).status).toBe(400);
+  }
+  expect(ports.restartSandboxService).toHaveBeenCalledTimes(1);
+});
 
 it("requires a valid share token for a private app", async () => {
   const ports = runtimePorts();

@@ -1,4 +1,5 @@
 import { PGlite } from "@electric-sql/pglite";
+import { readFileSync } from "node:fs";
 import { expect, it, vi } from "vitest";
 import { createQueryRepository } from "../../../../server/modules/app-services/infrastructure/repositories.js";
 import { createEmail } from "../../../../server/modules/app-services/application/email.js";
@@ -23,6 +24,7 @@ it("runs production email, secrets, storage, analytics and jobs SQL through inje
       create table job_timers (id text primary key, project_id text, env text, job text, payload jsonb, run_at timestamptz, status text default 'pending');
       create table job_settings (project_id text, job text, enabled boolean, primary key(project_id, job));
     `);
+    await pg.exec(readFileSync(new URL("../../../../server/shared/database/migrations/007_job_queue.sql", import.meta.url), "utf8"));
     const repository = createQueryRepository({
       q: async (sql, params = []) => (await pg.query(sql, params)).rows as never,
       one: async (sql, params = []) => (await pg.query(sql, params)).rows[0] as never,

@@ -49,4 +49,13 @@ describe("Project use cases", () => {
     unsubscribe();
     expect(source.close).toHaveBeenCalledOnce();
   });
+
+  it("sends an optional starter selector while leaving the legacy prompt input unchanged", async () => {
+    const fetch = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      expect(JSON.parse(String(init?.body))).toEqual({ prompt: "Orders demo", template: "orders-invoices" });
+      return Response.json({ project: { id: "demo" } });
+    });
+    await createProjectUseCases(new HttpClient(fetch)).createProject("Orders demo", { template: "orders-invoices" });
+    expect(fetch).toHaveBeenCalledOnce();
+  });
 });

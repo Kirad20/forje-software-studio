@@ -79,6 +79,7 @@ export function createMonolith() {
           publishedFiles: modules.projects.publishedFiles,
           readAllFiles: modules.projects.readAllFiles,
           jobFiles: runtime.jobFiles,
+          resolveExecution: runtime.resolveServiceExecution,
           readJobSettings: runtime.readJobSettings,
           compileServerModule: runtime.compileServerModule,
           runInSandbox: runtime.runInSandbox,

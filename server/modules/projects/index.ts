@@ -6,10 +6,19 @@ import { ProjectPath } from "./domain/ProjectPath.js";
 import { Project as ProjectEntity } from "./domain/Project.js";
 import type { Author, IProjectFileRepository } from "./ports/repositories.js";
 import type { ProjectsStore, ProjectServices } from "./ports/projects.js";
+import type { StarterTemplate } from "./domain/StarterTemplate.js";
+import { starterFiles as monolithStarterFiles, parseStarterTemplate } from "./domain/StarterTemplate.js";
+import { ordersInvoicesFiles } from "./infrastructure/OrdersInvoicesStarter.js";
 
 export * from "./domain/ProjectPath.js";
 export * from "./domain/Checkpoint.js";
-export * from "./domain/StarterTemplate.js";
+export { parseStarterTemplate } from "./domain/StarterTemplate.js";
+export type { StarterTemplate } from "./domain/StarterTemplate.js";
+export function starterFiles(name: string, template?: StarterTemplate): Record<string, string> {
+  parseStarterTemplate(template);
+  const files = monolithStarterFiles(name);
+  return template === "orders-invoices" ? { ...files, ...ordersInvoicesFiles() } : files;
+}
 export * from "./ports/repositories.js";
 export { normalizeProjectProfile } from "./domain/ProjectSnapshot.js";
 export type { ProjectSnapshot, ProjectPatch, FileMap, SeoSettings, ProjectProfile, ChangeEntry, TurnFileChange } from "./domain/ProjectSnapshot.js";
@@ -35,8 +44,8 @@ export function createProjectsModule(dependencies: ProjectsModuleDependencies) {
     application,
     isDevFile,
     assertValidPath: ProjectPath.assertValid,
-    createProject: (ownerId: string, name: string, description = "", files?: Parameters<typeof application.createProject>[3], orgId?: string) =>
-      application.createProject(ownerId, name, description, files, orgId),
+    createProject: (ownerId: string, name: string, description = "", files?: Parameters<typeof application.createProject>[3], orgId?: string, template?: StarterTemplate) =>
+      application.createProject(ownerId, name, description, files, orgId, template),
     duplicateProject: (ownerId: string, sourceId: string) => application.duplicateProject(ownerId, sourceId),
     createFolder: (accountId: string, name: string) => application.createFolder(accountId, name),
     createCheckpoint: (projectId: string, label: string, author?: Author, description?: string, actor?: string) =>

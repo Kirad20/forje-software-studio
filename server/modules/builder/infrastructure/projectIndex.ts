@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
 import type { FileMap } from "../../projects/index.js";
-import { endpointRoutes, pageRoutes } from "../../app-runtime/index.js";
+import { endpointRoutes, pageRoutes, readProjectServices, SERVICES_MANIFEST } from "../../app-runtime/index.js";
 
 /**
  * A graphify-style index of a project: per-file facts (exports, imports, routes, tables,
@@ -128,6 +128,18 @@ export function projectMap(files: FileMap, schema: Record<string, { name: string
   const lines = [`# Mapa del proyecto — ${all.length} archivos, ${all.reduce((n, f) => n + f.lines, 0)} líneas`];
   const routes = new Map(pageRoutes(files).map((r) => [r.file, r.pattern]));
   const section = (title: string, items: string[]) => items.length && lines.push(`\n## ${title}`, ...items);
+  if (SERVICES_MANIFEST in files) {
+    try {
+      const topology = readProjectServices(files)!;
+      section("Servicios (base de datos compartida)", [
+        ...Object.entries(topology.services).map(([name, service]) =>
+          `${name} · ${service.kind} · replicas ${service.replicas} · maxConcurrency ${service.maxConcurrency} · ${[...service.endpoints, ...service.jobs].join(", ")}`),
+        "Archivos sin asignar → monolith; rutas HTTP sin cambios.",
+      ]);
+    } catch (error) {
+      section("Servicios", [error instanceof Error ? error.message : String(error)]);
+    }
+  }
   section(
     "Páginas",
     by("page").map((f) => `${routes.get(f.path) ?? "(layout/especial)"} ← ${f.path}${f.components.length ? ` · usa ${short(f.components)}` : ""}${f.apiCalls.length ? ` · llama ${short(f.apiCalls)}` : ""}`),
@@ -210,6 +222,7 @@ export function selectContext(files: FileMap, goal: string, owned: string[], bud
     const hay = `${f.path} ${f.exports.join(" ")} ${f.tables.join(" ")} ${f.apiCalls.join(" ")} ${f.summary}`.toLowerCase();
     for (const w of words) if (hay.includes(w)) bump(f.path, 2);
   }
+  if (SERVICES_MANIFEST in files && owned.some((p) => p === SERVICES_MANIFEST || p.startsWith("endpoints/") || p.startsWith("jobs/"))) bump(SERVICES_MANIFEST, 10);
   // Performance optimization: pass the already computed `idx` into relatedFiles to prevent
   // re-building the full project index for every high-scoring file (O(1) index reuse vs O(K*N) rebuilds).
   for (const [p, s] of [...scores]) if (s >= 10) for (const n of relatedFiles(files, p, idx)) bump(n, 3);

@@ -14,6 +14,7 @@ import { runInSandbox, SandboxRunError, type SandboxError } from "./sandbox.js";
 import { appHeaders, rateLimit, RateLimitError, uploadHeaders } from "../../../shared/security.js";
 import { recordPageView } from "../../app-services/analytics.js";
 import { appUrl, previewOrigin } from "./urls.js";
+import { resolveServiceExecution } from "../domain/services.js";
 
 export interface AppTarget {
   project: Project;
@@ -381,6 +382,7 @@ async function callEndpoint(req: Request, t: AppTarget, routePath: string): Prom
         rawBody,
         query: Object.fromEntries(url.searchParams),
         user,
+        execution: resolveServiceExecution(files, ep.file),
       },
       "endpoint",
     )) as SandboxResult;
