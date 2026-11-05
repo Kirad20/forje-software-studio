@@ -641,6 +641,31 @@ async function main() {
     await screenshot(page, "admin-models");
   });
 
+  await step("admin: checkbox moderno conserva teclado, foco y accesibilidad en Studio y SDK", async () => {
+    await page.goto("/admin/models");
+    const checkbox = page.getByRole("checkbox", { name: "Solo utilizables", exact: true });
+    await checkbox.waitFor();
+    assert(await checkbox.evaluate(el => getComputedStyle(el).appearance) === "none", "Studio sigue mostrando el checkbox nativo sin estilo");
+    await checkbox.focus();
+    await page.keyboard.press("Space");
+    assert(!await checkbox.isChecked(), "Espacio no alternó el checkbox");
+    assert(await checkbox.evaluate(el => getComputedStyle(el).outlineStyle) === "solid", "el foco de teclado no es visible");
+    await page.keyboard.press("Space");
+    await page.emulateMedia({ forcedColors: "active" });
+    assert(await checkbox.evaluate(el => getComputedStyle(el).appearance) === "auto", "el checkbox no recuperó su apariencia accesible en alto contraste");
+    await page.emulateMedia({ forcedColors: "none" });
+    const sdkPage = await page.context().newPage();
+    try {
+      await sdkPage.setContent('<label class="fj-check"><input type="checkbox" name="choice"><span>Elegir opción</span></label><label class="fj-check"><input type="checkbox" disabled><span>No disponible</span></label>');
+      await sdkPage.addStyleTag({ path: path.join(ROOT, "sdk", "ui", "ui.css") });
+      const sdkCheckbox = sdkPage.getByRole("checkbox", { name: "Elegir opción" });
+      assert(await sdkCheckbox.evaluate(el => getComputedStyle(el).appearance) === "none", "SDK no usa el checkbox modernizado");
+      await sdkPage.getByText("Elegir opción", { exact: true }).click();
+      assert(await sdkCheckbox.isChecked(), "la etiqueta no activa el checkbox del SDK");
+      assert(await sdkPage.getByRole("checkbox", { name: "No disponible" }).isDisabled(), "el estado deshabilitado no se conservó");
+    } finally { await sdkPage.close(); }
+  });
+
   await step("admin: diagnóstico de permisos y selección explícita del juez visual", async () => {
     const account = await (await page.request.get("/api/models")).json();
     const visual = account.models.find(m => m.vision);

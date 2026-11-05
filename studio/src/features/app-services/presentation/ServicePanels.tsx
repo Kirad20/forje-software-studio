@@ -137,6 +137,7 @@ export function DataPanel({ projectId, projectName, reloadKey }: { projectId: st
                     <th style={{ width: 32 }}>
                       <input
                         type="checkbox"
+                        aria-label="Seleccionar todas las filas"
                         style={{ width: "auto" }}
                         disabled={!rows.primaryKey}
                         checked={rows.rows.length > 0 && selected.size === rows.rows.length}
@@ -158,6 +159,7 @@ export function DataPanel({ projectId, projectName, reloadKey }: { projectId: st
                       <td>
                         <input
                           type="checkbox"
+                          aria-label={`Seleccionar fila ${i + 1}`}
                           style={{ width: "auto" }}
                           disabled={!rows.primaryKey}
                           checked={selected.has(key(r))}
