@@ -22,6 +22,7 @@ export const SeedFile = z.object({
     .array(
       z.object({
         id: z.string(),
+        kind: z.enum(["anthropic", "openai", "ollama"]).optional(),
         label: z.string().optional(),
         baseUrl: z.string().nullable().optional(),
         apiKey: z.string().nullable().optional(),

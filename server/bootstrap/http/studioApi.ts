@@ -24,6 +24,7 @@ import { isBuilding, penalizeTurn, pendingPlan, runBuilderTurn, stopBuilding, ty
 import { replaceVisibleText } from "../../modules/builder/contracts.js";
 import type { IdentityModule, PublicAccount } from "../../modules/identity/index.js";
 import type { ProjectsModule, Project } from "../../modules/projects/index.js";
+import { parseStarterTemplate } from "../../modules/projects/index.js";
 import type { CollaborationModule, Access, OrgRole } from "../../modules/collaboration/index.js";
 import type { SettingsModule } from "../../modules/settings/index.js";
 import { projectEvents, readLogs, type ProjectEvent } from "../../modules/project-observability/events.js";
@@ -43,6 +44,12 @@ import {
   previewOrigin,
   previewUrl,
   shareToken,
+  createServiceControl,
+  readServiceRuntime,
+  restartServiceRuntime,
+  SERVICES_MANIFEST,
+  withManifestLock,
+  type ServiceQueueEntry,
 } from "../../modules/app-runtime/index.js";
 import path from "node:path";
 import { config } from "../../shared/config.js";
@@ -444,10 +451,11 @@ accountRoutes.get("/agent-metrics", async (c) => {
 
 /** The dashboard's prompt box: the project is named from the idea, and the studio then sends the idea to the builder. */
 accountRoutes.post("/projects", async (c) => {
-  const { name, prompt, orgId } = await c.req.json<{ name?: string; prompt?: string; orgId?: string }>();
+  const { name, prompt, orgId, template: rawTemplate } = await c.req.json<{ name?: string; prompt?: string; orgId?: string; template?: unknown }>();
+  const template = parseStarterTemplate(rawTemplate);
   if (orgId && !(await orgs.orgRoleOf(orgId, c.get("account").id))) return c.json({ error: "Organización no encontrada" }, 404);
   const title = (name ?? prompt ?? "").trim().split(/\s+/).slice(0, 5).join(" ").replace(/[.,;:]+$/, "") || "Proyecto nuevo";
-  const p = await projects.createProject(c.get("account").id, title.slice(0, 60), (prompt ?? "").slice(0, 2000), undefined, orgId);
+  const p = await projects.createProject(c.get("account").id, title.slice(0, 60), (prompt ?? "").slice(0, 2000), undefined, orgId, template);
   return c.json({ project: await projectView(p) });
 });
 
@@ -475,6 +483,26 @@ projectRoutes.use("/projects/:id", async (c, next) => {
 const ownerOnly = (c: Context<Env>) => (c.get("access") === "owner" ? null : c.json({ error: "Solo la persona dueña del proyecto puede hacer esto." }, 403));
 
 const pid = (c: Context<Env>) => c.get("project").id;
+
+const serviceControl = (c: Context<Env>) => createServiceControl({
+  readFiles: (id) => projects.readAllFiles(id),
+  writeManifest: (id, content) => projects.writeFile(id, SERVICES_MANIFEST, content, "owner", c.get("account").email),
+  listQueue: async (id) => (await listJobs(id)).queue as unknown as ServiceQueueEntry[],
+  runtime: readServiceRuntime,
+  restart: restartServiceRuntime,
+});
+projectRoutes.get("/projects/:id/service-control", async (c) => c.json(await serviceControl(c).snapshot(pid(c))));
+projectRoutes.patch("/projects/:id/service-control/:service", async (c) => {
+  const patch: unknown = await c.req.json();
+  return c.json(await withManifestLock(pid(c), () => serviceControl(c).scale(pid(c), c.req.param("service"), patch)));
+});
+projectRoutes.post("/projects/:id/service-control/:service/restart", async (c) => {
+  const body: unknown = await c.req.json();
+  if (!body || typeof body !== "object" || Array.isArray(body) || Object.keys(body).some((key) => key !== "env")) {
+    return c.json({ error: "Solo env es válido para reiniciar" }, 400);
+  }
+  return c.json(await serviceControl(c).restart(pid(c), c.req.param("service"), (body as { env?: unknown }).env));
+});
 
 projectRoutes.get("/projects/:id", async (c) => {
   if (c.get("access") === "owner") await projects.markOpened(pid(c));

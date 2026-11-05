@@ -47,11 +47,76 @@ const statements: Record<string, string> = {
   storageList: `select key, filename, content_type as "contentType", size, created_at as "createdAt" from storage_objects where project_id = $1 order by created_at desc`,
   storageUsage: `select coalesce(sum(size), 0)::int as bytes from storage_objects where project_id = $1`,
   jobCreateRun: `insert into job_runs (project_id, job, trigger, status) values ($1, $2, $3, 'running') returning id`,
+  jobEnqueue: `with capacity as (
+    insert into job_queue_capacity (project_id, pending) values ($2, 1)
+    on conflict (project_id) do update set pending = job_queue_capacity.pending + 1
+    where job_queue_capacity.pending < $8 returning project_id
+  ) insert into job_queue (id, project_id, env, job, payload, trigger, max_attempts, service)
+    select $1, project_id, $3, $4, $5::jsonb, $6, $7, $9 from capacity returning id`,
+  jobClaimQueue: `with claim as (
+    select id from job_queue
+    where ((status = 'queued' and available_at <= now())
+      or (status = 'running' and lease_until <= now() and attempts < max_attempts))
+      and ($4::text[] is null or service = any($4::text[]))
+      and ($5::text is null or project_id = $5)
+    order by available_at, created_at for update skip locked limit $1
+  ) update job_queue j set status = 'running', attempts = attempts + 1,
+    lease_token = $2, lease_until = now() + ($3::int * interval '1 millisecond')
+    from claim where j.id = claim.id returning j.*`,
+  jobRenewLease: `update job_queue set lease_until = now() + ($3::int * interval '1 millisecond')
+    where id = $1 and lease_token = $2 and status = 'running' returning id`,
+  jobCompleteQueue: `with done as (
+    update job_queue set status = 'completed', finished_at = now(), lease_token = null, lease_until = null
+    where id = $1 and lease_token = $2 and status = 'running' returning id, project_id
+  ), released as (
+    update job_queue_capacity c set pending = pending - 1 from done where c.project_id = done.project_id
+  ) select id from done`,
+  jobFailQueue: `with failed as (
+    update job_queue set status = case when attempts >= max_attempts then 'dead' else 'queued' end,
+      error = $3, available_at = now() + ($4::int * interval '1 millisecond'),
+      finished_at = case when attempts >= max_attempts then now() else null end,
+      lease_token = null, lease_until = null
+    where id = $1 and lease_token = $2 and status = 'running' returning id, project_id, status
+  ), released as (
+    update job_queue_capacity c set pending = pending - 1 from failed
+    where c.project_id = failed.project_id and failed.status = 'dead'
+  ) select id, status from failed`,
+  jobRecoverQueue: `with exhausted as (
+    update job_queue set status = 'dead', finished_at = now(), error = 'Worker lease expired after final attempt',
+      lease_token = null, lease_until = null
+    where status = 'running' and lease_until <= now() and attempts >= max_attempts
+    returning id, project_id, env, job
+  ), counts as (select project_id, count(*)::int as n from exhausted group by project_id),
+  released as (
+    update job_queue_capacity c set pending = pending - counts.n from counts where c.project_id = counts.project_id
+  ) select * from exhausted`,
+  jobPromoteTimers: `with due as materialized (
+    select * from job_timers where status = 'pending' and run_at <= now()
+    order by run_at for update skip locked limit 20
+  ), counts as (select project_id, count(*)::int as n from due group by project_id),
+  capacity as (
+    insert into job_queue_capacity (project_id, pending)
+      select project_id, n from counts order by project_id
+    on conflict (project_id) do update set pending = job_queue_capacity.pending + excluded.pending
+      where job_queue_capacity.pending + excluded.pending <= $2 returning project_id
+  ), queued as (
+    insert into job_queue (id, project_id, env, job, payload, trigger, max_attempts, service)
+    select 'timer:' || due.id, due.project_id, due.env, due.job, coalesce(due.payload, 'null'::jsonb), 'timer', $1, due.service
+      from due join capacity using (project_id) returning id
+  ) update job_timers set status = 'fired'
+    where 'timer:' || id in (select id from queued) returning project_id, env, job`,
+  jobPruneQueue: `delete from job_queue where id in (
+    select id from job_queue where finished_at < now() - interval '7 days'
+    order by finished_at limit 100
+  )`,
+  jobQueue: `select id, job, service, env, trigger, status, attempts, max_attempts as "maxAttempts", error,
+    available_at as "availableAt", lease_until as "leaseUntil", created_at as "createdAt",
+    finished_at as "finishedAt" from job_queue where project_id = $1 order by created_at desc limit 100`,
   jobProjectSlug: `select slug from projects where id = $1`,
   jobCompleteRun: `update job_runs set status = 'ok', finished_at = now() where id = $1`,
   jobFailRun: `update job_runs set status = 'error', error = $2, finished_at = now() where id = $1`,
   jobPendingCount: `select count(*)::int as n from job_timers where project_id = $1 and status = 'pending'`,
-  jobCreateTimer: `insert into job_timers (id, project_id, env, job, payload, run_at) values ($1, $2, $3, $4, $5, $6)`,
+  jobCreateTimer: `insert into job_timers (id, project_id, env, job, payload, run_at, service) values ($1, $2, $3, $4, $5, $6, $7)`,
   jobClaimTimers: `update job_timers set status = 'fired' where id in (select id from job_timers where status = 'pending' and run_at <= now() limit 20) returning id, project_id, env, job, payload`,
   jobDisabled: `select job from job_settings where project_id = $1 and not enabled`,
   jobSettings: `select job, enabled from job_settings where project_id = $1`,

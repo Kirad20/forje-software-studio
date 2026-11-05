@@ -201,8 +201,8 @@ async function main() {
     const nav = page.getByRole("navigation", { name: "Herramientas del proyecto" });
     await nav.waitFor();
     await page.getByRole("heading", { name: "Todo para darle vida a tu app" }).waitFor();
-    assert(await page.locator(".tool-card").count() === 14, "la vista general no muestra las 14 herramientas");
-    for (const name of ["Datos", "Usuarios", "IA", "Integraciones", "Analítica", "SEO", "Docs", "Tareas", "Archivos", "Correo", "Pagos", "Registros", "Seguridad", "Código"]) {
+    assert(await page.locator(".tool-card").count() === 15, "la vista general no muestra las 15 herramientas");
+    for (const name of ["Centro de control", "Datos", "Usuarios", "IA", "Integraciones", "Analítica", "SEO", "Docs", "Tareas", "Archivos", "Correo", "Pagos", "Registros", "Seguridad", "Código"]) {
       await nav.getByRole("button", { name, exact: true }).waitFor();
     }
     const search = nav.getByRole("searchbox", { name: "Buscar herramientas" });
@@ -772,11 +772,15 @@ async function main() {
   await step("admin: crear, editar y borrar proveedores sin exponer cabeceras", async () => {
     await page.goto("/admin/providers");
     await page.getByRole("button", { name: "+ Añadir proveedor", exact: true }).click();
-    const form = page.locator("form").filter({ hasText: "Nuevo proveedor compatible con OpenAI" });
+    const form = page.locator("form").filter({ hasText: "Nuevo proveedor" });
+    await form.getByRole("combobox", { name: /^Tipo/ }).selectOption("ollama");
     await form.getByLabel("Identificador", { exact: true }).fill("ux-local");
     await form.getByLabel("Nombre visible", { exact: true }).fill("Servidor local");
     await form.getByLabel("URL base", { exact: true }).fill(`http://127.0.0.1:${llm.port}/v1`);
+    const createdProvider = page.waitForResponse(response => response.url().endsWith("/api/admin/providers") && response.request().method() === "POST");
     await form.getByRole("button", { name: "Añadir", exact: true }).click();
+    const created = await (await createdProvider).json();
+    assert(created.providers.some(p => p.id === "ux-local" && p.kind === "ollama"), "no se conservó el tipo Ollama del proveedor");
     let card = page.locator("section").filter({ has: page.locator("strong", { hasText: /^Servidor local$/ }) });
     await card.getByRole("button", { name: "Editar proveedor", exact: true }).click();
     let dialog = page.getByRole("dialog", { name: "Editar proveedor" });

@@ -1,9 +1,12 @@
 import type { AppEnv } from "./context.js";
 import type { JobPorts, JobCron } from "../ports/jobs.js";
 import { JOB_LIMITS as LIMITS } from "../domain/policies.js";
+import { createJobQueue } from "./jobQueue.js";
 export { JOB_LIMITS as LIMITS } from "../domain/policies.js";
 
-export function createJobs({ q, newId, log, bindJobs, runtime, cron: makeCron }: JobPorts) {
+export function createJobs(ports: JobPorts) {
+  const { q, newId, log, bindJobs, runtime, cron: makeCron } = ports;
+  const queue = createJobQueue(ports, runJob);
   const running = new Map<string, Promise<void>>();
   const inFlight = new Set<Promise<unknown>>();
   const crons = new Map<string, JobCron[]>();
@@ -19,10 +22,19 @@ export function createJobs({ q, newId, log, bindJobs, runtime, cron: makeCron }:
     log(projectId, { env, level: "error", source: "job", message: `Tarea falló: ${String(error)}` });
   }
   function validatePayload(payload: unknown) {
-    if (JSON.stringify(payload ?? null).length > LIMITS.maxPayloadBytes) throw new Error("La carga de la tarea supera 100 KB");
+    if (new TextEncoder().encode(JSON.stringify(payload ?? null)).length > LIMITS.maxPayloadBytes) throw new Error("La carga de la tarea supera 100 KB");
   }
   function runJob(projectId: string, env: AppEnv, name: string, payload: unknown, trigger: string): Promise<void> {
     return track(executeJob(projectId, env, name, payload, trigger));
+  }
+  async function enqueueJob(projectId: string, env: AppEnv, name: string, payload: unknown, trigger = "background"): Promise<string> {
+    validatePayload(payload);
+    const rt = runtime();
+    const files = env === "published" ? (await rt.publishedFiles(projectId)) ?? {} : await rt.readAllFiles(projectId);
+    const job = rt.jobFiles(files).find((job) => job.name === name);
+    if (!job) throw new Error(`No existe la tarea jobs/${name}.ts`);
+    const execution = rt.resolveExecution?.(files, job.file);
+    return track(queue.enqueue(projectId, env, name, payload, trigger, execution?.service));
   }
   async function executeJob(projectId: string, env: AppEnv, name: string, payload: unknown, trigger: string) {
     validatePayload(payload);
@@ -39,7 +51,8 @@ export function createJobs({ q, newId, log, bindJobs, runtime, cron: makeCron }:
         const [project] = await q<{ slug: string }>("jobProjectSlug", [projectId]);
         base = project?.slug ? rt.appUrl(project.slug) : "";
       }
-      await rt.runInSandbox(projectId, "job", { env_name: env, file: mod.file, base, payload, job: name }, "job");
+      const execution = rt.resolveExecution?.(files, job.file);
+      await rt.runInSandbox(projectId, "job", { env_name: env, file: mod.file, base, payload, job: name, ...(execution ? { execution } : {}) }, "job");
       await q("jobCompleteRun", [run!.id]);
       log(projectId, { env, level: "info", source: "job", message: `Tarea ${name} (${trigger}) terminada` });
     } catch (error) {
@@ -52,20 +65,25 @@ export function createJobs({ q, newId, log, bindJobs, runtime, cron: makeCron }:
     const delay = runAt.getTime() - Date.now();
     if (!Number.isFinite(delay) || delay < LIMITS.minDelayMs || delay > LIMITS.maxDelayMs) throw new Error("Un temporizador debe ser de 1 minuto a 7 días");
     validatePayload(payload);
+    const rt = runtime();
+    const files = env === "published" ? (await rt.publishedFiles(projectId)) ?? {} : await rt.readAllFiles(projectId);
+    const job = rt.jobFiles(files).find((job) => job.name === name);
+    if (!job) throw new Error(`No existe la tarea jobs/${name}.ts`);
+    const service = rt.resolveExecution?.(files, job.file)?.service ?? "monolith";
     const [count] = await q<{ n: number }>("jobPendingCount", [projectId]);
     if (count!.n >= LIMITS.timersPerProject) throw new Error("Máximo 25 temporizadores pendientes por proyecto");
     const id = newId();
     await q("jobCreateTimer",
-      [id, projectId, env, name, JSON.stringify(payload ?? null), runAt.toISOString()]);
+      [id, projectId, env, name, JSON.stringify(payload ?? null), runAt.toISOString(), service]);
     return id;
   }
-  function initializeAppServices() { bindJobs({ runNow: runJob, addTimer }); }
+  function initializeAppServices() { bindJobs({ runNow: runJob, enqueue: enqueueJob, addTimer }); }
   async function fireDueTimers() {
     const version = generation;
-    const due = await q<{ project_id: string; env: AppEnv; job: string; payload: unknown }>(
-      "jobClaimTimers");
+    const due = await q<{ project_id: string; env: AppEnv; job: string }>(
+      "jobPromoteTimers", [queue.maxAttempts, queue.maxQueuedPerProject]);
     if (version !== generation) return;
-    for (const timer of due) void runJob(timer.project_id, timer.env, timer.job, timer.payload, "timer").catch((error) => report(timer.project_id, timer.env, error));
+    for (const timer of due) log(timer.project_id, { env: timer.env, level: "info", source: "job", message: `Temporizador ${timer.job} encolado` });
   }
   async function scheduleProject(projectId: string) {
     const version = generation;
@@ -86,7 +104,7 @@ export function createJobs({ q, newId, log, bindJobs, runtime, cron: makeCron }:
           if (version !== generation) return;
           const key = `${projectId}:${job.name}`;
           if (running.has(key)) return;
-          const work = runJob(projectId, "published", job.name, null, "schedule").catch((error) => report(projectId, "published", error));
+          const work = enqueueJob(projectId, "published", job.name, null, "schedule").then(() => {}).catch((error) => report(projectId, "published", error));
           running.set(key, work);
           void work.finally(() => running.delete(key));
         });
@@ -113,7 +131,8 @@ export function createJobs({ q, newId, log, bindJobs, runtime, cron: makeCron }:
     });
     const runs = await q("jobRuns", [projectId]);
     const timers = await q("jobTimers", [projectId]);
-    return { jobs, runs, timers };
+    const queued = await q("jobQueue", [projectId]);
+    return { jobs, runs, timers, queue: queued };
   }
   async function setJobEnabled(projectId: string, job: string, enabled: boolean) {
     await q("jobSetEnabled", [projectId, job, enabled]);
@@ -121,15 +140,21 @@ export function createJobs({ q, newId, log, bindJobs, runtime, cron: makeCron }:
   async function cancelTimer(projectId: string, id: string) {
     await q("jobCancelTimer", [projectId, id]);
   }
-  async function startJobRunner() {
+  async function startJobRunner(options: { queueOnly?: boolean } = {}) {
     if (starting) return starting;
-    if (pollTimer) return;
+    if (pollTimer || queue.isStarted()) return;
     runtime();
     initializeAppServices();
     const version = generation;
     starting = (async () => {
+      if (options.queueOnly) {
+        await queue.start();
+        return;
+      }
       const published = await q<{ id: string }>("jobPublishedProjects");
       for (const project of published) {
+        if (version !== generation) return;
+        if (queue.mode === "embedded") await queue.start();
         if (version !== generation) return;
         await scheduleProject(project.id);
       }
@@ -146,8 +171,9 @@ export function createJobs({ q, newId, log, bindJobs, runtime, cron: makeCron }:
     pollTimer = undefined;
     for (const list of crons.values()) for (const cron of list) cron.stop();
     crons.clear();
+    await queue.stop();
     await Promise.allSettled([...inFlight, ...(starting ? [starting] : [])]);
     while (inFlight.size) await Promise.allSettled([...inFlight]);
   }
-  return { runJob, addTimer, scheduleProject, listJobs, setJobEnabled, cancelTimer, startJobRunner, stopJobRunner, initializeAppServices, isJobRunnerStarted: () => !!pollTimer };
+  return { runJob, enqueueJob, addTimer, scheduleProject, listJobs, setJobEnabled, cancelTimer, startJobRunner, stopJobRunner, initializeAppServices, isJobRunnerStarted: () => !!pollTimer || queue.isStarted() };
 }

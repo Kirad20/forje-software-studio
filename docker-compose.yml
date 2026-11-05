@@ -47,6 +47,9 @@ services:
       - BUILDER_SERVICE_URL=http://builder:4300
       - BUILDER_SERVICE_TOKEN=${SERVICE_PASSWORD_BUILDER:?Set SERVICE_PASSWORD_BUILDER}
       - APP_RUNTIME_PUBLIC_PORT=${APP_RUNTIME_PUBLIC_PORT:-}
+      - FORJA_JOB_WORKER_MODE=external
+      - FORJA_JOB_MAX_ATTEMPTS=${FORJA_JOB_MAX_ATTEMPTS:-3}
+      - FORJA_JOB_QUEUE_LIMIT=${FORJA_JOB_QUEUE_LIMIT:-1000}
 
       # Base de datos de la plataforma (servicio postgres de abajo).
       # Si Coolify no genera SERVICE_PASSWORD_POSTGRES se usa un valor fijo: Postgres no publica puerto y
@@ -140,6 +143,53 @@ services:
       - traefik.http.routers.forja-apps-http.service=forja-apps
       - traefik.http.middlewares.forja-apps-https.redirectscheme.scheme=https
       - traefik.http.services.forja-apps.loadbalancer.server.port=4200
+
+  job-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        BROWSER: ${FORJA_BROWSER:-1}
+    command: ["node", "--import", "tsx", "server/bootstrap/jobWorkerServer.ts"]
+    restart: unless-stopped
+    expose:
+      - "4400"
+    environment:
+      - PORT=4400
+      - DATA_DIR=/app/data
+      - NODE_ENV=production
+      - PUBLIC_URL=${PUBLIC_URL:-}
+      - FORJA_DOMAIN=${FORJA_DOMAIN:-}
+      - SECRETS_KEY=${SERVICE_HEX_64_SECRETSKEY}
+      - DATABASE_URL=postgres://forja:${SERVICE_PASSWORD_POSTGRES:-forja-internal-db}@postgres:5432/forja
+      - APP_DATA_SERVICE_URL=http://app-runtime:4200
+      - APP_DATA_SERVICE_TOKEN=${SERVICE_PASSWORD_APP_DATA:-${SERVICE_PASSWORD_BUILDER:?Set SERVICE_PASSWORD_BUILDER}}
+      - APP_RUNTIME_INTERNAL_URL=http://app-runtime:4200
+      - APP_RUNTIME_PUBLIC_PORT=${APP_RUNTIME_PUBLIC_PORT:-}
+      - FORJA_JOB_WORKER_MODE=external
+      - FORJA_JOB_WORKER_SERVICES=${FORJA_JOB_WORKER_SERVICES:-}
+      - FORJA_JOB_WORKER_PROJECT_ID=${FORJA_JOB_WORKER_PROJECT_ID:-}
+      - FORJA_JOB_CONCURRENCY=${FORJA_JOB_CONCURRENCY:-4}
+      - FORJA_JOB_POLL_MS=${FORJA_JOB_POLL_MS:-1000}
+      - FORJA_JOB_LEASE_MS=${FORJA_JOB_LEASE_MS:-60000}
+      - FORJA_JOB_MAX_ATTEMPTS=${FORJA_JOB_MAX_ATTEMPTS:-3}
+      - FORJA_JOB_QUEUE_LIMIT=${FORJA_JOB_QUEUE_LIMIT:-1000}
+    volumes:
+      # Compiled source and dependencies only; project DB access is always remote.
+      - forja-data:/app/data
+      - forja-deps:/app/node_modules/.forja-deps
+    depends_on:
+      postgres:
+        condition: service_healthy
+      app-runtime:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4400/healthz').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    stop_grace_period: 120s
 
   builder:
     build:

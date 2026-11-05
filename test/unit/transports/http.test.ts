@@ -8,7 +8,19 @@ import type { SettingsModule } from "../../../server/modules/settings/index.js";
 import { createStudioApi } from "../../../server/bootstrap/http/studioApi.js";
 import type { BuilderServiceClient } from "../../../server/modules/builder/infrastructure/builderServiceClient.js";
 
-const mocks = vi.hoisted(() => ({ watchProblems: vi.fn() }));
+const mocks = vi.hoisted(() => ({ watchProblems: vi.fn(), getSandboxServices: vi.fn(() => []), restartSandboxService: vi.fn() }));
+
+vi.mock("../../../server/modules/app-runtime/index.js", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../../../server/modules/app-runtime/index.js")>(),
+  getSandboxServices: mocks.getSandboxServices,
+  restartSandboxService: mocks.restartSandboxService,
+  readServiceRuntime: vi.fn(async () => ({ available: true, scope: "app-runtime", services: mocks.getSandboxServices() })),
+  restartServiceRuntime: vi.fn(async (id: string, service: string, env?: "preview" | "published") => mocks.restartSandboxService(id, service, env)),
+}));
+vi.mock("../../../server/modules/app-services/jobs.js", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../../../server/modules/app-services/jobs.js")>(),
+  listJobs: vi.fn(async () => ({ jobs: [], runs: [], timers: [], queue: [] })),
+}));
 
 vi.mock("../../../server/modules/app-services/projectDb.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../../server/modules/app-services/projectDb.js")>();
@@ -34,8 +46,13 @@ const identity = {
   accountFromSession: vi.fn(async (token?: string) => (token === "valid" ? account : null)),
 } as unknown as IdentityModule;
 const projects = {
+  createProject: vi.fn(async () => ({ id: "created-project", ownerId: "account-1", name: "Orders demo" })),
   getProject: vi.fn(async () => ({ id: "project-1", ownerId: "account-1" })),
   readFile: vi.fn(async () => "existing content"),
+  readAllFiles: vi.fn(async () => ({
+    "jobs/invoices.ts": "",
+    "forja.services.json": '{"version":1,"services":{"invoices":{"kind":"worker","jobs":["jobs/invoices.ts"],"replicas":1}}}',
+  })),
   writeFile: vi.fn(async () => undefined),
 } as unknown as ProjectsModule;
 const collaboration = { accessOf: vi.fn(async () => "owner") } as unknown as CollaborationModule;
@@ -46,6 +63,50 @@ const app = new Hono().route("/api", studioApi);
 const eventModule = await import("../../../server/modules/project-observability/events.js");
 
 describe("HTTP transport contract", () => {
+  it("authenticates project service reads and validates persistent scaling and targeted restarts", async () => {
+    const url = "/api/projects/project-1/service-control";
+    expect((await app.request(url)).status).toBe(401);
+    const headers = { cookie: "forja_session=valid", "content-type": "application/json" };
+    const response = await app.request(url, { headers });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ services: [{ name: "invoices" }, { name: "monolith" }] });
+    vi.mocked(projects.writeFile).mockClear();
+    const update = await app.request(`${url}/invoices`, { method: "PATCH", headers, body: '{"replicas":2}' });
+    expect(update.status).toBe(200);
+    expect(projects.writeFile).toHaveBeenCalledWith("project-1", "forja.services.json", expect.stringContaining('"replicas": 2'), "owner", "owner@example.com");
+    const invalid = await app.request(`${url}/invoices`, { method: "PATCH", headers, body: '{"replicas":99}' });
+    expect(invalid.status).toBe(400);
+    expect(projects.writeFile).toHaveBeenCalledTimes(1);
+    const restart = await app.request(`${url}/invoices/restart`, { method: "POST", headers, body: '{"env":"preview"}' });
+    expect(restart.status).toBe(200);
+    expect(mocks.restartSandboxService).toHaveBeenCalledWith("project-1", "invoices", "preview");
+  });
+  it("denies service control reads and writes without project membership", async () => {
+    vi.mocked(collaboration.accessOf).mockResolvedValueOnce(null).mockResolvedValueOnce(null);
+    const headers = { cookie: "forja_session=valid", "content-type": "application/json" };
+    expect((await app.request("/api/projects/project-1/service-control", { headers })).status).toBe(404);
+    expect((await app.request("/api/projects/project-1/service-control/invoices", { method: "PATCH", headers, body: '{"replicas":2}' })).status).toBe(404);
+  });
+  it("forwards optional starter selection and rejects unknown values before creation", async () => {
+    const createProject = vi.mocked(projects.createProject);
+    createProject.mockClear();
+    const headers = { cookie: "forja_session=valid", "content-type": "application/json" };
+    for (const template of [undefined, "orders-invoices"]) {
+      const response = await app.request("/api/projects", {
+        method: "POST", headers, body: JSON.stringify({ prompt: "Orders demo", template }),
+      });
+      expect(response.status).toBe(200);
+      expect(createProject).toHaveBeenLastCalledWith("account-1", "Orders demo", "Orders demo", undefined, undefined, template);
+    }
+    for (const template of ["typo", null, {}, 1]) {
+      const response = await app.request("/api/projects", {
+        method: "POST", headers, body: JSON.stringify({ prompt: "Orders demo", template }),
+      });
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({ error: expect.stringMatching(/template/i) });
+    }
+    expect(createProject).toHaveBeenCalledTimes(2);
+  });
   it("requires a signed-in account for studio endpoints", async () => {
     const response = await app.request("/api/me");
     expect(response.status).toBe(401);

@@ -3,6 +3,10 @@ import type { HttpPort } from "../../../shared/application/http-port.js";
 import type { EventStreamPort } from "../../../shared/infrastructure/browser.js";
 import type { ProjectEvent, ProjectLogLine } from "./contracts.js";
 
+export interface CreateProjectOptions {
+  template?: "monolith" | "orders-invoices";
+}
+
 export function subscribeToProjectEvents(
   createEventSource: (url: string) => EventStreamPort,
   id: string,
@@ -46,8 +50,8 @@ export function createProjectUseCases(http: HttpPort) {
     },
     loadProject: (id: string, signal?: AbortSignal) =>
       http.request<{ project: Project }>(`/projects/${id}`, { signal }),
-    createProject: (prompt: string) =>
-      http.request<{ project: Project }>("/projects", { body: { prompt } }),
+    createProject: (prompt: string, options: CreateProjectOptions = {}) =>
+      http.request<{ project: Project }>("/projects", { body: { prompt, ...options } }),
   };
 }
 

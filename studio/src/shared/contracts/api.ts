@@ -61,3 +61,23 @@ export interface ProjectProblem {
 
 export type Me = Account;
 export type JsonObject = Record<string, unknown>;
+
+export interface ServiceReplica { pid: number | null; active: number; ready: boolean }
+export interface ServiceRuntimeGroup { env: "preview" | "published"; service: string; replicas: ServiceReplica[] }
+export interface ServiceQueueEntry {
+  id: string; job: string; service?: string; env: string; status: string;
+  attempts: number; maxAttempts: number; error: string | null;
+  createdAt?: string; availableAt?: string;
+}
+export interface ControlledService {
+  name: string; kind: "service" | "worker" | "monolith";
+  endpoints: string[]; jobs: string[]; scalable: boolean;
+  desired: { replicas: number; maxConcurrency: number | null };
+  runtime: Omit<ServiceRuntimeGroup, "service">[];
+  queue: ServiceQueueEntry[]; queueCounts: Record<string, number>; lastFailure: string | null;
+}
+export interface ServiceControlSnapshot {
+  manifest: boolean; services: ControlledService[];
+  runtime: { available: boolean; scope: "app-runtime"; services: ServiceRuntimeGroup[]; error?: string };
+  queueScope: string;
+}

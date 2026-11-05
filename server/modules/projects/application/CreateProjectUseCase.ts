@@ -3,6 +3,7 @@ import { Checkpoint } from "../domain/Checkpoint.js";
 import { CreateCheckpointUseCase } from "./CreateCheckpointUseCase.js";
 import type { ProjectSnapshot } from "../domain/ProjectSnapshot.js";
 import type { ProjectsStore, ProjectServices } from "../ports/projects.js";
+import { parseStarterTemplate, type StarterTemplate } from "../domain/StarterTemplate.js";
 
 export interface CreateProjectInput {
   id?: string;
@@ -12,6 +13,7 @@ export interface CreateProjectInput {
   description?: string;
   visibility?: Visibility;
   files?: Record<string, string>;
+  template?: StarterTemplate;
 }
 
 export class CreateProjectUseCase {
@@ -21,6 +23,7 @@ export class CreateProjectUseCase {
   ) {}
 
   async execute(input: CreateProjectInput): Promise<ProjectSnapshot> {
+    const template = parseStarterTemplate(input.template);
     const project = new Project({
       id: input.id ?? this.services.projectId(),
       ownerId: input.ownerId,
@@ -31,7 +34,7 @@ export class CreateProjectUseCase {
       files: input.files,
     });
 
-    await this.store.create(project, input.files ?? this.services.templates(input.name), input.orgId);
+    await this.store.create(project, input.files ?? this.services.templates(input.name, template), input.orgId);
     await new CreateCheckpointUseCase(this.store).execute(project.id, new Checkpoint({
       projectId: project.id, label: "Proyecto creado", author: "system",
     }));

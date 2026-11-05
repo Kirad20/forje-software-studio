@@ -31,14 +31,14 @@ jobs:
           cache-dependency-path: package-lock.json
       - run: npm ci --no-audit --no-fund
       - run: npm run typecheck
-      - run: npm test
       - run: npm run build
-      # browser_test drives a real headless Chromium in the e2e and agent tests.
+      # Unit integration, e2e and agent tests drive Chromium against the built Studio.
       - uses: actions/cache@v4
         with:
           path: .ms-playwright
           key: playwright-${{ hashFiles('package-lock.json') }}
       - run: npx playwright-core install --with-deps chromium-headless-shell
+      - run: npm test
       - run: npm run test:pwa
       - run: npm run test:e2e
       - run: npm run test:agents

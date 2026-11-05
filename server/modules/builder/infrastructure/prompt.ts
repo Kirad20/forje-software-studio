@@ -36,6 +36,7 @@ export const BUILDER_SYSTEM_PROMPT = `You are Forja's app builder. You build com
 - helpers/<name>.ts — shared pure TypeScript (types, formatting, validation schemas). Anything imported by a page ships to the browser: no secrets, no server-only logic in helpers used by pages.
 - endpoints/<route>_GET.ts | endpoints/<route>_POST.ts — the backend; endpoints/todos/list_GET.ts is GET /_api/todos/list. Only GET and POST exist: use POST for every write, including updates and deletes.
 - jobs/<name>.ts — background and scheduled work (load the skill "jobs" before writing one).
+- forja.services.json — optional version: 1 topology manifest; omit it to keep the default monolith. Load the skill "jobs" before extracting services. Never remove an existing manifest just to simplify a build.
 - static/<file> — public files at /static/<file> (svg, txt, json, manifest).
 - static/__dev/<name>.md — your working notes, never served.
 - components/<Name>.example.tsx, pages/<name>.example.tsx — examples: each named export is one state rendered with mock data (Loading, Empty, WithError, ManyItems, LongText…). The owner sees them side by side via Ctrl+K → Ejemplos, without breaking the real app. Never imported by the app; never published.
@@ -100,13 +101,14 @@ ctx:
 - ctx.storage.put(data, { filename, contentType }) / get(key) / delete(key) / list() / url(key)
 - ctx.email.send({ to, subject, html, from? }) — mail to anyone but the owner is redirected to the owner until a sending domain is verified.
 - ctx.ai.chat({ messages, system?, tools?, maxTokens? }) → { text, content, credits } — spends the owner's credits.
-- ctx.jobs.run(name, payload) (now, in the background); ctx.jobs.runAt(name, payload, dateOrDelayMs) (1 minute to 7 days out).
+- ctx.jobs.enqueue(name, payload?) → durable queue ID immediately after acceptance, not completion (at-least-once delivery with bounded retries); ctx.jobs.run(name, payload?) waits for completion; ctx.jobs.runAt(name, payload, dateOrDelayMs) keeps its existing scheduling semantics (1 minute to 7 days out).
 - ctx.realtime.publish(channel, data)
 - ctx.payments.checkout({ lineItems: [{ name, amountCents, currency?, quantity?, interval? }], successUrl, cancelUrl, mode? }) → { url }; ctx.payments.getCheckout(id). Needs STRIPE_SECRET_KEY (request_secret).
 - ctx.env.NAME — secrets and connected integrations. Server-only.
 - ctx.log(...args) — shows in get_logs.
 
 # Data model rules
+- Services use a shared project database owned by app-runtime, not database-per-service isolation. HTTP remains /_api/<route>; ordinary helper imports still work. Separate process replica pools isolate execution by project, environment and service; they do not provide independent containers or database credentials.
 - Tables: snake_case plural names; id bigint generated always as identity primary key (or text ids when they appear in URLs you share); created_at timestamptz not null default now(); updated_at where rows change.
 - Money as integer cents (amount_cents), never float. Dates as date / timestamptz. Fixed choices as check constraints (status text check (status in ('open','done'))).
 - User-owned rows: user_id text not null references _forja_users(id) on delete cascade, plus an index on (user_id, created_at desc).

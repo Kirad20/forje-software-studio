@@ -29,6 +29,7 @@ export interface ServiceContext {
   email: { send(input: EmailInput): ReturnType<ContextPorts["sendEmail"]> };
   ai: { chat(input: AppAiInput): ReturnType<ContextPorts["appAiChat"]> };
   jobs: {
+    enqueue(name: string, payload?: unknown): Promise<string>;
     run(name: string, payload?: unknown): Promise<void>;
     runAt(name: string, payload: unknown, when: Date | number): Promise<string>;
   };
@@ -84,6 +85,11 @@ async function serviceContext(projectId: string, env: AppEnv, base: string, sour
     email: { send: (input) => sendEmail(projectId, input) },
     ai: { chat: (input) => appAiChat(projectId, input) },
     jobs: {
+      enqueue: (name, payload) => {
+        const enqueue = needJobs().enqueue;
+        if (!enqueue) throw new Error("Cola de tareas no configurada");
+        return enqueue(projectId, env, name, payload ?? null, "background");
+      },
       run: (name, payload) => {
         // Fire and forget: the request does not wait for the task.
         void needJobs().runNow(projectId, env, name, payload ?? null, "background").catch((error) => write("error", [`Tarea ${name} falló:`, String(error)]));

@@ -72,7 +72,10 @@ export function createAdminApi({ identity, settings, models }: AdminApiModules) 
   modelRoutes.get("/providers", async (c) => c.json({ providers: await models.providers.listProviders() }));
   modelRoutes.post("/providers", async (c) => {
     const input = await body<ProviderInput>(c);
-    await models.providers.saveProvider({ ...input, kind: "openai" }, me(c), { create: true });
+    if (input.kind !== undefined && input.kind !== "openai" && input.kind !== "ollama") {
+      throw new ProviderError("El tipo debe ser OpenAI u Ollama.");
+    }
+    await models.providers.saveProvider({ ...input, kind: input.kind ?? "openai" }, me(c), { create: true });
     return c.json({ providers: await models.providers.listProviders() }, 201);
   });
   modelRoutes.patch("/providers/:id", async (c) => {

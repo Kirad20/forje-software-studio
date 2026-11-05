@@ -234,7 +234,7 @@ Style the table in a CSS Module with tokens; wrap it in an overflow-x: auto cont
     body: `- ctx.email.send({ to, subject, html, from? }). Until the owner verifies a sending domain, mail to anyone but the owner is redirected to the owner: tell them so in your summary.
 - Sending is rate-sensitive: do it behind sign-in and keep a per-user counter in the database (for example an email_log table with user_id and created_at; refuse over a sensible daily number).
 - Never put raw user text into html: escape it, or send plain text inside a <p>.
-- Reminders: ctx.jobs.runAt("send-reminder", { id }, whenOrDelayMs) works from 1 minute to 7 days ahead; for recurring mail use a job with a cron schedule. Runs are not retried, so record 'sent_at' and skip rows that already have it.
+- Reminders: ctx.jobs.runAt("send-reminder", { id }, whenOrDelayMs) works from 1 minute to 7 days ahead; for recurring mail use a job with a cron schedule. Durable enqueue delivery is at-least-once with bounded retries: use provider idempotency keys for mail, since recording sent_at alone cannot prevent a duplicate after a crash.
 - Keep the template in a helper (helpers/emails.ts) that returns { subject, html } and cover it with a spec.
 
   import type { Ctx } from "@forja/server";
@@ -298,10 +298,13 @@ Style the table in a CSS Module with tokens; wrap it in an overflow-x: auto cont
   {
     name: "jobs",
     description: "Background and scheduled work (jobs/<name>.ts): cron schedule, time zone, limits, safe re-runs",
-    body: `A job is a file jobs/<name>.ts (letters, digits, - and _). It runs in the background: from ctx.jobs.run(name, payload) now, from ctx.jobs.runAt(name, payload, dateOrDelayMs) between 1 minute and 7 days ahead, or on a cron schedule.
+    body: `A job is a file jobs/<name>.ts (letters, digits, - and _). ctx.jobs.enqueue(name, payload?) returns a durable queue ID after acceptance, not execution. Delivery is at-least-once with bounded retries; a crash can replay an attempt. ctx.jobs.run(name, payload?) waits for completion; ctx.jobs.runAt(name, payload, dateOrDelayMs) keeps its existing scheduling semantics between 1 minute and 7 days ahead. Cron schedules remain supported.
 - export const schedule is optional, only runs in the published app, at most every 5 minutes, at most 10 scheduled jobs per project. export const timezone is optional (default UTC): set the business's zone, for example "America/Mexico_City".
 - ctx.payload carries the arguments; the job has the same services as an endpoint (db, email, storage, ai, jobs, realtime, env, log).
-- A run may last 15 minutes and is NOT retried: record progress in the database and make every run safe to repeat (mark rows as done, skip the ones already done), because the same job can be started twice.
+- A run may last 15 minutes. Make durable jobs idempotent: a unique business key (for example invoice.order_id), INSERT ... ON CONFLICT and a transaction updating output + status. External effects need provider idempotency keys; a database transaction cannot atomically commit email or payments.
+- Optional extraction: forja.services.json = {"version":1,"services":{"orders":{"kind":"service","endpoints":["endpoints/orders/create_POST.ts"],"jobs":[],"replicas":2,"maxConcurrency":8},"invoices":{"kind":"worker","endpoints":[],"jobs":["jobs/invoice.ts"],"replicas":2,"maxConcurrency":1}}}. Assign existing exact endpoint/job filenames once only; workers cannot expose endpoints. Service names are lowercase letters/digits/hyphens, start with a letter, at most 40 characters, and cannot be monolith. Unknown fields fail validation. replicas: 1–8 per service, at most 16 total; maxConcurrency: 1–32. Unassigned files stay in the monolith.
+- Routes remain /_api/<route>; imports work normally. All services share the project database owned by app-runtime; this is execution/process isolation, not database-per-service isolation. Local replica pools are not separate Docker containers. Independently scale the existing Docker worker service; never attach several app-runtime containers to shared PGlite.
+- For existing apps, inspect tables and migrate additively before assigning entrypoints. Use enqueue for API → worker handoff and read persisted status through an authorized endpoint. Database writes + queue acceptance are not one transaction: handle enqueue failure with safe retries or an outbox/reconciler.
 - Try it with the run_job tool and read the result with get_logs; a schedule only fires once published.
 
   import type { JobCtx } from "@forja/server";
