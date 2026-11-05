@@ -101,7 +101,7 @@ export function createAdminApi({ identity, settings, models }: AdminApiModules) 
     if (provider === "openrouter") throw new ModelError("Usa la sincronización de OpenRouter.");
     const remote = await listProviderModels(provider);
     if (remote.error) return c.json({ error: remote.error }, 400);
-    return c.json(await models.catalog.importProviderModels(provider, remote.models, me(c)));
+    return c.json(await models.classification.importProviderModels({ accountId: me(c) }, provider, remote.models));
   });
 
   modelRoutes.get("/models", async (c) =>

@@ -21,6 +21,8 @@ await monolith.startBindings();
 await monolith.models.start();
 const providers = await import("../../server/modules/model-management/providers.js");
 const catalog = await import("../../server/modules/model-management/catalog.js");
+const { createModelClassification } = await import("../../server/modules/model-management/application/ModelClassification.js");
+const { recordClassificationUsage } = await import("../../server/modules/model-management/infrastructure/PostgresClassificationUsage.js");
 afterAll(async () => {
   await monolith.models.stop();
   await monolith.stopBindings();
@@ -99,14 +101,31 @@ describe("providers and models", () => {
   });
 
   it("persists classified provider imports disabled and preserves prior edits on repeat imports", async () => {
+    await q(`insert into accounts (id, email, credits) values ('admin', 'classification@example.test', 20)`);
     await providers.saveProvider({ id: "import-lab", baseUrl: "http://127.0.0.1:11434/v1" }, null, { create: true });
-    const service = monolith.models.catalog;
+    const classifier = (await catalog.listCatalog()).find(m => m.id === "anthropic:claude-sonnet-5-5")!;
+    const service = createModelClassification({
+      catalog: monolith.models.catalog, recordUsage: recordClassificationUsage,
+      callModel: async () => ({
+        model: classifier, usd: 0.003, credits: 0, failed: [],
+        response: { content: [{ type: "text", text: JSON.stringify({ models: [{
+          id: "claude-opus-5", tier: 2, speed: 4, tools: true, vision: true,
+          context: 240000, inPrice: 99, outPrice: 99, cacheReadPrice: null,
+        }] }) }], stopReason: "end", servedBy: classifier.model,
+          usage: { input: 100, output: 50, cacheRead: 0, cacheWrite: 0 } },
+      }),
+    });
     const remote = [{ id: "claude-opus-5", inPrice: 4, outPrice: 20 }];
-    expect(await service.importProviderModels("import-lab", remote, null)).toEqual({ created: 1, skipped: 0, errors: [] });
+    expect(await service.importProviderModels({ accountId: "admin" }, "import-lab", remote))
+      .toMatchObject({ created: 1, skipped: 0, errors: [], classifiedBy: [classifier.id], usd: 0.003 });
     expect((await catalog.listCatalog()).find(m => m.id === "import-lab:claude-opus-5"))
-      .toMatchObject({ source: "custom", tier: 5, speed: 2, enabled: false, tools: true, vision: true, inPrice: 4, outPrice: 20 });
+      .toMatchObject({ source: "custom", tier: 2, speed: 4, enabled: false, tools: true, vision: true, inPrice: 4, outPrice: 20, context: 240000 });
+    expect(await q(`select account_id, model, input_tokens, output_tokens, usd, credits from ai_usage where source = 'admin_classification'`))
+      .toEqual([{ account_id: "admin", model: classifier.id, input_tokens: 100, output_tokens: 50, usd: 0.003, credits: 0 }]);
+    expect(await q(`select credits from accounts where id = 'admin'`)).toEqual([{ credits: 20 }]);
     await catalog.saveModel({ provider: "import-lab", model: "claude-opus-5", tier: 4, enabled: true }, null);
-    expect(await service.importProviderModels("import-lab", remote, null)).toEqual({ created: 0, skipped: 1, errors: [] });
+    expect(await service.importProviderModels({ accountId: "admin" }, "import-lab", remote))
+      .toMatchObject({ created: 0, skipped: 1, errors: [], classifiedBy: [], usd: 0 });
     expect((await catalog.listCatalog()).find(m => m.id === "import-lab:claude-opus-5")).toMatchObject({ tier: 4, enabled: true });
     await providers.deleteProvider("import-lab", null);
   });
