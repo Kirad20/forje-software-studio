@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BrainCircuit, ChevronRight, FileCode2, FolderTree, Maximize2, Minus, Plus, RefreshCw, Search, Sparkles } from "lucide-react";
-import { api } from "../../projects/application/controller.js";
+import { httpClient } from "../../../shared/infrastructure/http-client.js";
 import { buildGraphView, type GraphCard, type GraphQuestion, type ProjectGraph } from "../application/graph.js";
 import "./ProjectKnowledge.css";
 
@@ -27,7 +27,7 @@ export function ProjectKnowledge({ projectId, reloadKey }: { projectId: string; 
     setLoading(true);
     setError("");
     try {
-      const result = await api<ProjectGraph>(`/projects/${projectId}/knowledge${force ? "/rebuild" : ""}`, force ? { method: "POST" } : {});
+      const result = await httpClient.request<ProjectGraph>(`/projects/${projectId}/knowledge${force ? "/rebuild" : ""}`, force ? { method: "POST" } : {});
       if (requestId.current === current) setGraph(result);
     } catch (e) {
       if (requestId.current === current) setError(e instanceof Error ? e.message : String(e));
@@ -80,7 +80,7 @@ export function ProjectKnowledge({ projectId, reloadKey }: { projectId: string; 
   const openSource = async (path: string) => {
     const current = ++sourceRequestId.current;
     try {
-      const result = await api<{ path: string; text: string }>(`/projects/${projectId}/knowledge/source?path=${encodeURIComponent(path)}`);
+      const result = await httpClient.request<{ path: string; text: string }>(`/projects/${projectId}/knowledge/source?path=${encodeURIComponent(path)}`);
       if (current === sourceRequestId.current) setSource(result);
     } catch (e) {
       if (current === sourceRequestId.current) setError(e instanceof Error ? e.message : String(e));
@@ -92,7 +92,7 @@ export function ProjectKnowledge({ projectId, reloadKey }: { projectId: string; 
     setAnswer(undefined);
     const current = requestId.current;
     try {
-      const result = await api<GraphQuestion>(`/projects/${projectId}/knowledge/question`, { method: "POST", body: { query: question } });
+      const result = await httpClient.request<GraphQuestion>(`/projects/${projectId}/knowledge/question`, { method: "POST", body: { query: question } });
       if (current === requestId.current) setAnswer(result);
     } catch (e) {
       if (current === requestId.current) setError(e instanceof Error ? e.message : String(e));
