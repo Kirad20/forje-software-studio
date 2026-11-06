@@ -204,4 +204,11 @@ describe("organizations and project access", { timeout: 30_000 }, () => {
     expect((await accounts.accountFromApiToken(scoped))?.tokenOrgId).toBe(team.id);
     expect((await accounts.accountFromApiToken(free))?.tokenOrgId).toBeNull();
   });
+
+  it("limits a project token to its project", async () => {
+    const id = await accounts.createAccount("project-token@example.com", null, null);
+    const project = await projects.createProject(id, "Privado");
+    const token = await accounts.createApiToken(id, "Claude", null, project.id);
+    expect(await accounts.accountFromApiToken(token)).toMatchObject({ id, tokenProjectId: project.id, tokenOrgId: null });
+  });
 });

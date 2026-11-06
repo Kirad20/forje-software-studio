@@ -4,19 +4,20 @@ import type { AdminApiTokenInfo, ApiTokenInfo, ApiTokenPurpose, ApiTokenReposito
 export class PostgresApiTokenRepository implements ApiTokenRepository {
   constructor(private readonly organizationNames: (ids: string[]) => Promise<Record<string, string>>) {}
 
-  async create(id: string, accountId: string, name: string, hash: string, orgId: string | null, purpose: ApiTokenPurpose = "project", expiresAt?: Date): Promise<void> {
+  async create(id: string, accountId: string, name: string, hash: string, orgId: string | null, purpose: ApiTokenPurpose = "project", expiresAt?: Date, projectId?: string | null): Promise<void> {
     const rows = await q(
-      `insert into api_tokens (id, account_id, name, token_hash, org_id, purpose, expires_at)
-       select $1, a.id, $3, $4, $5, $6, $7 from accounts a
+      `insert into api_tokens (id, account_id, name, token_hash, org_id, purpose, expires_at, project_id)
+       select $1, a.id, $3, $4, $5, $6, $7, $8 from accounts a
        where a.id = $2 and ($6 <> 'admin' or (a.platform_role = 'admin' and not a.disabled))
-       returning id`, [id, accountId, name, hash, orgId, purpose, expiresAt ?? null],
+       returning id`, [id, accountId, name, hash, orgId, purpose, expiresAt ?? null, projectId ?? null],
     );
     if (!rows.length) throw new Error("Solo administradores activos de la plataforma.");
   }
 
   async findAccount(hash: string, purpose: ApiTokenPurpose = "project"): Promise<PublicAccount | null> {
     const account = await one<PublicAccount>(
-      `select a.id, a.email, a.name, a.credits, a.platform_role as "platformRole", t.org_id as "tokenOrgId"
+      `select a.id, a.email, a.name, a.credits, a.platform_role as "platformRole",
+       t.org_id as "tokenOrgId", t.project_id as "tokenProjectId"
        ${purpose === "admin" ? ", a.disabled" : ""}
        from api_tokens t join accounts a on a.id = t.account_id
        where t.token_hash = $1 and t.purpose = $2 and not a.disabled
@@ -29,7 +30,8 @@ export class PostgresApiTokenRepository implements ApiTokenRepository {
 
   async list(accountId: string): Promise<ApiTokenInfo[]> {
     const rows = await q<Omit<ApiTokenInfo, "orgName">>(
-      `select t.id, t.name, t.org_id as "orgId", t.last_used_at as "lastUsedAt", t.created_at as "createdAt"
+      `select t.id, t.name, t.org_id as "orgId", t.project_id as "projectId",
+       t.last_used_at as "lastUsedAt", t.created_at as "createdAt"
        from api_tokens t where t.account_id = $1 and t.purpose = 'project' order by t.created_at desc`, [accountId],
     );
     const ids = [...new Set(rows.flatMap((row) => row.orgId ? [row.orgId] : []))];
@@ -43,7 +45,7 @@ export class PostgresApiTokenRepository implements ApiTokenRepository {
 
   listAdmin(accountId: string): Promise<AdminApiTokenInfo[]> {
     return q<AdminApiTokenInfo>(
-      `select id, name, purpose, org_id as "orgId", null::text as "orgName",
+      `select id, name, purpose, org_id as "orgId", null::text as "projectId", null::text as "orgName",
        last_used_at as "lastUsedAt", created_at as "createdAt", expires_at as "expiresAt", revoked_at as "revokedAt"
        from api_tokens where account_id = $1 and purpose = 'admin' order by created_at desc`, [accountId],
     );
