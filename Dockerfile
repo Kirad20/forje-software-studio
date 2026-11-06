@@ -29,6 +29,11 @@ RUN if [ "$BROWSER" = "1" ]; then npx playwright-core install --with-deps chromi
  && mkdir -p /app/data /app/node_modules/.forja-deps /app/node_modules/.cache \
  && chown -R node:node /app/data /app/node_modules/.forja-deps /app/node_modules/.cache
 ENV FORJA_BROWSER=${BROWSER}
+# Graphify powers the project brain (question tool): local AST extraction, no LLM.
+RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-venv \
+ && python3 -m venv /opt/graphify && /opt/graphify/bin/pip install --no-cache-dir graphifyy==0.9.103 \
+ && rm -rf /var/lib/apt/lists/*
+ENV GRAPHIFY_BIN=/opt/graphify/bin/graphify
 USER node
 VOLUME /app/data
 EXPOSE 4100
