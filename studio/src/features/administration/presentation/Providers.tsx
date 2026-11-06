@@ -4,6 +4,7 @@ import { Switch } from "../../../shared/ui.js";
 import { EditDialog } from "../../../shared/EditDialog.js";
 import { useConfirmation } from "../../../shared/ConfirmDialog.js";
 import { WandSparkles } from "lucide-react";
+import { ModelSetupSteps } from "./ModelSetupSteps.js";
 
 interface ProviderView {
   id: string;
@@ -57,11 +58,9 @@ export function Providers() {
   };
   return (
     <div className="stack" style={{ gap: 14 }}>
+      <ModelSetupSteps current="providers" />
       <p className="small muted" style={{ margin: 0 }}>
-        Un proveedor se usa cuando está activado y tiene su clave (o su URL). Las claves se guardan cifradas y nunca vuelven al navegador.
-      </p>
-      <p className="small muted" style={{ margin: 0 }}>
-        El alta mágica usa un modelo habilitado y permitido en tu cuenta, elegido por el router, para clasificar con IA. Conserva los metadatos del proveedor y estima los datos restantes; no usa una tabla fija por familia. Si la IA desconoce un dato, se usa contexto de 128 000, precios de 0 pendientes de revisión y capacidades desactivadas. Los nuevos modelos quedan desactivados; no cambia permisos ni modelos existentes. Las llamadas generan costo en el proveedor.
+        Pega la clave de un proveedor o conecta un servidor local por URL. Después prueba la conexión y elige sus modelos. Las claves se guardan cifradas y nunca vuelven al navegador.
       </p>
       <div className="admin-toolbar">
         <input type="search" name="provider-search" autoComplete="off" autoCorrect="off" spellCheck={false} aria-label="Buscar proveedores" placeholder="Buscar por nombre, identificador o URL…" value={filter} onChange={(e) => setFilter(e.target.value)} />
@@ -143,7 +142,7 @@ function ProviderCard({ p, onPatch, onDeleted }: { p: ProviderView; onPatch: (b:
           <button
             disabled={busy || !key.trim()}
             onClick={async () => {
-              if (!await update({ apiKey: key.trim() })) setKey("");
+              if (!await update({ apiKey: key.trim(), enabled: true })) setKey("");
             }}
           >
             Guardar
@@ -171,9 +170,7 @@ function ProviderCard({ p, onPatch, onDeleted }: { p: ProviderView; onPatch: (b:
         <button onClick={() => void test()} disabled={busy || testing || !p.available}>
           {testing ? <span className="spinner" /> : "Probar conexión"}
         </button>
-        {p.id !== "openrouter" && <button className="primary" onClick={() => void importModels()} disabled={busy || testing || !p.available}>
-          {busy ? <span className="spinner" /> : <WandSparkles size={16} aria-hidden="true" />} Dar de alta y clasificar con IA
-        </button>}
+        {p.available && <a href={`/admin/models?provider=${encodeURIComponent(p.id)}${p.id === "openrouter" ? "" : "&add=1"}`}>Elegir modelos de {p.label} →</a>}
         {probe &&
           (probe.ok ? (
             <span className="pill ok">
@@ -202,6 +199,13 @@ function ProviderCard({ p, onPatch, onDeleted }: { p: ProviderView; onPatch: (b:
           </button>
         )}
       </div>
+      {p.id !== "openrouter" && <details>
+        <summary className="small muted" style={{ cursor: "pointer" }}>Avanzado: importar catálogo con IA</summary>
+        <p className="small muted">Opcional y con costo. Necesita un modelo ya habilitado y permitido en tu cuenta. Los nuevos modelos quedan desactivados: revisa precios, contexto y capacidades antes de activarlos. Los datos desconocidos se estiman; los modelos existentes y los permisos no cambian.</p>
+        <button onClick={() => void importModels()} disabled={busy || testing || !p.available}>
+          {busy ? <span className="spinner" /> : <WandSparkles size={16} aria-hidden="true" />} Dar de alta y clasificar con IA
+        </button>
+      </details>}
       {editing && <ProviderEditor p={p} onClose={() => setEditing(false)} onSave={async (body) => {
         const failure = await update(body);
         if (!failure) setEditing(false);
@@ -291,7 +295,13 @@ function AddProvider({ onDone }: { onDone: (list?: ProviderView[]) => void }) {
     >
       <strong>Nuevo proveedor</strong>
       <fieldset disabled={busy} className="admin-form-grid">
-        <label>Tipo<select value={kind} onChange={(e) => setKind(e.target.value === "ollama" ? "ollama" : "openai")}><option value="openai">Compatible con OpenAI</option><option value="ollama">Ollama nativo</option></select></label>
+        <label>Tipo<select value={kind} onChange={(e) => {
+          const next = e.target.value === "ollama" ? "ollama" : "openai";
+          setKind(next);
+          if (!baseUrl || baseUrl === "http://localhost:11434" || baseUrl === "http://localhost:11434/v1") {
+            setBaseUrl(next === "ollama" ? "http://localhost:11434" : "http://localhost:11434/v1");
+          }
+        }}><option value="openai">Compatible con OpenAI</option><option value="ollama">Ollama nativo</option></select></label>
         <label>Identificador<input required placeholder="p. ej. ollama" pattern="[a-z0-9-]{2,32}" value={id} onChange={(e) => setId(e.target.value.toLowerCase())} /></label>
         <label>Nombre visible<input maxLength={80} placeholder="p. ej. Ollama local" value={label} onChange={(e) => setLabel(e.target.value)} /></label>
         <label>URL base<input required type="url" maxLength={500} placeholder={kind === "ollama" ? "http://localhost:11434" : "http://localhost:11434/v1"} value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} /></label>

@@ -5,6 +5,8 @@ import { Select, Switch } from "../../../shared/ui.js";
 import { EditDialog } from "../../../shared/EditDialog.js";
 import { useConfirmation } from "../../../shared/ConfirmDialog.js";
 import type { SettingView } from "./Settings.js";
+import { modelBlockers, usableModel } from "../application/model-readiness.js";
+import { ModelSetupSteps } from "./ModelSetupSteps.js";
 
 interface CatalogModel {
   id: string;
@@ -50,14 +52,15 @@ export function Models() {
   const { confirm, dialog } = useConfirmation();
   const [data, setData] = useState<{ models: CatalogModel[]; openrouter: { configured: boolean; lastSync: string | null } } | null>(null);
   const [filter, setFilter] = useState("");
-  const [provider, setProvider] = useState("");
-  const [onlyUsable, setOnlyUsable] = useState(true);
+  const [provider, setProvider] = useState(() => new URLSearchParams(window.location.search).get("provider") ?? "");
+  const [onlyUsable, setOnlyUsable] = useState(false);
   const [probes, setProbes] = useState<Record<string, Probe | "running">>({});
   const [error, setError] = useState("");
   const [note, setNote] = useState("");
   const [page, setPage] = useState(0);
   const [editing, setEditing] = useState<CatalogModel | null>(null);
   const [pending, setPending] = useState<string | null>(null);
+  const [permissionsOpen, setPermissionsOpen] = useState(false);
   const load = () => api<NonNullable<typeof data>>("/admin/models").then(setData);
   useEffect(() => {
     void load().catch((e) => setError((e as Error).message));
@@ -67,7 +70,7 @@ export function Models() {
   const shown = useMemo(
     () =>
       (data?.models ?? []).filter(
-        (m) => (!provider || m.provider === provider) && (!onlyUsable || (m.available && m.allowed)) && (!filter || `${m.label} ${m.id}`.toLowerCase().includes(filter.toLowerCase())),
+        (m) => (!provider || m.provider === provider) && (!onlyUsable || usableModel(m)) && (!filter || `${m.label} ${m.id}`.toLowerCase().includes(filter.toLowerCase())),
       ),
     [data, provider, onlyUsable, filter],
   );
@@ -96,22 +99,13 @@ export function Models() {
 
   return (
     <div className="stack" style={{ gap: 16 }}>
+      <ModelSetupSteps current="models" />
       <AddModel existing={new Set(data.models.map((m) => m.id))} onAdded={load} />
       <section className="card stack" style={{ padding: 16 }}>
         <strong>Preparación para construir y evaluar</strong>
-        <p className="small muted" style={{ margin: 0 }}>Activo en la plataforma no significa permitido en tu cuenta. Evals usa tus permisos; el juez necesita Imágenes, no Herramientas. Activa solo capacidades que el modelo realmente soporta.</p>
-        <div className="small muted">{data.models.filter(m => m.enabled && m.vision && !m.blockers?.length).length} jueces visuales permitidos · {data.models.filter(m => m.enabled && m.tools && !m.blockers?.length).length} modelos con herramientas permitidos. Diagnóstico de los modelos de esta página.</div>
-        {shown.slice(currentPage * SHOWN, (currentPage + 1) * SHOWN).map(m => <div className="row" key={m.id} style={{ flexWrap: "wrap" }}>
-          <span className="grow">{m.label} <code className="small muted">{m.id}</code></span>
-          <span className={`pill ${m.blockers?.length ? "warn" : "ok"}`}>{m.blockers?.length ? m.blockers.join(" · ") : m.vision ? "Listo para juez visual" : m.tools ? "Listo para construir · sin visión" : "Solo texto"}</span>
-          {m.available && m.allowed && m.blockers?.includes("No permitido en tu cuenta") && <button disabled={pending !== null} onClick={async () => {
-            setPending(m.id); setError("");
-            try {
-              await api(`/admin/models/permit/${enc(m.id)}`, { body: {} });
-              await load();
-            } catch (e) { setError((e as Error).message); } finally { setPending(null); }
-          }}>Permitir {m.label} en mi cuenta</button>}
-        </div>)}
+        <p className="small muted" style={{ margin: 0 }}>Activa un modelo y resuelve los bloqueos de su fila. Para construir necesita Herramientas; para evaluar capturas necesita Imágenes. No es necesario asignar un modelo a cada agente.</p>
+        <div className="small muted">{data.models.filter(m => usableModel(m) && m.vision).length} modelos para evaluar imágenes · {data.models.filter(m => usableModel(m) && m.tools).length} modelos para construir.</div>
+        <a href="/account">Permisos de mi cuenta y valores por defecto →</a>
       </section>
 
       <section className="card stack" style={{ padding: 16, gap: 10 }}>
@@ -144,7 +138,7 @@ export function Models() {
           {shown.length} de {data.models.length} modelos
           {data.openrouter.configured && ` · OpenRouter sincronizado ${data.openrouter.lastSync ? timeAgo(data.openrouter.lastSync) : "nunca"}`}
         </div>
-        {error && <div className="error-box">{error}</div>}
+        {error && <div className="error-box" role="alert">{error}</div>}
         {note && <div role="status" className="small">{note}</div>}
         <div className="admin-model-scroll">
           <table className="grid admin-model-table">
@@ -175,7 +169,11 @@ export function Models() {
                       </div>
                     </td>
                     <td data-label="Estado">
-                      {!m.available ? <span className="pill">{m.enabled ? "proveedor no disponible" : "desactivado"}</span> : m.allowed ? <span className="pill ok">en uso</span> : <span className="pill warn">fuera de la lista blanca</span>}
+                      <span className={`pill ${usableModel(m) ? "ok" : "warn"}`} style={{ whiteSpace: "normal" }}>
+                        {modelBlockers(m).join(" · ") || "Listo para usar"}
+                      </span>
+                      {modelBlockers(m).includes("Proveedor no disponible") && <div><a href="/admin/providers">Conectar proveedor</a></div>}
+                      {!m.allowed && <div><a href="#model-platform-permissions" onClick={() => setPermissionsOpen(true)}>Revisar permisos de plataforma</a></div>}
                     </td>
                     <td data-label="Capacidades">
                       <div className="stack small" style={{ gap: 4 }}>
@@ -201,7 +199,7 @@ export function Models() {
                       </div>
                     </td>
                     <td data-label="Precio entrada / salida (MTok)">
-                      {m.inPrice === 0 && m.outPrice === 0 ? "gratis" : `$${m.inPrice} / $${m.outPrice}`}
+                      {m.inPrice === 0 && m.outPrice === 0 ? (m.source === "custom" ? "$0 / $0 · verificar" : "gratis") : `$${m.inPrice} / $${m.outPrice}`}
                     </td>
                     <td data-label="Calidad">
                       <span title="Calidad de 1 a 5">{m.tier}/5</span>
@@ -211,7 +209,14 @@ export function Models() {
                     </td>
                     <td data-label="Acciones" style={{ whiteSpace: "normal", minWidth: 160 }}>
                       <button className="small" disabled={pending !== null} onClick={() => setEditing(m)} aria-label={`Editar ${m.label}`}>Editar</button>{" "}
-                      <button className="small" disabled={!m.available || p === "running"} onClick={() => void test(m)}>
+                      {m.available && m.allowed && modelBlockers(m).includes("No permitido en tu cuenta") && <button className="small" disabled={pending !== null} onClick={async () => {
+                        setPending(m.id); setError("");
+                        try {
+                          await api(`/admin/models/permit/${enc(m.id)}`, { body: {} });
+                          await load();
+                        } catch (e) { setError((e as Error).message); } finally { setPending(null); }
+                      }}>Permitir {m.label} en mi cuenta</button>}{" "}
+                      <button className="small" disabled={!usableModel(m) || p === "running"} onClick={() => void test(m)}>
                         {p === "running" ? <span className="spinner" /> : "Probar"}
                       </button>{" "}
                       {p && p !== "running" && (
@@ -257,7 +262,7 @@ export function Models() {
         </div>
       </section>
 
-      <details className="card" style={{ padding: 16 }}>
+      <details id="model-platform-permissions" open={permissionsOpen} onToggle={(event) => setPermissionsOpen(event.currentTarget.open)} className="card" style={{ padding: 16 }}>
         <summary style={{ cursor: "pointer", fontWeight: 600 }}>Permisos de la plataforma · lista blanca</summary>
         <p className="small muted">Controla qué modelos pueden utilizar las cuentas. Los permisos de cada cuenta pueden restringir esta lista.</p>
         <Whitelist models={data.models} onSaved={load} />
@@ -445,7 +450,7 @@ interface RemoteModel {
 }
 
 function AddModel({ existing, onAdded }: { existing: Set<string>; onAdded: () => Promise<void> }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(() => new URLSearchParams(window.location.search).get("add") === "1");
   // Registered providers, not the ones that already have models: a freshly added provider has none.
   const [providers, setProviders] = useState<string[]>([]);
   useEffect(() => {
@@ -456,7 +461,7 @@ function AddModel({ existing, onAdded }: { existing: Set<string>; onAdded: () =>
       setF((cur) => (ids.includes(cur.provider) ? cur : { ...cur, provider: ids.find((id) => id !== "anthropic") ?? ids[0] ?? "" }));
     }).catch((e) => setError((e as Error).message));
   }, [open]);
-  const [f, setF] = useState({ provider: "", model: "", label: "", inPrice: 0, outPrice: 0, context: 128000, tier: 3, speed: 3, tools: true, vision: false });
+  const [f, setF] = useState(() => ({ provider: new URLSearchParams(window.location.search).get("provider") ?? "", model: "", label: "", inPrice: 0, outPrice: 0, context: 128000, tier: 3, speed: 3, tools: false, vision: false }));
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   // What the chosen provider lists in its API, to pick from; typing a name by hand still works.
@@ -479,7 +484,12 @@ function AddModel({ existing, onAdded }: { existing: Set<string>; onAdded: () =>
     setF((cur) => ({
       ...cur,
       model: name,
-      ...(m ? { label: m.label ?? cur.label, context: m.context ?? cur.context, inPrice: m.inPrice ?? cur.inPrice, outPrice: m.outPrice ?? cur.outPrice } : {}),
+      label: m?.label ?? name,
+      context: m?.context ?? 128000,
+      inPrice: m?.inPrice ?? 0,
+      outPrice: m?.outPrice ?? 0,
+      tools: false,
+      vision: false,
     }));
   };
   if (!open)
@@ -536,11 +546,6 @@ function AddModel({ existing, onAdded }: { existing: Set<string>; onAdded: () =>
           <input required maxLength={200} value={f.model} onChange={(e) => pick(e.target.value)} placeholder="Elige arriba o escribe el nombre" style={{ width: 260 }} />
         </label>
         {field("label", "Nombre visible", "text", 160)}
-        {field("inPrice", "$ entrada/MTok", "number", 90)}
-        {field("outPrice", "$ salida/MTok", "number", 90)}
-        {field("context", "Contexto", "number", 110)}
-        {field("tier", "Calidad 1–5", "number", 80)}
-        {field("speed", "Velocidad 1–5", "number", 80)}
         <label className="row small" style={{ color: "var(--text)" }}>
           <input type="checkbox" checked={f.tools} onChange={(e) => setF({ ...f, tools: e.target.checked })} style={{ width: "auto" }} /> Herramientas
         </label>
@@ -548,8 +553,18 @@ function AddModel({ existing, onAdded }: { existing: Set<string>; onAdded: () =>
           <input type="checkbox" checked={f.vision} onChange={(e) => setF({ ...f, vision: e.target.checked })} style={{ width: "auto" }} /> Imágenes
         </label>
       </fieldset>
+      <details>
+        <summary className="small muted" style={{ cursor: "pointer" }}>Precios, contexto y rendimiento</summary>
+        <fieldset disabled={busy} className="row" style={{ flexWrap: "wrap", marginTop: 8 }}>
+          {field("inPrice", "$ entrada/MTok", "number", 90)}
+          {field("outPrice", "$ salida/MTok", "number", 90)}
+          {field("context", "Contexto", "number", 110)}
+          {field("tier", "Calidad 1–5", "number", 80)}
+          {field("speed", "Velocidad 1–5", "number", 80)}
+        </fieldset>
+      </details>
       <div className="small muted">
-        Las capacidades se declaran manualmente: descargar un modelo no las activa aquí. Marca Imágenes solo si admite visión (por ejemplo, qwen2.5vl); el juez visual no necesita herramientas.
+        Confirma las capacidades reales: Herramientas para construir, Imágenes para evaluar capturas. Los precios y el contexto se rellenan si el proveedor los publica; si no, revisa los valores antes de usarlo (0 no significa gratis).
       </div>
       <div className="small muted">
         {remote.loading

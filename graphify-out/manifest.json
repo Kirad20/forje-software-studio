@@ -1578,9 +1578,9 @@
     "semantic_hash": ""
   },
   "server/modules/evaluations/infrastructure/playground.ts": {
-    "mtime": 1793917698.3028488,
-    "seen": 1793917712.302402,
-    "ast_hash": "118e4de317a7927ed47ca7006b6216b1",
+    "mtime": 1793933826.759108,
+    "seen": 1793933830.854657,
+    "ast_hash": "81714ce965140290ca37be084bfefba6",
     "semantic_hash": ""
   },
   "server/modules/evaluations/infrastructure/runner.ts": {
@@ -1668,21 +1668,21 @@
     "semantic_hash": ""
   },
   "studio/src/features/administration/presentation/Agents.tsx": {
-    "mtime": 1793822578.32712,
-    "seen": 1793822608.8691163,
-    "ast_hash": "c7d74923cf67fcc92bceddfa1c5e9ded",
+    "mtime": 1793934176.3083837,
+    "seen": 1793934203.649955,
+    "ast_hash": "fe810b28eb65a2bac128e1e50ba4e88a",
     "semantic_hash": ""
   },
   "studio/src/features/administration/presentation/Models.tsx": {
-    "mtime": 1793918079.0936775,
-    "seen": 1793918096.0553622,
-    "ast_hash": "6a66df579577055d2d9c10a2673f78f2",
+    "mtime": 1793933969.1578078,
+    "seen": 1793934002.706568,
+    "ast_hash": "3c4a21a55a1714a9775f9be50db2e955",
     "semantic_hash": ""
   },
   "studio/src/features/administration/presentation/Providers.tsx": {
-    "mtime": 1793903503.601281,
-    "seen": 1793903535.651939,
-    "ast_hash": "5054670c2958129ff42429bee3e5fddb",
+    "mtime": 1793933770.6452358,
+    "seen": 1793933805.6593146,
+    "ast_hash": "92c750c5e52c47ee90c1f9f64966cd54",
     "semantic_hash": ""
   },
   "studio/src/features/administration/presentation/Router.tsx": {
@@ -3288,9 +3288,9 @@
     "semantic_hash": ""
   },
   "test/studio.mjs": {
-    "mtime": 1793919376.4355688,
-    "seen": 1793919390.904386,
-    "ast_hash": "5a9f7e9644f8d3b956a561ac98034d60",
+    "mtime": 1793935303.4375443,
+    "seen": 1793935338.674996,
+    "ast_hash": "bfbcb3887049e44c72a032a9e1c688e3",
     "semantic_hash": ""
   },
   "test/unit/modules/settings/coreComposition.test.ts": {
@@ -4041,6 +4041,24 @@
     "mtime": 1793919897.5175772,
     "seen": 1793919902.2699423,
     "ast_hash": "c456ed4918e9c835a371d6d98ab74f0b",
+    "semantic_hash": ""
+  },
+  "studio/src/features/administration/application/model-readiness.ts": {
+    "mtime": 1793933769.305478,
+    "seen": 1793933805.6540546,
+    "ast_hash": "7853079b8f47264f286521e900a2529e",
+    "semantic_hash": ""
+  },
+  "studio/src/features/administration/presentation/ModelSetupSteps.tsx": {
+    "mtime": 1793933769.9418433,
+    "seen": 1793933805.6593146,
+    "ast_hash": "125ba6756160615f85ce31d7585496e2",
+    "semantic_hash": ""
+  },
+  "test/unit/studio/model-readiness.test.ts": {
+    "mtime": 1793933828.0719743,
+    "seen": 1793933863.0629618,
+    "ast_hash": "f760933bdbb3e274b6890cd862b5854f",
     "semantic_hash": ""
   },
   "package-lock.json": {
