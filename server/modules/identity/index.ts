@@ -95,8 +95,8 @@ export function createIdentityModule(dependencies: IdentityModuleDependencies) {
     createAdminApiToken: (accountId: string, name: string, expiresAt?: Date) => service.createAdminApiToken(accountId, name, expiresAt),
     listAdminApiTokens: (accountId: string) => service.listAdminApiTokens(accountId),
     revokeAdminApiToken: (accountId: string, id: string) => service.revokeAdminApiToken(accountId, id),
-    createApiToken: (accountId: string, name: string, orgId: string | null = null) =>
-      service.createApiToken(accountId, name, orgId),
+    createApiToken: (accountId: string, name: string, orgId: string | null = null, projectId: string | null = null) =>
+      service.createApiToken(accountId, name, orgId, projectId),
     listApiTokens: (accountId: string) => service.listApiTokens(accountId),
     deleteApiToken: (accountId: string, id: string) => service.deleteApiToken(accountId, id),
     updateAccountName: (id: string, name: string) => updateAccountNameUseCase.execute(id, name),

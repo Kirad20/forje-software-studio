@@ -130,9 +130,11 @@ export class IdentityAccountsService {
     }
   }
 
-  async createApiToken(accountId: string, name: string, orgId: string | null = null): Promise<string> {
+  async createApiToken(accountId: string, name: string, orgId: string | null = null, projectId: string | null = null): Promise<string> {
     const token = `fj_${this.deps.random.token()}`;
-    await this.deps.tokens.create(this.deps.random.id(), accountId, name, this.deps.random.hash(token), orgId);
+    const tokenArgs = [this.deps.random.id(), accountId, name.trim().slice(0, 100) || "Cliente MCP", this.deps.random.hash(token), orgId] as const;
+    if (projectId) await this.deps.tokens.create(...tokenArgs, "project", undefined, projectId);
+    else await this.deps.tokens.create(...tokenArgs);
     return token;
   }
 

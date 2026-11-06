@@ -16,7 +16,13 @@ import { recordToolCall } from "../../modules/builder/index.js";
  * projects with its own model. Same tools as the in-studio builder, plus project lookup.
  * Authenticated with an API token created in the studio (Authorization: Bearer fj_...).
  */
-const projectIdProp = { projectId: { type: "string", description: "Id del proyecto (de list_projects o create_project)" } };
+const projectIdProp = { projectId: { type: "string", description: "Id del proyecto (de list_projects o create_project). Los tokens limitados a un proyecto solo pueden usar ese id." } };
+
+export function projectInTokenScope(account: Pick<PublicAccount, "tokenOrgId" | "tokenProjectId">, project: Pick<Project, "id" | "orgId">) {
+  return account.tokenProjectId
+    ? project.id === account.tokenProjectId
+    : !account.tokenOrgId || project.orgId === account.tokenOrgId;
+}
 
 /**
  * Patterns borrowed from Floot's MCP (design only, no code):
@@ -35,7 +41,7 @@ Un proyecto SOLO admite estas rutas:
 - jobs/<nombre>.ts · static/<archivo> (static/__dev/ = notas, nunca se publican) · base.css
 - package.json solo con add_dependency / remove_dependency
 Una tool devuelve su resultado o "PENDING jobId=…": en ese caso consulta get_job_status(jobId, wait_seconds) hasta tener el resultado.
-Flujo: primero determina si el dueño habla de un proyecto existente o pide uno nuevo. Si puede ser existente, usa list_projects y trabaja sobre ese proyecto sin cambiar sus metadatos, salvo que el dueño pida explícitamente un cambio. Para un proyecto nuevo, antes de construir o escribir archivos llama create_project con un nombre, descripción e initial_prompt basados solo en lo que el dueño ya dijo, y un perfil estructurado con propósito, audiencia, tipo de app, funciones y restricciones conocidas. Si falta un dato realmente necesario para identificar qué app quiere, haz una sola pregunta breve antes de crearla; no inventes detalles. Si trabajas en un proyecto nuevo creado en el studio y su perfil está pendiente, guárdalo primero con set_project_profile usando solo información disponible. Después sigue con get_guides("forja-overview") antes del primer cambio y get_guides("design") y get_guides("ui-kit") antes de hacer UI. Luego project_map (o list_files) y lee antes de editar. Datos primero (execute_sql), luego endpoints y páginas. Verifica con check_build, call_endpoint, get_problems y browser_test antes de decir que algo funciona.
+Flujo: primero determina si el dueño habla de un proyecto existente o pide uno nuevo. Si puede ser existente, usa list_projects y trabaja sobre ese proyecto sin cambiar sus metadatos, salvo que el dueño pida explícitamente un cambio. Los tokens limitados a un proyecto solo ven ese proyecto y no pueden crear otros. Para un proyecto nuevo, antes de construir o escribir archivos llama create_project con un nombre, descripción e initial_prompt basados solo en lo que el dueño ya dijo, y un perfil estructurado con propósito, audiencia, tipo de app, funciones y restricciones conocidas. Si falta un dato realmente necesario para identificar qué app quiere, haz una sola pregunta breve antes de crearla; no inventes detalles. Si trabajas en un proyecto nuevo creado en el studio y su perfil está pendiente, guárdalo primero con set_project_profile usando solo información disponible. Después sigue con get_guides("forja-overview") antes del primer cambio y get_guides("design") y get_guides("ui-kit") antes de hacer UI. Luego project_map (o list_files) y lee antes de editar. Datos primero (execute_sql), luego endpoints y páginas. Verifica con check_build, call_endpoint, get_problems y browser_test antes de decir que algo funciona.
 Concurrencia: list_files, project_map y read_files devuelven la versión del proyecto; pásala como expected_version en write_file, edit_file, delete_file, rename_file y las dependencias para no pisar cambios del dueño en el studio. Cada escritura devuelve la versión nueva.
 Depuración: get_problems y get_logs antes de suponer la causa.
 Comparte con el usuario el enlace de vista previa (create_project o get_preview_url) desde el primer cambio para que vea la construcción en vivo.
@@ -45,13 +51,13 @@ Nunca pidas claves en el chat: usa request_secret.`;
 const extraTools = [
   {
     name: "list_projects",
-    description: "Lista tus proyectos de Forja y los compartidos contigo (id, nombre, publicado). Úsala para encontrar el projectId cuando el usuario nombra un proyecto existente; el nombre guardado puede no coincidir con cómo lo llama.",
+    description: "Lista los proyectos que este token puede usar (id, nombre, publicado). Un token limitado a proyecto solo devuelve ese proyecto. Úsala para encontrar projectId antes de llamar herramientas de proyecto.",
     inputSchema: { type: "object", properties: {} },
   },
   {
     name: "create_project",
     description:
-      "Úsala solo para un proyecto nuevo, antes de construir o escribir archivos. Basa name, description, initial_prompt y profile únicamente en lo que el dueño ya expresó; no inventes detalles. profile admite purpose, audience, appType, coreFeatures y constraints; omite lo desconocido. initial_prompt conserva las palabras del usuario y se guarda como instrucciones del proyecto. Si no hay información suficiente para saber qué app crear, pregunta brevemente antes de llamar esta herramienta. No la uses para proyectos existentes ni cambies sus metadatos. Crea el proyecto (con la plantilla inicial) y devuelve su id y el enlace de la vista previa en vivo: compártelo con el usuario tal cual. Un proyecto nuevo solo tiene la plantilla: sigue con get_guides y la primera página en vez de terminar aquí.",
+      "Úsala solo para un proyecto nuevo con un token sin alcance de proyecto, antes de construir o escribir archivos. Basa name, description, initial_prompt y profile únicamente en lo que el dueño ya expresó; no inventes detalles. profile admite purpose, audience, appType, coreFeatures y constraints; omite lo desconocido. initial_prompt conserva las palabras del usuario y se guarda como instrucciones del proyecto. Si no hay información suficiente para saber qué app crear, pregunta brevemente antes de llamar esta herramienta. No la uses para proyectos existentes ni cambies sus metadatos. Crea el proyecto (con la plantilla inicial) y devuelve su id y el enlace de la vista previa en vivo: compártelo con el usuario tal cual. Un proyecto nuevo solo tiene la plantilla: sigue con get_guides y la primera página en vez de terminar aquí.",
     inputSchema: {
       type: "object",
       properties: {
@@ -110,6 +116,7 @@ const DESTRUCTIVE: Hints = { readOnlyHint: false, destructiveHint: true, openWor
  * destructive calls. Every tool must be listed (a test checks it); when unsure, DESTRUCTIVE.
  */
 export const TOOL_HINTS: Record<string, Hints> = {
+  question: READ,
   list_projects: READ,
   get_guides: READ,
   get_job_status: READ,
@@ -192,8 +199,7 @@ export async function projectContext(project: Project, accountId: string) {
 }
 
 function buildServer(account: PublicAccount, projects: ProjectsModule, collaboration: CollaborationModule, builderClient?: BuilderServiceClient) {
-  // A token limited to one organization sees only that organization's projects.
-  const inTokenScope = (p: { orgId: string | null }) => !account.tokenOrgId || p.orgId === account.tokenOrgId;
+  // Token scope narrows project discovery and every project operation.
   const server = new Server(
     { name: "forja", version: "0.1.0" },
     {
@@ -231,10 +237,11 @@ function buildServer(account: PublicAccount, projects: ProjectsModule, collabora
       switch (req.params.name) {
         case "list_projects": {
           const shared = (await Promise.all((await collaboration.sharedProjectIds(account.id)).map((id) => projects.getProject(id)))).filter((p) => !!p);
-          const list = [...(await projects.listProjects(account.id)), ...shared].filter(inTokenScope);
+          const list = [...(await projects.listProjects(account.id)), ...shared].filter((project) => projectInTokenScope(account, project));
           return text(list.map((p) => `${p.id}  ${p.name}${p.slug ? `  (publicado: ${p.slug})` : ""}`).join("\n") || "Sin proyectos.");
         }
         case "create_project": {
+          if (account.tokenProjectId) return text("Este token está limitado a un proyecto existente y no puede crear proyectos.", true);
           const initial = String(args.initial_prompt ?? "").trim();
           const p = await projects.createProject(account.id, String(args.name), String(args.description ?? ""), undefined, account.tokenOrgId ?? undefined);
           await projects.updateProject(p.id, {
@@ -269,7 +276,7 @@ function buildServer(account: PublicAccount, projects: ProjectsModule, collabora
       if (!tool) return text(`Herramienta desconocida: ${req.params.name}`, true);
       const projectId = String(args.projectId ?? "");
       const project = await projects.getProject(projectId);
-      if (!(await collaboration.accessOf(account.id, project)) || !inTokenScope(project!)) return text("Proyecto no encontrado en esta cuenta.", true);
+      if (!project || !(await collaboration.accessOf(account.id, project)) || !projectInTokenScope(account, project)) return text("Proyecto no encontrado en esta cuenta.", true);
       if (VERSIONED_WRITES.has(tool.name) && args.expected_version !== undefined && args.expected_version !== null) {
         const current = await projects.projectVersion(projectId);
         if (Number(args.expected_version) !== current) {
