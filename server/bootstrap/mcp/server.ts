@@ -127,7 +127,6 @@ export const TOOL_HINTS: Record<string, Hints> = {
   find_symbol: READ,
   related_files: READ,
   read_files: READ,
-  question: READ,
   search_code: READ,
   describe_database: READ,
   query_database: READ,
