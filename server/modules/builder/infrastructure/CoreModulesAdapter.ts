@@ -1,11 +1,13 @@
 import type { IdentityModule } from "../../identity/index.js";
 import type { CollaborationModule } from "../../collaboration/index.js";
 import type { ProjectsModule } from "../../projects/index.js";
+import type { ProjectKnowledgeModule } from "../../project-knowledge/index.js";
 
 export interface BuilderCoreModules {
   identity: Pick<IdentityModule, "getAccount">;
   collaboration: Pick<CollaborationModule, "enabledOrgSkills">;
   projects: ProjectsModule;
+  knowledge?: ProjectKnowledgeModule;
 }
 
 let binding: { modules: BuilderCoreModules } | undefined;

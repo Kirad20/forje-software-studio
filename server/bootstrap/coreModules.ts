@@ -37,6 +37,8 @@ export interface CoreModulesDependencies {
   findSecret(text: string): string | null;
 }
 
+import { createProjectKnowledgeModule } from "../modules/project-knowledge/index.js";
+
 export function createCoreModules(dependencies: CoreModulesDependencies) {
   const memberRepository = new PostgresMemberRepository();
   const collaborationAccountRepository = new PostgresCollaborationAccountRepository();
@@ -116,5 +118,6 @@ export function createCoreModules(dependencies: CoreModulesDependencies) {
     },
   });
 
-  return { identity, collaboration, projects, settings };
+  const knowledge = createProjectKnowledgeModule(projects, dependencies.findSecret);
+  return { identity, collaboration, projects, settings, knowledge };
 }

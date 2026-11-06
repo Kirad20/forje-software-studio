@@ -173,6 +173,8 @@ export const ROLE_TOOLS: Record<AgentToolRole, string[]> = {
   chat: ["load_skill", "project_map", "read_files", "find_symbol", "related_files", "search_code", "describe_database", "query_database", "get_problems", "get_logs", "list_secrets", "security_scan", "fetch_url", "remember", "forget"],
 };
 
+for (const tools of Object.values(ROLE_TOOLS)) tools.push("question");
+
 const SPECIAL_ROLE_TOOLS: Partial<Record<Role, string[]>> = {
   planner: ["submit_plan"],
   qa: ["report_review", "report_security"],

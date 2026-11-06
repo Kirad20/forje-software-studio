@@ -24,6 +24,7 @@ import { isBuilding, penalizeTurn, pendingPlan, runBuilderTurn, stopBuilding, ty
 import { replaceVisibleText } from "../../modules/builder/contracts.js";
 import type { IdentityModule, PublicAccount } from "../../modules/identity/index.js";
 import type { ProjectsModule, Project } from "../../modules/projects/index.js";
+import type { ProjectKnowledgeModule } from "../../modules/project-knowledge/index.js";
 import { parseStarterTemplate } from "../../modules/projects/index.js";
 import type { CollaborationModule, Access, OrgRole } from "../../modules/collaboration/index.js";
 import type { SettingsModule } from "../../modules/settings/index.js";
@@ -74,6 +75,7 @@ type Env = { Variables: { account: PublicAccount; project: Project; access: Acce
 type StudioApiModules = {
   identity: IdentityModule;
   projects: ProjectsModule;
+  knowledge: ProjectKnowledgeModule;
   collaboration: CollaborationModule;
   settings: SettingsModule;
   models: ReturnType<typeof createPlatformModelManagement>;
@@ -82,7 +84,7 @@ type StudioApiModules = {
 export const SESSION_COOKIE = "forja_session";
 
 export function createStudioApi(
-  { identity: accounts, projects, collaboration: orgs, settings, models }: StudioApiModules,
+  { identity: accounts, projects, knowledge, collaboration: orgs, settings, models }: StudioApiModules,
   builderClient = config.builderServiceUrl ? new BuilderServiceClient(config.builderServiceUrl, config.builderServiceToken) : undefined,
 ) {
 const building = async (projectId: string) => builderClient ? (await builderClient.status(projectId)).building : isBuilding(projectId);
@@ -483,6 +485,21 @@ projectRoutes.use("/projects/:id", async (c, next) => {
 const ownerOnly = (c: Context<Env>) => (c.get("access") === "owner" ? null : c.json({ error: "Solo la persona dueña del proyecto puede hacer esto." }, 403));
 
 const pid = (c: Context<Env>) => c.get("project").id;
+
+projectRoutes.get("/projects/:id/knowledge", async (c) => c.json(await knowledge.graph(pid(c))));
+projectRoutes.post("/projects/:id/knowledge/rebuild", async (c) => c.json(await knowledge.graph(pid(c), true)));
+projectRoutes.get("/projects/:id/knowledge/source", async (c) => {
+  const path = c.req.query("path");
+  if (!path) return c.json({ error: "Indica la ruta del archivo." }, 400);
+  return c.json(await knowledge.source(pid(c), path));
+});
+projectRoutes.post("/projects/:id/knowledge/question", async (c) => {
+  const body: unknown = await c.req.json();
+  if (!body || typeof body !== "object" || !("query" in body) || typeof body.query !== "string" || !body.query.trim() || body.query.length > 1000) {
+    return c.json({ error: "La pregunta debe tener entre 1 y 1000 caracteres." }, 400);
+  }
+  return c.json(await knowledge.question(pid(c), body.query));
+});
 
 const serviceControl = (c: Context<Env>) => createServiceControl({
   readFiles: (id) => projects.readAllFiles(id),
