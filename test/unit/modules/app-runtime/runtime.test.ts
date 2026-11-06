@@ -7,7 +7,6 @@ import { createShareAccess } from "../../../../server/modules/app-runtime/applic
 import { createDependencyResolution } from "../../../../server/modules/app-runtime/application/dependencies.js";
 import { buildClient, buildExamples, checkProject, compileServerModule } from "../../../../server/modules/app-runtime/index.js";
 import { readDeps, writeDeps } from "../../../../server/modules/app-runtime/domain/dependencies.js";
-import { KIT_CATALOG } from "../../../../server/modules/app-runtime/domain/catalog.js";
 
 describe("runtime ports and policies", () => {
   it("keeps the real publication snapshot unchanged on an actual compiler error", async () => {
@@ -60,15 +59,16 @@ describe("runtime ports and policies", () => {
     expect(access.parseAppHost("nested.app.studio.example.test")).toBeNull();
   });
 
-  it("resolves only catalog versions through the registry port, leaving manifest policy pure", async () => {
+  it("resolves arbitrary packages through the registry port, leaving manifest policy pure", async () => {
     const lookup = vi.fn(async () => ({ version: "4.1.0", deprecated: "old", scripts: { install: "native" } }));
     const resolve = createDependencyResolution({ isNodeBuiltin: (name) => name.startsWith("node:"), lookup });
-    await expect(resolve("unknown-package")).rejects.toThrow("catálogo");
+    const arbitrary = await resolve("unknown-package", "latest");
+    expect(arbitrary.version).toBe("4.1.0");
+    expect(lookup).toHaveBeenCalledWith("unknown-package", "latest");
     await expect(resolve("node:fs")).rejects.toThrow("módulo de Node");
-    expect(lookup).not.toHaveBeenCalled();
     const result = await resolve("date-fns", "^1.0.0");
-    expect(lookup).toHaveBeenCalledWith("date-fns", KIT_CATALOG["date-fns"]!.version);
-    expect(result.warnings).toHaveLength(3);
+    expect(lookup).toHaveBeenCalledWith("date-fns", "^1.0.0");
+    expect(result.warnings).toHaveLength(2);
     expect(() => readDeps({ "package.json": "null" })).toThrow();
     const manifest = writeDeps({ "package.json": '{"name":"app"}' }, { zeta: "1.0.0", alfa: "2.0.0" });
     expect(Object.keys(JSON.parse(manifest).dependencies)).toEqual(["alfa", "zeta"]);

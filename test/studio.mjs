@@ -900,8 +900,15 @@ async function main() {
       const result = await (await page.request.get("/api/admin/models")).json();
       const model = result.models.find(m => m.id === "openai:fake-config-flow");
       assert(model?.context === 64000 && model.inPrice === 0.2 && model.outPrice === 0.8 && model.tools === false, "no persistieron los metadatos y capacidades del modelo");
-      const rejected = await page.request.post("/api/admin/agents/runs", { data: { role: "backend", modelId: model.id, prompt: "Crea un endpoint" } });
-      assert(rejected.status() === 400 && (await rejected.json()).error.includes("Herramientas"), "el servidor admitió un agente de construcción sin herramientas");
+      const admission = await page.request.post("/api/admin/agents/runs", { data: { role: "backend", modelId: model.id, prompt: "Crea un endpoint", maxSteps: 1 } });
+      assert(admission.status() === 202, "el servidor rechazó un rol de construcción por no declarar herramientas");
+      const { runId } = await admission.json();
+      assert((await page.request.post(`/api/admin/agents/runs/${runId}/cancel`)).ok(), "no se pudo cancelar la prueba del modelo");
+      for (let i = 0; i < 50; i++) {
+        const run = await (await page.request.get(`/api/admin/agents/runs/${runId}`)).json();
+        if (run.status !== "running") break;
+        await sleep(100);
+      }
       const updated = page.waitForResponse(r => r.url().endsWith("/api/admin/models/item/openai%3Afake-config-flow") && r.request().method() === "PATCH");
       await row.getByText("Detalles y opciones", { exact: true }).click();
       await row.getByRole("switch", { name: "Herramientas: Modelo del recorrido", exact: true }).click();
@@ -991,7 +998,7 @@ async function main() {
       const picker = page.getByRole("button", { name: /^Modelo del agente:/ });
       await picker.click();
       await page.getByRole("option", { name: /^Con herramientas/ }).waitFor();
-      assert(!await page.getByRole("option", { name: /^Solo texto de prueba/ }).count(), "el rol backend ofreció un modelo sin herramientas");
+      await page.getByRole("option", { name: /^Solo texto de prueba/ }).waitFor();
       await page.getByRole("combobox", { name: "Buscar en Modelo del agente" }).press("Escape");
       await page.getByRole("button", { name: /^Rol del agente:/ }).click();
       await page.getByRole("option", { name: "Chat (solo lee y responde)", exact: true }).click();

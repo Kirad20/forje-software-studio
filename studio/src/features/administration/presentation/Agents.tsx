@@ -67,7 +67,7 @@ export function Agents() {
     return () => { generation.current++; window.clearTimeout(poll.current); };
   }, []);
 
-  const compatible = models.filter((m) => playgroundModel(m, role));
+  const compatible = models.filter(playgroundModel);
   useEffect(() => {
     setModel((selected) => compatible.some((m) => m.id === selected) ? selected : compatible[0]?.id ?? "");
   }, [models, role]);
@@ -131,7 +131,7 @@ export function Agents() {
           <label className="small grow">
             Modelo
             <Select label="Modelo del agente" value={model} onValueChange={setModel} disabled={loading || running || !compatible.length}
-              placeholder={loading ? "Cargando modelos…" : "Sin modelos compatibles"}
+              placeholder={loading ? "Cargando modelos…" : "Sin modelos disponibles"}
               options={compatible.map((m) => ({ value: m.id, label: m.label, description: m.id }))} />
           </label>
         </div>
@@ -165,7 +165,7 @@ export function Agents() {
             </button>
           )}
           {!loading && !compatible.length && <span className="small muted">
-            {role === "chat" ? "No hay modelos disponibles." : "Este rol necesita un modelo activo con Herramientas."} <a href="/admin/models">Configurar modelos →</a>
+            No hay modelos disponibles para este rol. <a href="/admin/models">Configurar modelos →</a>
           </span>}
         </div>
       </section>

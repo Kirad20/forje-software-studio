@@ -16,7 +16,7 @@ export function usableModel(model: ModelReadiness): boolean {
   return model.available && model.allowed && modelBlockers(model).length === 0;
 }
 
-export function playgroundModel(model: ModelReadiness, role: string): boolean {
+export function playgroundModel(model: ModelReadiness): boolean {
   // The playground uses the internal evaluation account, not the admin's whitelist.
-  return model.available && model.allowed && (role === "chat" || model.tools);
+  return model.available && model.allowed;
 }
