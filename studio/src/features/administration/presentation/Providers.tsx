@@ -3,8 +3,8 @@ import { api } from "../application/controller.js";
 import { Switch } from "../../../shared/ui.js";
 import { EditDialog } from "../../../shared/EditDialog.js";
 import { useConfirmation } from "../../../shared/ConfirmDialog.js";
-import { WandSparkles } from "lucide-react";
-import { ModelSetupSteps } from "./ModelSetupSteps.js";
+import { ChevronDown, Cable, WandSparkles } from "lucide-react";
+import { ConfigurationHeader } from "./ConfigurationHeader.js";
 
 interface ProviderView {
   id: string;
@@ -41,6 +41,7 @@ export function Providers() {
   const [error, setError] = useState("");
   const [adding, setAdding] = useState(false);
   const [filter, setFilter] = useState("");
+  const [selected, setSelected] = useState<string | null>(null);
   const load = () => api<{ providers: ProviderView[] }>("/admin/providers").then((r) => setList(r.providers));
   useEffect(() => {
     void load().catch((e) => setError((e as Error).message));
@@ -57,29 +58,35 @@ export function Providers() {
     }
   };
   return (
-    <div className="stack" style={{ gap: 14 }}>
-      <ModelSetupSteps current="providers" />
-      <p className="small muted" style={{ margin: 0 }}>
-        Pega la clave de un proveedor o conecta un servidor local por URL. Después prueba la conexión y elige sus modelos. Las claves se guardan cifradas y nunca vuelven al navegador.
-      </p>
+    <div className="ai-config stack">
+      <ConfigurationHeader current="providers" />
       <div className="admin-toolbar">
         <input type="search" name="provider-search" autoComplete="off" autoCorrect="off" spellCheck={false} aria-label="Buscar proveedores" placeholder="Buscar por nombre, identificador o URL…" value={filter} onChange={(e) => setFilter(e.target.value)} />
-        <button className="primary" disabled={adding} onClick={() => setAdding(true)}>+ Añadir proveedor</button>
+        <button className="primary" onClick={() => setAdding(true)}>+ Añadir proveedor</button>
       </div>
-      <div className="small muted">{list.filter((p) => p.available).length} de {list.length} proveedores disponibles</div>
+      <div className="ai-config-summary small muted"><span>{list.filter((p) => p.available).length} de {list.length} proveedores disponibles</span><span>Claves cifradas · nunca se muestran completas</span></div>
       {error && <div className="error-box" role="alert">{error}</div>}
+      <div className="ai-config-list">
       {list.filter((p) => `${p.label} ${p.id} ${p.baseUrl ?? ""}`.toLowerCase().includes(filter.toLowerCase())).map((p) => (
-        <ProviderCard key={p.id} p={p} onPatch={(b) => patch(p.id, b)} onDeleted={(l) => setList(l)} />
+        <ProviderCard key={p.id} p={p} expanded={selected === p.id} onExpand={() => setSelected(selected === p.id ? null : p.id)} onPatch={(b) => patch(p.id, b)} onDeleted={(l) => { setList(l); setSelected(null); }} />
       ))}
+      </div>
       {filter && !list.some((p) => `${p.label} ${p.id} ${p.baseUrl ?? ""}`.toLowerCase().includes(filter.toLowerCase())) && <div className="empty">No hay proveedores con ese filtro. <button onClick={() => setFilter("")}>Limpiar búsqueda</button></div>}
       {adding && (
-        <AddProvider onDone={(l) => (l && setList(l), setAdding(false))} />
+        <AddProvider onDone={(l) => {
+          if (l) {
+            setList(l);
+            setFilter("");
+            setSelected(l.find((p) => !list.some((old) => old.id === p.id))?.id ?? selected);
+          }
+          setAdding(false);
+        }} />
       )}
     </div>
   );
 }
 
-function ProviderCard({ p, onPatch, onDeleted }: { p: ProviderView; onPatch: (b: Record<string, unknown>) => Promise<string | null>; onDeleted: (l: ProviderView[]) => void }) {
+function ProviderCard({ p, expanded, onExpand, onPatch, onDeleted }: { p: ProviderView; expanded: boolean; onExpand: () => void; onPatch: (b: Record<string, unknown>) => Promise<string | null>; onDeleted: (l: ProviderView[]) => void }) {
   const { confirm, dialog } = useConfirmation();
   const [key, setKey] = useState("");
   const [editing, setEditing] = useState(false);
@@ -125,20 +132,23 @@ function ProviderCard({ p, onPatch, onDeleted }: { p: ProviderView; onPatch: (b:
     } finally { setBusy(false); }
   };
   return (
-    <section className="card stack" style={{ padding: 16, gap: 10 }}>
-      <div className="row">
-        <div className="grow">
+    <section className="ai-provider" aria-label={p.label}>
+      <div className="ai-provider-row">
+        <span className="ai-config-icon"><Cable size={20} aria-hidden="true" /></span>
+        <button className="ai-provider-open" onClick={onExpand} aria-expanded={expanded} aria-controls={`provider-details-${p.id}`}>
           <strong>{p.label}</strong> <code className="small muted">{p.id}</code>
-          <div className="small muted">{KIND_HINT[p.id] ?? KIND_HINT[p.kind]}</div>
-        </div>
-        {p.available ? <span className="pill ok">Disponible</span> : <span className={`pill ${p.enabled ? "warn" : ""}`}>{p.missing}</span>}
+          <span className="small muted ai-provider-url">{p.baseUrl ?? KIND_HINT[p.id] ?? KIND_HINT[p.kind]}</span>
+        </button>
+        {p.available ? <span className="pill ok">Disponible</span> : <span className={`pill ${p.enabled ? "warn" : ""}`}>{p.missing ?? "Desactivado"}</span>}
         <Switch on={p.enabled} disabled={busy || testing} onChange={(v) => void update({ enabled: v })} label={`Activar ${p.label}`} />
+        <ChevronDown size={16} className={expanded ? "ai-chevron expanded" : "ai-chevron"} aria-hidden="true" />
       </div>
-      <div className="kv" style={{ alignItems: "center" }}>
-        <span className="muted">Clave de API</span>
-        <div className="row">
-          {p.keySet && <code>{p.keyBroken ? "no se puede descifrar" : (p.keyHint ?? "••••")}</code>}
-          <input className="grow" name={`provider-key-${p.id}`} aria-label={`Clave de API de ${p.label}`} disabled={busy} type="password" autoComplete="new-password" placeholder={p.keySet ? "Reemplazar clave" : p.kind !== "anthropic" && p.id !== "openrouter" ? "Opcional en servidores locales" : "Pega la clave"} value={key} onChange={(e) => setKey(e.target.value)} />
+      <div id={`provider-details-${p.id}`} hidden={!expanded} className="ai-provider-details stack">
+      <p className="small muted">{KIND_HINT[p.id] ?? KIND_HINT[p.kind]}</p>
+      <div className="stack" style={{ gap: 8 }}>
+        <label htmlFor={`provider-key-${p.id}`} className="small">Clave de API {p.keySet && <code className="muted">{p.keyBroken ? "no se puede descifrar" : (p.keyHint ?? "••••")}</code>}</label>
+        <div className="ai-key-row">
+          <input id={`provider-key-${p.id}`} name={`provider-key-${p.id}`} aria-label={`Clave de API de ${p.label}`} disabled={busy} type="password" autoComplete="new-password" placeholder={p.keySet ? "Reemplazar clave" : p.kind !== "anthropic" && p.id !== "openrouter" ? "Opcional en servidores locales" : "Pega la clave"} value={key} onChange={(e) => setKey(e.target.value)} />
           <button
             disabled={busy || !key.trim()}
             onClick={async () => {
@@ -155,32 +165,20 @@ function ProviderCard({ p, onPatch, onDeleted }: { p: ProviderView; onPatch: (b:
         </div>
         {p.kind !== "anthropic" && p.id !== "openrouter" && (
           <>
-            <span className="muted">URL base</span>
-            <div className="row">
+            <span className="small muted">URL base</span>
+            <div>
               <code style={{ overflowWrap: "anywhere" }}>{p.baseUrl}</code>
             </div>
           </>
         )}
       </div>
       {p.headerNames.length > 0 && <div className="small muted">Cabeceras configuradas: {p.headerNames.join(", ")}</div>}
-      {error && <div className="error-box" role="alert">{error}</div>}
-      {notice && <div className="small muted" role="status">{notice}</div>}
-      <div className="row">
+      <div className="ai-config-actions">
         <button onClick={() => setEditing(true)} disabled={busy || testing}>Editar proveedor</button>
         <button onClick={() => void test()} disabled={busy || testing || !p.available}>
           {testing ? <span className="spinner" /> : "Probar conexión"}
         </button>
         {p.available && <a href={`/admin/models?provider=${encodeURIComponent(p.id)}${p.id === "openrouter" ? "" : "&add=1"}`}>Elegir modelos de {p.label} →</a>}
-        {probe &&
-          (probe.ok ? (
-            <span className="pill ok">
-              Conecta en {probe.ms} ms{probe.models !== undefined ? ` · ${probe.models} modelos` : ""}
-            </span>
-          ) : (
-            <span className="pill err" style={{ whiteSpace: "normal" }}>
-              {probe.error}
-            </span>
-          ))}
         <span className="grow" />
         {!p.builtin && (
           <button
@@ -206,6 +204,13 @@ function ProviderCard({ p, onPatch, onDeleted }: { p: ProviderView; onPatch: (b:
           {busy ? <span className="spinner" /> : <WandSparkles size={16} aria-hidden="true" />} Dar de alta y clasificar con IA
         </button>
       </details>}
+      </div>
+      {error && <div className="ai-provider-feedback"><div className="error-box" role="alert">{error}</div></div>}
+      {notice && <div className="ai-provider-feedback small muted" role="status">{notice}</div>}
+      {probe && <div className="ai-provider-feedback">
+        {probe.ok ? <span className="pill ok" role="status">Conecta en {probe.ms} ms{probe.models !== undefined ? ` · ${probe.models} modelos` : ""}</span>
+          : <div className="error-box" role="alert">{probe.error}</div>}
+      </div>}
       {editing && <ProviderEditor p={p} onClose={() => setEditing(false)} onSave={async (body) => {
         const failure = await update(body);
         if (!failure) setEditing(false);
@@ -276,9 +281,9 @@ function AddProvider({ onDone }: { onDone: (list?: ProviderView[]) => void }) {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   return (
+    <EditDialog title="Nuevo proveedor" description="Conecta un servidor compatible con OpenAI u Ollama. Después podrás elegir sus modelos." busy={busy} onClose={() => onDone()}>
     <form
-      className="card stack"
-      style={{ padding: 16 }}
+      className="stack"
       onSubmit={async (e) => {
         e.preventDefault();
         setError("");
@@ -293,7 +298,6 @@ function AddProvider({ onDone }: { onDone: (list?: ProviderView[]) => void }) {
         }
       }}
     >
-      <strong>Nuevo proveedor</strong>
       <fieldset disabled={busy} className="admin-form-grid">
         <label>Tipo<select value={kind} onChange={(e) => {
           const next = e.target.value === "ollama" ? "ollama" : "openai";
@@ -307,14 +311,14 @@ function AddProvider({ onDone }: { onDone: (list?: ProviderView[]) => void }) {
         <label>URL base<input required type="url" maxLength={500} placeholder={kind === "ollama" ? "http://localhost:11434" : "http://localhost:11434/v1"} value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} /></label>
         <label>Clave (opcional)<input name="new-provider-api-key" type="password" autoComplete="new-password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} /></label>
       </fieldset>
-      {error && <div className="error-box">{error}</div>}
+      {error && <div className="error-box" role="alert">{error}</div>}
       <div className="row">
         <button className="primary" disabled={busy}>{busy ? "Añadiendo…" : "Añadir"}</button>
         <button type="button" className="ghost" disabled={busy} onClick={() => onDone()}>
           Cancelar
         </button>
-        <span className="small muted">Después, añade sus modelos en la pestaña Modelos.</span>
       </div>
     </form>
+    </EditDialog>
   );
 }

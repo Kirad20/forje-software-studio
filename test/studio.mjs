@@ -667,6 +667,57 @@ async function main() {
     assert(await page.getByLabel("Solo modificados").evaluate((el) => document.activeElement === el), "Tab no continuó al siguiente control");
   });
 
+  await step("admin IA: diseño compacto, expansión por teclado y formularios móviles", async () => {
+    await page.goto("/admin/providers");
+    const providers = page.locator(".ai-provider");
+    const first = providers.first();
+    const second = providers.nth(1);
+    const opener = first.getByRole("button", { expanded: false });
+    await opener.waitFor();
+    assert(!await page.getByRole("textbox", { name: /^Clave de API de / }).count(), "se mostraron todas las claves en la lista inicial");
+    await opener.focus();
+    await page.keyboard.press("Enter");
+    await first.getByRole("button", { name: "Editar proveedor", exact: true }).waitFor();
+    await second.getByRole("button", { expanded: false }).click();
+    assert(await first.getByRole("button", { expanded: false }).isVisible(), "no se cerró el proveedor anterior");
+    assert(!await first.getByRole("button", { name: "Editar proveedor", exact: true }).isVisible(), "las acciones del proveedor cerrado siguen visibles");
+    await screenshot(page, "admin-providers-compact");
+    await page.route("**/api/admin/providers/*/test", route => route.fulfill({ json: { ok: false, ms: 0, error: "Conexión de prueba rechazada" } }));
+    try {
+      await second.getByRole("button", { name: "Probar conexión", exact: true }).click();
+      await second.getByRole("alert").filter({ hasText: "Conexión de prueba rechazada" }).waitFor();
+      await second.getByRole("button", { expanded: true }).click();
+      assert(await second.getByRole("alert").isVisible(), "se ocultó el error de conexión al cerrar el proveedor");
+    } finally { await page.unroute("**/api/admin/providers/*/test"); }
+    await page.setViewportSize({ width: 390, height: 844 });
+    try {
+      await page.getByRole("button", { name: "+ Añadir proveedor", exact: true }).click();
+      let dialog = page.getByRole("dialog", { name: "Nuevo proveedor", exact: true });
+      await dialog.getByLabel("Identificador", { exact: true }).fill("mobile-local");
+      assert(await dialog.evaluate(el => el.scrollWidth <= el.clientWidth), "el formulario de proveedor desborda su diálogo");
+      await screenshot(page, "admin-provider-mobile");
+      await page.keyboard.press("Escape");
+      await dialog.waitFor({ state: "hidden" });
+      await page.goto("/admin/models");
+      await page.getByRole("article").first().waitFor();
+      assert(!await page.locator(".admin-model-table").count(), "se conservó la tabla densa anterior");
+      assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), "la lista de modelos desborda el ancho móvil");
+      await screenshot(page, "admin-models-mobile");
+      const search = page.getByRole("searchbox", { name: "Buscar modelo", exact: true });
+      await search.fill("modelo-inexistente");
+      await page.getByText("No hay modelos con estos filtros.", { exact: false }).waitFor();
+      await page.getByRole("button", { name: "Ver todos", exact: true }).click();
+      assert(await search.inputValue() === "", "no se limpió el filtro");
+      await page.getByRole("button", { name: "+ Añadir modelo propio", exact: true }).click();
+      dialog = page.getByRole("dialog", { name: "Añadir modelo propio", exact: true });
+      await dialog.getByText("Precios, contexto y rendimiento", { exact: true }).click();
+      assert(await dialog.evaluate(el => el.scrollWidth <= el.clientWidth), "el formulario de modelo desborda su diálogo");
+      await screenshot(page, "admin-model-mobile");
+      await dialog.getByRole("button", { name: "Cancelar", exact: true }).click();
+      await dialog.waitFor({ state: "hidden" });
+    } finally { await page.setViewportSize({ width: 1280, height: 800 }); }
+  });
+
   await step("admin: edición completa de modelos conserva errores y persiste cambios", async () => {
     await page.goto("/admin/models");
     await page.getByRole("button", { name: "Editar Fuerte", exact: true }).click();
@@ -834,16 +885,17 @@ async function main() {
     try {
       await page.goto("/admin/providers");
       await page.getByRole("navigation", { name: "Configuración de IA" }).waitFor();
+      await page.locator(".ai-provider").filter({ has: page.locator("code", { hasText: /^openai$/ }) }).getByRole("button", { expanded: false }).click();
       await page.locator('a[href="/admin/models?provider=openai&add=1"]').click();
       await page.waitForURL(/\/admin\/models\?provider=openai&add=1$/);
-      const form = page.locator("form").filter({ hasText: "Modelo propio" });
+      const form = page.getByRole("dialog", { name: "Añadir modelo propio", exact: true }).locator("form");
       await form.getByRole("button", { name: /^Proveedor del nuevo modelo: openai/ }).waitFor();
       await form.getByRole("button", { name: /^Modelo del proveedor:/ }).click();
       await page.getByRole("option", { name: /^fake-config-flow/ }).click();
       assert(await form.getByLabel("Nombre visible", { exact: true }).inputValue() === "Modelo del recorrido", "se perdió el nombre publicado por el proveedor");
       assert(!await form.getByRole("checkbox", { name: "Herramientas", exact: true }).isChecked(), "se inventó soporte de herramientas");
       await form.getByRole("button", { name: "Añadir", exact: true }).click();
-      const row = page.getByRole("row").filter({ has: page.getByRole("button", { name: "Editar Modelo del recorrido", exact: true }) });
+      const row = page.getByRole("article", { name: "Modelo del recorrido", exact: true });
       await row.waitFor();
       const result = await (await page.request.get("/api/admin/models")).json();
       const model = result.models.find(m => m.id === "openai:fake-config-flow");
@@ -851,6 +903,7 @@ async function main() {
       const rejected = await page.request.post("/api/admin/agents/runs", { data: { role: "backend", modelId: model.id, prompt: "Crea un endpoint" } });
       assert(rejected.status() === 400 && (await rejected.json()).error.includes("Herramientas"), "el servidor admitió un agente de construcción sin herramientas");
       const updated = page.waitForResponse(r => r.url().endsWith("/api/admin/models/item/openai%3Afake-config-flow") && r.request().method() === "PATCH");
+      await row.getByText("Detalles y opciones", { exact: true }).click();
       await row.getByRole("switch", { name: "Herramientas: Modelo del recorrido", exact: true }).click();
       assert((await updated).ok(), "no se guardó la capacidad declarada");
       await row.getByText("Listo para usar", { exact: true }).waitFor();
@@ -862,6 +915,36 @@ async function main() {
       await page.setViewportSize({ width: 1280, height: 800 });
       await page.unroute("**/api/admin/providers/openai/models");
     }
+  });
+
+  await step("admin IA: activar, probar y borrar desde la nueva lista de modelos", async () => {
+    await page.goto("/admin/models");
+    const model = page.getByRole("article", { name: "Modelo del recorrido", exact: true });
+    const toggle = model.getByRole("switch", { name: "Activar Modelo del recorrido", exact: true });
+    await toggle.click();
+    await model.getByText("Desactivado", { exact: false }).waitFor();
+    assert(await model.getByRole("button", { name: "Probar", exact: true }).isDisabled(), "se permitió probar un modelo desactivado");
+    await toggle.click();
+    await model.getByText("Listo para usar", { exact: true }).waitFor();
+    await page.route("**/api/admin/models/test/**", route => route.fulfill({ json: { ok: false, error: "Prueba del modelo rechazada" } }));
+    try {
+      await model.getByRole("button", { name: "Probar", exact: true }).click();
+      await model.getByRole("alert").filter({ hasText: "Prueba del modelo rechazada" }).waitFor();
+    } finally { await page.unroute("**/api/admin/models/test/**"); }
+    await page.route("**/api/admin/models/test/**", route => route.fulfill({ json: { ok: true, ms: 42, usd: 0.001, toolsOk: true, text: "Listo", inputTokens: 10, outputTokens: 5 } }));
+    try {
+      await model.getByRole("button", { name: "Probar", exact: true }).click();
+      await model.getByRole("status").filter({ hasText: "42 ms" }).waitFor();
+    } finally { await page.unroute("**/api/admin/models/test/**"); }
+    await model.getByText("Detalles y opciones", { exact: true }).click();
+    await model.getByRole("button", { name: "Borrar", exact: true }).click();
+    await page.getByRole("alertdialog").getByRole("button", { name: "Cancelar", exact: true }).click();
+    assert(await model.isVisible(), "se borró el modelo al cancelar");
+    await model.getByRole("button", { name: "Borrar", exact: true }).click();
+    await page.getByRole("alertdialog").getByRole("button", { name: "Confirmar", exact: true }).click();
+    await model.waitFor({ state: "hidden" });
+    const catalog = await (await page.request.get("/api/admin/models")).json();
+    assert(!catalog.models.some(m => m.id === "openai:fake-config-flow"), "no persistió el borrado del modelo");
   });
 
   await step("admin IA: permisos visibles, selección compatible y recuperación de seguimiento", async () => {
@@ -896,7 +979,7 @@ async function main() {
       await page.goto("/admin/models");
       await page.getByRole("alert").filter({ hasText: "Error de catálogo de prueba" }).waitFor();
       await page.getByRole("button", { name: "Reintentar", exact: true }).click();
-      const row = page.getByRole("row").filter({ has: page.getByRole("button", { name: "Editar Solo texto de prueba", exact: true }) });
+      const row = page.getByRole("article", { name: "Solo texto de prueba", exact: true });
       await row.getByText("No permitido en tu cuenta", { exact: true }).waitFor();
       assert(await row.getByRole("button", { name: "Probar", exact: true }).isDisabled(), "se pudo probar un modelo bloqueado por la cuenta");
       await page.getByRole("checkbox", { name: "Solo utilizables", exact: true }).check();
@@ -904,7 +987,7 @@ async function main() {
       await page.getByRole("checkbox", { name: "Solo utilizables", exact: true }).uncheck();
       await row.getByRole("button", { name: "Permitir Solo texto de prueba en mi cuenta", exact: true }).click();
       await row.getByText("Listo para usar", { exact: true }).waitFor();
-      await page.getByRole("link", { name: "3. Probar un agente", exact: true }).click();
+      await page.getByRole("link", { name: "Probar un agente →", exact: true }).click();
       const picker = page.getByRole("button", { name: /^Modelo del agente:/ });
       await picker.click();
       await page.getByRole("option", { name: /^Con herramientas/ }).waitFor();
@@ -940,7 +1023,7 @@ async function main() {
   await step("admin: crear, editar y borrar proveedores sin exponer cabeceras", async () => {
     await page.goto("/admin/providers");
     await page.getByRole("button", { name: "+ Añadir proveedor", exact: true }).click();
-    const form = page.locator("form").filter({ hasText: "Nuevo proveedor" });
+    const form = page.getByRole("dialog", { name: "Nuevo proveedor", exact: true }).locator("form");
     await form.getByRole("combobox", { name: /^Tipo/ }).selectOption("ollama");
     await form.getByLabel("Identificador", { exact: true }).fill("ux-local");
     await form.getByLabel("Nombre visible", { exact: true }).fill("Servidor local");
@@ -959,6 +1042,7 @@ async function main() {
     await dialog.waitFor({ state: "hidden" });
     await page.reload();
     card = page.locator("section").filter({ has: page.locator("strong", { hasText: /^Ollama del equipo$/ }) });
+    await card.getByRole("button", { expanded: false }).click();
     await card.getByText("Cabeceras configuradas: x-team-token").waitFor();
     const search = page.getByRole("searchbox", { name: "Buscar proveedores" });
     assert(await search.getAttribute("autocomplete") === "off", "la búsqueda permite autocompletar credenciales");
@@ -967,6 +1051,7 @@ async function main() {
       await card.waitFor({ state: "hidden" });
       await search.fill("");
       await card.waitFor({ state: "visible" });
+      await card.getByText("Cabeceras configuradas: x-team-token").waitFor();
       assert(await search.inputValue() === "", "la búsqueda volvió a rellenarse al limpiarla");
     }
     assert(!await page.getByText("test-private-header", { exact: false }).count(), "se expuso el valor de una cabecera");
@@ -1048,7 +1133,7 @@ async function main() {
     await picker.click();
     await page.getByRole("combobox", { name: "Buscar en Modelo del proveedor" }).fill("flaky");
     await page.getByRole("combobox", { name: "Buscar en Modelo del proveedor" }).press("Enter");
-    const form = page.locator("form").filter({ hasText: "Modelo propio" });
+    const form = page.getByRole("dialog", { name: "Añadir modelo propio", exact: true }).locator("form");
     assert(await form.getByLabel("Nombre en la API", { exact: true }).inputValue() === "fake-flaky", "el selector no rellenó el nombre API");
     await form.getByLabel("Nombre visible", { exact: true }).fill("Modelo agregado");
     await form.getByRole("button", { name: "Añadir", exact: true }).click();
@@ -1067,7 +1152,7 @@ async function main() {
     assert(await page.getByRole("button", { name: /^Editar Paginado / }).count() === 25, "no se limitó la página de modelos");
     await page.getByRole("button", { name: "Siguiente", exact: true }).click();
     assert(await page.getByRole("button", { name: /^Editar Paginado / }).count() === 3, "faltan modelos de la segunda página");
-    await page.getByRole("textbox", { name: "Buscar modelo", exact: true }).fill("Paginado 0");
+    await page.getByRole("searchbox", { name: "Buscar modelo", exact: true }).fill("Paginado 0");
     await page.getByRole("button", { name: "Editar Paginado 0", exact: true }).waitFor();
     await page.unroute("**/api/admin/models");
     await page.setViewportSize({ width: 390, height: 844 });
@@ -1080,7 +1165,7 @@ async function main() {
     const list = page.getByRole("listbox", { name: "Calidad" });
     const listBounds = await list.boundingBox();
     assert(listBounds && listBounds.x >= 0 && listBounds.x + listBounds.width <= 391, "el selector se sale de la pantalla móvil");
-    await page.getByRole("combobox", { name: "Buscar en Calidad" }).press("Escape");
+    await list.press("Escape");
     await dialog.getByRole("button", { name: "Cancelar", exact: true }).click();
     await screenshot(page, "admin-mobile");
     await page.setViewportSize({ width: 1280, height: 800 });
