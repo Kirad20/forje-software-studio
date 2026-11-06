@@ -27,7 +27,6 @@ export function createFusionOrchestrator(ports: ModelRouterPorts) {
       const health = await ports.modelHealth?.(model.id, model.provider);
       const blockers = [
         exclude.has(model.id) ? "excluido tras un fallo o por la petición" : "",
-        needsTools && !model.tools ? "sin herramientas" : "",
         needsVision && !model.vision ? "sin visión" : "",
         !fitsContext(model, req) ? `contexto ${model.context}; se necesitan al menos ${estimate + (req.maxTokens ?? 16000)} tokens, incluida la respuesta` : "",
         health?.available === false ? "proveedor/modelo temporalmente no disponible" : "",
@@ -92,7 +91,7 @@ export function createFusionOrchestrator(ports: ModelRouterPorts) {
       const current = allowed.find(m => m.id === model.id);
       if (!current) throw new NoModelError(`El modelo ${model.label} ya no está permitido.`);
       const needsImages = input.messages.some(m => typeof m.content !== "string" && m.content.some(b => b.type === "image"));
-      if ((input.tools?.length && !current.tools) || (needsImages && !current.vision)
+      if ((needsImages && !current.vision)
         || (await ports.modelHealth?.(current.id, current.provider))?.available === false) {
         throw new NoModelError(`El modelo ${current.label} perdió la capacidad o disponibilidad necesaria para ${phase}.`);
       }
@@ -168,7 +167,7 @@ export function createFusionOrchestrator(ports: ModelRouterPorts) {
           const current = allowed.find(m => m.id === preferredId);
           const health = current ? await ports.modelHealth?.(current.id, current.provider) : undefined;
           if (current && fitsContext(current, input) && health?.available !== false
-            && (!input.tools?.length || current.tools) && (!features.needsVision || current.vision)) model = current;
+            && (!features.needsVision || current.vision)) model = current;
           else if (strict) throw new NoModelError("El modelo explícito no está disponible, permitido o no admite la petición.");
         } else if (strict) throw new NoModelError("El modelo explícito no está disponible.");
         preferred = undefined;

@@ -14,19 +14,16 @@ describe("configuration model readiness", () => {
     ]);
   });
 
-  it("requires tools for building roles but permits text-only chat", () => {
-    for (const role of ["fast", "data", "backend", "ui"]) {
-      expect(playgroundModel(ready, role)).toBe(true);
-      expect(playgroundModel({ ...ready, tools: false }, role)).toBe(false);
-    }
-    expect(playgroundModel({ ...ready, tools: false }, "chat")).toBe(true);
-    expect(playgroundModel({ ...ready, available: false }, "chat")).toBe(false);
-    expect(playgroundModel({ ...ready, allowed: false }, "backend")).toBe(false);
+  it("allows any available model for every role", () => {
+    expect(playgroundModel(ready)).toBe(true);
+    expect(playgroundModel({ ...ready, tools: false })).toBe(true);
+    expect(playgroundModel({ ...ready, available: false })).toBe(false);
+    expect(playgroundModel({ ...ready, allowed: false })).toBe(false);
   });
 
   it("keeps the playground independent of the admin account whitelist", () => {
     const blockedAccount = { ...ready, blockers: ["No permitido en tu cuenta"] };
-    expect(playgroundModel(blockedAccount, "backend")).toBe(true);
+    expect(playgroundModel(blockedAccount)).toBe(true);
     expect(usableModel(blockedAccount)).toBe(false);
   });
 });

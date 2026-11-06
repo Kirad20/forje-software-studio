@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildClient, checkProject } from "../../server/modules/app-runtime/index.js";
-import { KIT_BUILTIN, KIT_CATALOG } from "../../server/modules/app-runtime/index.js";
+import { KIT_BUILTIN } from "../../server/modules/app-runtime/index.js";
 import { BUILTIN_PACKAGES, resolvePackage } from "../../server/modules/app-runtime/index.js";
 import { typecheckProject } from "../../server/modules/app-runtime/index.js";
 
@@ -13,10 +13,8 @@ export const contract = {
 `;
 
 describe("interface kit", () => {
-  it("ships the built-in kit without installing it, and pins the rest", () => {
+  it("ships the built-in kit without installing it", () => {
     for (const name of Object.keys(KIT_BUILTIN)) expect(BUILTIN_PACKAGES, name).toContain(name);
-    for (const [name, e] of Object.entries(KIT_CATALOG)) expect(e.version, name).toMatch(/^\d+\.\d+\.\d+$/);
-    expect(Object.keys(KIT_CATALOG).some((n) => BUILTIN_PACKAGES.includes(n))).toBe(false);
   });
 
   it("bundles @forja/ui with icons and motion into the browser build, with its styles", async () => {
@@ -84,29 +82,26 @@ describe("typed API from the contract", () => {
   }, 90_000);
 });
 
-describe("catalog pinning", () => {
+describe("npm package resolution", () => {
   afterEach(() => vi.unstubAllGlobals());
   const registry = (seen: string[]) =>
     vi.stubGlobal("fetch", async (url: string) => {
       seen.push(url);
-      return new Response(JSON.stringify({ version: url.split("/").pop(), description: "x" }), { status: 200 });
+      return new Response(JSON.stringify({ version: "1.9.3", description: "x" }), { status: 200 });
     });
 
-  it("installs the catalog version whatever was asked for, and says so", async () => {
+  it("resolves any npm package at the requested version", async () => {
     const seen: string[] = [];
     registry(seen);
-    const r = await resolvePackage("recharts", "latest");
-    expect(r.version).toBe(KIT_CATALOG.recharts!.version);
-    expect(seen[0]).toMatch(new RegExp(`recharts/${KIT_CATALOG.recharts!.version}$`));
-    expect(r.warnings.join()).not.toMatch(/no está en el catálogo/);
-    const other = await resolvePackage("recharts", "2.0.0");
-    expect(other.warnings.join()).toMatch(/versión .* del catálogo/);
+    const r = await resolvePackage("canvas-confetti", "1.9.3");
+    expect(r.version).toBe("1.9.3");
+    expect(seen[0]).toContain("canvas-confetti/1.9.3");
   });
 
-  it("refuses a package outside the catalog, listing the kit, and one that is built in", async () => {
+  it("still rejects built-in packages and invalid package names", async () => {
     const seen: string[] = [];
     registry(seen);
-    await expect(resolvePackage("canvas-confetti", "1.9.3")).rejects.toThrow(/no está en el catálogo de Forja[\s\S]*@forja\/ui/);
+    await expect(resolvePackage("../invalid")).rejects.toThrow(/Nombre de paquete no válido/);
     expect(seen).toEqual([]);
     await expect(resolvePackage("lucide-react")).rejects.toThrow(/ya viene incluido/);
   });

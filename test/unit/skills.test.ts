@@ -7,7 +7,6 @@ import { BUILTIN_SKILLS } from "../../server/modules/builder/infrastructure/skil
 import { SKILLS_DIR, allSkills, findSkill, parseSkill, projectSkills, renderSkill, skillIndex } from "../../server/modules/builder/infrastructure/skills.js";
 import { builderTools } from "../../server/modules/builder/index.js";
 import { buildClient } from "../../server/modules/app-runtime/index.js";
-import { KIT_CATALOG } from "../../server/modules/app-runtime/index.js";
 import { typecheckProject } from "../../server/modules/app-runtime/index.js";
 
 const OPEN_SOURCE = ["frontend-design", "impeccable", "hallmark", "taste-skill", "ui-ux-pro-max", "web-design-guidelines"];
@@ -135,9 +134,12 @@ describe("skills", () => {
     expect(ROLE_PROMPTS.backend).toMatch(/load_skill/);
   });
 
-  // Needs the network the first time (installs the catalog packages, then cached).
+  // Needs the network the first time (installs the packages used by the built-in skills, then cached).
   it.skipIf(!process.env.FORJA_NETWORK_TESTS)("has code samples that compile against the kit's real packages", async () => {
-    const files: Record<string, string> = { "package.json": JSON.stringify({ dependencies: Object.fromEntries(Object.entries(KIT_CATALOG).map(([n, e]) => [n, e.version])) }) };
+    const files: Record<string, string> = { "package.json": JSON.stringify({ dependencies: {
+      "react-hook-form": "7.91.0", "@hookform/resolvers": "5.9.2", recharts: "3.10.1", "date-fns": "4.4.0",
+      "@tanstack/react-table": "8.21.3", "@dnd-kit/core": "6.3.1", "@dnd-kit/sortable": "10.0.0", "@dnd-kit/utilities": "3.2.2",
+    } }) };
     const imports: string[] = [];
     for (const skill of BUILTIN_SKILLS.filter((s) => !OPEN_SOURCE.includes(s.name))) {
       const blocks = skill.body.split(/\n\s*\n/).filter((b) => b.split("\n").every((l) => l.startsWith("  ") || !l.trim()) && /import /.test(b));

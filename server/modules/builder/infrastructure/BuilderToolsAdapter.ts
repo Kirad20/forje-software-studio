@@ -368,7 +368,7 @@ export const builderTools: BuilderTool[] = [
   {
     name: "add_dependency",
     description:
-      "Instala un paquete de npm para la app (navegador o endpoints): fija la versión exacta en package.json y lo instala sin ejecutar scripts. Hazlo antes de importarlo. Ya vienen incluidos react, react-dom, zod, @forja/client, @forja/ui, radix-ui, lucide-react, motion, clsx y sonner. Los paquetes del catálogo del kit (react-hook-form, @hookform/resolvers, recharts, date-fns, @tanstack/react-table, @dnd-kit/*) se instalan siempre en la versión del catálogo. El catálogo es cerrado: cualquier otro paquete se rechaza, así que usa el kit o escribe las pocas líneas tú mismo.",
+      "Instala cualquier paquete disponible en el registro npm configurado para la app (navegador o endpoints): fija la versión resuelta en package.json y lo instala sin ejecutar scripts. Hazlo antes de importarlo. Ya vienen incluidos react, react-dom, zod, @forja/client, @forja/ui, radix-ui, lucide-react, motion, clsx y sonner; no hace falta instalarlos.",
     input_schema: obj(
       {
         name: str("Nombre en npm, p. ej. recharts o @tanstack/react-table"),

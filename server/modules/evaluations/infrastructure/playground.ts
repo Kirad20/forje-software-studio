@@ -90,7 +90,6 @@ async function admitPlayground(run: InternalRun, files: [string, string][], maxS
     await setAccountModels(account.id, null);
     const model = (await allowedModels({ accountId: account.id })).find((m) => m.id === run.modelId);
     if (!model) throw new PlaygroundError(400, "Ese modelo no está disponible o no está permitido en la plataforma.");
-    if (run.role !== "chat" && !model.tools) throw new PlaygroundError(400, "Este rol necesita un modelo con Herramientas. Elige otro modelo o usa el rol Chat.");
     if (run.abort.signal.aborted) throw new PlaygroundError(409, "El servidor se está apagando.");
     void admission.track(execute(run, account.id, files, maxSteps)).catch(() => {});
   } catch (e) {

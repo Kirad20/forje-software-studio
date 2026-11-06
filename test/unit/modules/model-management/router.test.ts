@@ -71,10 +71,15 @@ describe("model routing application", () => {
     await expect(router.callModel(scope, "chat", features, { messages: [] }, { pinned: a })).rejects.toBe(aborted);
     expect(ports.recordOutcome).not.toHaveBeenCalled();
   });
-  it("filters tool, vision, context and excluded candidates before choosing", async () => {
+  it("allows models without tool support for any role, while filtering vision and context", async () => {
     const { ports, router } = setup();
-    ports.allowedModels.mockResolvedValueOnce([{ ...a, tools: false }, b]);
-    expect((await router.pick(scope, "ui", features, { rand: () => 0.5 })).model.id).toBe("b");
+    ports.allowedModels.mockResolvedValueOnce([{ ...a, tools: false }]);
+    expect((await router.pick(scope, "fast", features, { rand: () => 0.5 })).model.id).toBe("a");
+    ports.allowedModels.mockResolvedValue([{ ...a, tools: false }]);
+    const result = await router.callModel(scope, "backend", features, {
+      messages: [], tools: [{ name: "write_file", description: "write", input_schema: { type: "object" } }],
+    });
+    expect(result.model.id).toBe("a");
     await expect(router.pick(scope, "ui", features, { exclude: new Set(["a", "b"]) })).rejects.toThrow("No hay ningún modelo");
   });
   it("uses heuristic analysis without making a paid classifier call", async () => {
@@ -121,21 +126,21 @@ describe("model routing application", () => {
     });
     expect(result.model.id).toBe("b");
   });
-  it("explains capability and permission failures without relaxing them for local models", async () => {
+  it("still requires vision for image requests and respects model permissions", async () => {
     const { ports, router } = setup();
     ports.allowedModels.mockResolvedValueOnce([{ ...b, tools: false, vision: false }]);
-    await expect(router.pick(scope, "fast", { ...features, needsVision: true })).rejects.toThrow(/b: sin herramientas, sin visión/);
+    await expect(router.pick(scope, "fast", { ...features, needsVision: true })).rejects.toThrow(/b: sin visión/);
     ports.allowedModels.mockResolvedValueOnce([]);
     await expect(router.pick(scope, "fast", features)).rejects.toThrow("No hay modelos habilitados y permitidos");
   });
-  it("allows vision-only judges on fallback without relaxing the QA role default", async () => {
+  it("allows models without tools for QA while retaining image capability checks", async () => {
     const { ports, router } = setup();
     ports.allowedModels.mockResolvedValue([{ ...a, tools: false }, { ...b, tools: false }]);
     ports.invoke.mockRejectedValueOnce(new ModelCallError("overloaded", true));
     const result = await router.callModel(scope, "qa", { ...features, needsVision: true, needsTools: false },
       { messages: [] }, { pinned: a });
     expect(result.model.id).toBe("b");
-    await expect(router.pick(scope, "qa", { ...features, needsVision: true })).rejects.toThrow("No hay ningún modelo");
+    expect((await router.pick(scope, "qa", { ...features, needsVision: true })).model.vision).toBe(true);
     ports.allowedModels.mockResolvedValue([{ ...b, tools: false, vision: false }]);
     await expect(router.pick(scope, "qa", { ...features, needsVision: true, needsTools: false })).rejects.toThrow("No hay ningún modelo");
   });

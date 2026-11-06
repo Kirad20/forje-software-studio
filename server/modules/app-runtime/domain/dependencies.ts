@@ -1,4 +1,4 @@
-import { KIT_BUILTIN, KIT_CATALOG, kitSummary } from "./catalog.js";
+import { KIT_BUILTIN } from "./catalog.js";
 import type { FileMap } from "./publication.js";
 
 export const BUILTIN_PACKAGES = ["react", "react-dom", "zod", "@forja/client", "@forja/server", ...Object.keys(KIT_BUILTIN)];
@@ -44,14 +44,9 @@ export function writeDeps(files: FileMap, deps: Deps): string {
   return JSON.stringify({ ...manifest, private: true, dependencies: sorted }, null, 2) + "\n";
 }
 
-export function catalogVersion(name: string) {
+export function validatePackageName(name: string) {
   if (!isValidPackageName(name)) throw new Error(`Nombre de paquete no válido: ${name}`);
   if (BUILTIN_PACKAGES.includes(name)) throw new Error(`${name} ya viene incluido; impórtalo sin instalar nada.`);
-  const version = KIT_CATALOG[name]?.version;
-  if (!version) throw new Error(`${name} no está en el catálogo de Forja, así que no se puede instalar. Usa lo que ya hay:
-${kitSummary()}
-Si nada de eso sirve, resuélvelo con unas pocas líneas propias o dile al dueño que hace falta ese paquete.`);
-  return version;
 }
 
 export interface RegistryPackage {
@@ -59,9 +54,11 @@ export interface RegistryPackage {
   gypfile?: boolean; scripts?: Record<string, string>; peerDependencies?: Record<string, string>;
 }
 export interface PackageInfo { name: string; version: string; description: string; warnings: string[] }
-export function packageInfo(name: string, requested: string, pinned: string, metadata: RegistryPackage): PackageInfo {
+export function packageInfo(name: string, metadata: RegistryPackage): PackageInfo {
+  if (typeof metadata.version !== "string" || !EXACT.test(metadata.version)) {
+    throw new Error(`El registro de npm devolvió una versión no válida para ${name}.`);
+  }
   const warnings: string[] = [];
-  if (requested !== "latest" && requested.replace(/^[\^~=v]/, "") !== pinned) warnings.push(`Se instaló la versión ${pinned} del catálogo de Forja, no ${requested}.`);
   if (metadata.deprecated) warnings.push(`Está obsoleto: ${metadata.deprecated}`);
   if (metadata.gypfile || metadata.os || metadata.cpu || metadata.scripts?.install || metadata.scripts?.postinstall) warnings.push("Usa código nativo o scripts de instalación, que aquí no se ejecutan: es probable que no funcione.");
   const peers = Object.keys(metadata.peerDependencies ?? {}).filter((p) => !BUILTIN_PACKAGES.includes(p));
