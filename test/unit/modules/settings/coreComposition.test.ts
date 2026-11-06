@@ -4,7 +4,7 @@ import { starterFiles, type ProjectServices } from "../../../../server/modules/p
 import { config } from "../../../../server/shared/config.js";
 
 describe("Core module bootstrap composition", () => {
-  it("constructs all four module instances without starting them", () => {
+  it("constructs core modules and the project knowledge service", () => {
     const projectServices: ProjectServices = {
       projectId: () => "project",
       id: () => "id",
@@ -19,14 +19,15 @@ describe("Core module bootstrap composition", () => {
       findSecret: () => null,
     });
 
-    expect(Object.keys(modules).sort()).toEqual(["collaboration", "identity", "projects", "settings"]);
-    for (const module of Object.values(modules)) {
+    expect(Object.keys(modules).sort()).toEqual(["collaboration", "identity", "knowledge", "projects", "settings"]);
+    for (const module of [modules.collaboration, modules.identity, modules.projects, modules.settings]) {
       expect(module.start).toEqual(expect.any(Function));
       expect(module.stop).toEqual(expect.any(Function));
     }
     expect(modules.identity.getAccountSecurity).toEqual(expect.any(Function));
     expect(modules.identity.listAccounts).toEqual(expect.any(Function));
     expect(modules.projects.getProject).toEqual(expect.any(Function));
+    expect(modules.knowledge.graph).toEqual(expect.any(Function));
     expect(modules.settings.onSettingsChanged).toEqual(expect.any(Function));
     expect(starterFiles("Demo")["pages/_index.tsx"]).toContain("<h1>Demo</h1>");
   });

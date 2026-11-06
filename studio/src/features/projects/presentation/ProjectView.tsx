@@ -11,6 +11,7 @@ import { External, Refresh } from "../../../shared/Icons.js";
 import { AiPanel, CodePanel, EmailPanel, JobsPanel, LogsPanel, UsersPanel } from "../../files/index.js";
 import { AnalyticsPanel, DataPanel, DocsPanel, IntegrationsPanel, PaymentsPanel, SeoPanel, StoragePanel } from "../../app-services/index.js";
 import { ServiceControlPanel } from "../../service-control/index.js";
+import { ProjectKnowledge } from "../../project-knowledge/index.js";
 import { Avatar, copyText, Menu, MenuItem, useDismiss } from "../../../shared/ui.js";
 import { CheckpointPanel, Collaborators, DEVICES, PagePalette, PreviewCanvas, ProjectSettings, PublishPanel, type Device, type PreviewHandle, type TextEdit } from "./Workspace.js";
 
@@ -24,7 +25,7 @@ const TEXT_EDIT_WHY: Record<string, string> = {
   empty: "El texto no puede quedar vacío.",
 };
 
-type View = "preview" | "services" | "settings" | "details";
+type View = "preview" | "services" | "knowledge" | "settings" | "details";
 type ServiceKey = "control" | "data" | "users" | "ai" | "integrations" | "analytics" | "seo" | "docs" | "jobs" | "storage" | "email" | "payments" | "logs" | "security" | "code";
 const SERVICE_GUIDES: Record<ServiceKey, { description: string; prompt: string }> = {
   control: { description: "Gestiona servicios, workers, réplicas y la cola reciente del proyecto.", prompt: "Ayúdame a organizar los servicios y workers de mi app: " },
@@ -296,6 +297,9 @@ export function ProjectView({
             <button className={view === "services" ? "on" : ""} onClick={() => setView("services")}>
               Servicios
             </button>
+            <button className={view === "knowledge" ? "on" : ""} onClick={() => setView("knowledge")}>
+              Cerebro
+            </button>
             <button title="Datos" aria-label="Datos" onClick={() => openService("data")}>
               ⛁
             </button>
@@ -326,6 +330,8 @@ export function ProjectView({
                   ×
                 </button>
               </span>
+            ) : view === "knowledge" ? (
+              <span className="page-chip">Arquitectura y conocimiento del proyecto</span>
             ) : view === "details" ? (
               <span className="page-chip">✎ Detalles del cambio</span>
             ) : (
@@ -672,6 +678,7 @@ export function ProjectView({
               </div>
             </div>
           )}
+          {view === "knowledge" && <ProjectKnowledge projectId={id} reloadKey={filesKey} />}
           {view === "settings" && <ProjectSettings project={project} onChange={load} />}
           {view === "details" && detail && (
             <TurnDetails

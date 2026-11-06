@@ -5,6 +5,7 @@ import type { CollaborationModule } from "../../../server/modules/collaboration/
 import type { IdentityModule } from "../../../server/modules/identity/index.js";
 import type { ProjectsModule } from "../../../server/modules/projects/index.js";
 import type { SettingsModule } from "../../../server/modules/settings/index.js";
+import type { ProjectKnowledgeModule } from "../../../server/modules/project-knowledge/index.js";
 import { createStudioApi } from "../../../server/bootstrap/http/studioApi.js";
 import type { BuilderServiceClient } from "../../../server/modules/builder/infrastructure/builderServiceClient.js";
 
@@ -57,8 +58,9 @@ const projects = {
 } as unknown as ProjectsModule;
 const collaboration = { accessOf: vi.fn(async () => "owner") } as unknown as CollaborationModule;
 const settings = {} as SettingsModule;
+const knowledge = { graph: vi.fn(), question: vi.fn(), source: vi.fn() } as unknown as ProjectKnowledgeModule;
 const models = {} as ReturnType<typeof import("../../../server/modules/model-management/index.js").createPlatformModelManagement>;
-const studioApi = createStudioApi({ identity, projects, collaboration, settings, models });
+const studioApi = createStudioApi({ identity, projects, knowledge, collaboration, settings, models });
 const app = new Hono().route("/api", studioApi);
 const eventModule = await import("../../../server/modules/project-observability/events.js");
 
@@ -169,7 +171,7 @@ describe("HTTP transport contract", () => {
       })),
     };
     const api = new Hono().route("/api", createStudioApi(
-      { identity, projects, collaboration, settings, models },
+      { identity, projects, knowledge, collaboration, settings, models },
       worker as unknown as BuilderServiceClient,
     ));
 
