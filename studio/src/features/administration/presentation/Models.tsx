@@ -6,7 +6,7 @@ import { EditDialog } from "../../../shared/EditDialog.js";
 import { useConfirmation } from "../../../shared/ConfirmDialog.js";
 import type { SettingView } from "./Settings.js";
 import { modelBlockers, usableModel } from "../application/model-readiness.js";
-import { ModelSetupSteps } from "./ModelSetupSteps.js";
+import { ConfigurationHeader } from "./ConfigurationHeader.js";
 
 interface CatalogModel {
   id: string;
@@ -61,6 +61,7 @@ export function Models() {
   const [editing, setEditing] = useState<CatalogModel | null>(null);
   const [pending, setPending] = useState<string | null>(null);
   const [permissionsOpen, setPermissionsOpen] = useState(false);
+  const [syncing, setSyncing] = useState(false);
   const load = () => api<NonNullable<typeof data>>("/admin/models").then(setData);
   useEffect(() => {
     void load().catch((e) => setError((e as Error).message));
@@ -98,27 +99,15 @@ export function Models() {
   const currentPage = Math.min(page, pages - 1);
 
   return (
-    <div className="stack" style={{ gap: 16 }}>
-      <ModelSetupSteps current="models" />
-      <AddModel existing={new Set(data.models.map((m) => m.id))} onAdded={load} />
-      <section className="card stack" style={{ padding: 16 }}>
-        <strong>Preparación para construir y evaluar</strong>
-        <p className="small muted" style={{ margin: 0 }}>Activa un modelo y resuelve los bloqueos de su fila. Para construir necesita Herramientas; para evaluar capturas necesita Imágenes. No es necesario asignar un modelo a cada agente.</p>
-        <div className="small muted">{data.models.filter(m => usableModel(m) && m.vision).length} modelos para evaluar imágenes · {data.models.filter(m => usableModel(m) && m.tools).length} modelos para construir.</div>
-        <a href="/account">Permisos de mi cuenta y valores por defecto →</a>
-      </section>
-
-      <section className="card stack" style={{ padding: 16, gap: 10 }}>
-        <div className="row" style={{ flexWrap: "wrap" }}>
-          <input className="grow" aria-label="Buscar modelo" placeholder="Buscar modelo…" value={filter} onChange={(e) => setFilter(e.target.value)} style={{ minWidth: 200 }} />
-          <Select label="Filtrar por proveedor" value={provider} onValueChange={setProvider} style={{ width: 220 }}
-            options={[{ value: "", label: "Todos los proveedores" }, ...providers.map((p) => ({ value: p, label: p }))]} />
-          <label className="row small" style={{ color: "var(--text)" }}>
-            <input type="checkbox" checked={onlyUsable} onChange={(e) => setOnlyUsable(e.target.checked)} style={{ width: "auto" }} /> Solo utilizables
-          </label>
-          {data.openrouter.configured && (
-            <button
+    <div className="ai-config stack">
+      <ConfigurationHeader current="models" />
+      <div className="ai-config-actions">
+        <AddModel existing={new Set(data.models.map((m) => m.id))} onAdded={load} />
+        {data.openrouter.configured && (
+            <button disabled={syncing}
               onClick={async () => {
+                setSyncing(true);
+                setError("");
                 setNote("Sincronizando…");
                 try {
                   const r = await api<{ synced: number }>("/admin/models/sync", { body: {} });
@@ -127,103 +116,81 @@ export function Models() {
                 } catch (e) {
                   setNote("");
                   setError((e as Error).message);
-                }
+                } finally { setSyncing(false); }
               }}
             >
-              Sincronizar OpenRouter
+              {syncing ? "Sincronizando…" : "Sincronizar OpenRouter"}
             </button>
-          )}
+        )}
+        <span className="grow" />
+        <a href="/admin/agents">Probar un agente →</a>
+      </div>
+      <section className="stack" style={{ gap: 12 }}>
+        <div className="admin-toolbar">
+          <input type="search" aria-label="Buscar modelo" placeholder="Buscar por nombre o identificador…" value={filter} onChange={(e) => setFilter(e.target.value)} />
+          <Select label="Filtrar por proveedor" value={provider} onValueChange={setProvider} style={{ width: 220, maxWidth: "100%" }}
+            options={[{ value: "", label: "Todos los proveedores" }, ...providers.map((p) => ({ value: p, label: p }))]} />
+          <label className="row small" style={{ color: "var(--text)" }}>
+            <input type="checkbox" checked={onlyUsable} onChange={(e) => setOnlyUsable(e.target.checked)} style={{ width: "auto" }} /> Solo utilizables
+          </label>
         </div>
-        <div className="small muted">
-          {shown.length} de {data.models.length} modelos
-          {data.openrouter.configured && ` · OpenRouter sincronizado ${data.openrouter.lastSync ? timeAgo(data.openrouter.lastSync) : "nunca"}`}
+        <div className="ai-config-summary small muted">
+          <span>{shown.length} de {data.models.length} modelos · {data.models.filter(usableModel).length} listos para usar</span>
+          <span>{data.models.filter(m => usableModel(m) && m.tools).length} para construir · {data.models.filter(m => usableModel(m) && m.vision).length} para imágenes</span>
         </div>
         {error && <div className="error-box" role="alert">{error}</div>}
         {note && <div role="status" className="small">{note}</div>}
-        <div className="admin-model-scroll">
-          <table className="grid admin-model-table">
-            <thead>
-              <tr>
-                <th>Activo</th>
-                <th>Modelo</th>
-                <th>Estado</th>
-                <th>Capacidades</th>
-                <th>$ entrada / salida (MTok)</th>
-                <th>Calidad</th>
-                <th>Velocidad</th>
-                <th>Acciones</th>
-              </tr>
-            </thead>
-            <tbody>
+        <div className="ai-config-list" aria-label="Catálogo de modelos">
               {shown.slice(currentPage * SHOWN, (currentPage + 1) * SHOWN).map((m) => {
                 const p = probes[m.id];
+                const blockers = modelBlockers(m);
                 return (
-                  <tr key={m.id}>
-                    <td data-label="Activo">
+                  <article className="ai-model" key={m.id} aria-label={m.label}>
+                    <div className="ai-model-main">
                       <Switch on={m.enabled} disabled={pending !== null} onChange={(v) => void patch(m, { enabled: v })} label={`Activar ${m.label}`} />
-                    </td>
-                    <td data-label="Modelo" title={m.id}>
-                      {m.label}
-                      <div className="small muted">
-                        {m.id} {m.vision && <span className="pill">imágenes</span>} {!m.tools && <span className="pill warn">sin herramientas</span>}
+                      <div className="ai-model-name">
+                        <strong>{m.label}</strong>
+                        <div className="small muted">{m.id}</div>
                       </div>
-                    </td>
-                    <td data-label="Estado">
-                      <span className={`pill ${usableModel(m) ? "ok" : "warn"}`} style={{ whiteSpace: "normal" }}>
-                        {modelBlockers(m).join(" · ") || "Listo para usar"}
-                      </span>
-                      {modelBlockers(m).includes("Proveedor no disponible") && <div><a href="/admin/providers">Conectar proveedor</a></div>}
-                      {!m.allowed && <div><a href="#model-platform-permissions" onClick={() => setPermissionsOpen(true)}>Revisar permisos de plataforma</a></div>}
-                    </td>
-                    <td data-label="Capacidades">
-                      <div className="stack small" style={{ gap: 4 }}>
-                        {m.source === "custom" ? (
-                          <>
-                          <div className="row" style={{ flexWrap: "nowrap" }}>
-                            <Switch on={m.vision} disabled={pending !== null} onChange={(vision) => void patch(m, { vision })} label={`Imágenes: ${m.label}`} />
-                            <span>Imágenes</span>
-                          </div>
-                          <div className="row" style={{ flexWrap: "nowrap" }}>
-                            <Switch on={m.tools} disabled={pending !== null} onChange={(tools) => void patch(m, { tools })} label={`Herramientas: ${m.label}`} />
-                            <span>Herramientas</span>
-                          </div>
-                          </>
-                        ) : (
-                          <span className="small muted">{[m.vision && "Imágenes", m.tools && "Herramientas"].filter(Boolean).join(" · ") || "Texto"}</span>
-                        )}
-                        {m.capabilities && <span title={`${m.capabilities.source}; confianza ${Math.round(m.capabilities.confidence * 100)}%`}>
-                          Fusion R{m.capabilities.reasoning} · C{m.capabilities.coding} · D{m.capabilities.debugging} · H{m.capabilities.toolUse}
-                          <span className="muted"> · {m.capabilities.source} {Math.round(m.capabilities.confidence * 100)}%</span>
-                        </span>}
-                        <span className="muted">{m.reasoningEffort === undefined ? "Esfuerzo de razonamiento sin verificar" : `Esfuerzo de razonamiento ${m.reasoningEffort ? "verificado" : "no compatible"}`}</span>
+                      <span className={`pill ${usableModel(m) ? "ok" : "warn"}`}>{blockers.join(" · ") || "Listo para usar"}</span>
+                      <div className="ai-config-actions">
+                        <button disabled={pending !== null} onClick={() => setEditing(m)} aria-label={`Editar ${m.label}`}>Editar</button>
+                        <button disabled={!usableModel(m) || pending !== null || p === "running"} onClick={() => void test(m)}>
+                          {p === "running" ? "Probando…" : "Probar"}
+                        </button>
                       </div>
-                    </td>
-                    <td data-label="Precio entrada / salida (MTok)">
-                      {m.inPrice === 0 && m.outPrice === 0 ? (m.source === "custom" ? "$0 / $0 · verificar" : "gratis") : `$${m.inPrice} / $${m.outPrice}`}
-                    </td>
-                    <td data-label="Calidad">
-                      <span title="Calidad de 1 a 5">{m.tier}/5</span>
-                    </td>
-                    <td data-label="Velocidad">
-                      <span title="Velocidad de 1 a 5">{m.speed}/5</span>
-                    </td>
-                    <td data-label="Acciones" style={{ whiteSpace: "normal", minWidth: 160 }}>
-                      <button className="small" disabled={pending !== null} onClick={() => setEditing(m)} aria-label={`Editar ${m.label}`}>Editar</button>{" "}
+                    </div>
+                    <div className="ai-model-meta small muted">
+                      <span>{[m.tools && "Herramientas", m.vision && "Imágenes"].filter(Boolean).join(" · ") || "Solo texto"}</span>
+                      <span>{m.context.toLocaleString()} tokens</span>
+                      <span>{m.inPrice === 0 && m.outPrice === 0 ? (m.source === "custom" ? "$0 / $0 · verificar" : "Gratis") : `$${m.inPrice} / $${m.outPrice}`} por MTok</span>
+                    </div>
+                    {(blockers.includes("Proveedor no disponible") || !m.allowed || blockers.includes("No permitido en tu cuenta")) && <div className="ai-model-recovery ai-config-actions small">
+                      {blockers.includes("Proveedor no disponible") && <a href="/admin/providers">Conectar proveedor</a>}
+                      {!m.allowed && <a href="#model-platform-permissions" onClick={() => setPermissionsOpen(true)}>Revisar permisos de plataforma</a>}
                       {m.available && m.allowed && modelBlockers(m).includes("No permitido en tu cuenta") && <button className="small" disabled={pending !== null} onClick={async () => {
                         setPending(m.id); setError("");
                         try {
                           await api(`/admin/models/permit/${enc(m.id)}`, { body: {} });
                           await load();
                         } catch (e) { setError((e as Error).message); } finally { setPending(null); }
-                      }}>Permitir {m.label} en mi cuenta</button>}{" "}
-                      <button className="small" disabled={!usableModel(m) || p === "running"} onClick={() => void test(m)}>
-                        {p === "running" ? <span className="spinner" /> : "Probar"}
-                      </button>{" "}
+                      }}>Permitir {m.label} en mi cuenta</button>}
+                    </div>}
                       {p && p !== "running" && (
-                        <span className={`small ${p.ok ? "" : "muted"}`}>
+                        <div className={p.ok ? "ai-model-feedback small" : "error-box small"} role={p.ok ? "status" : "alert"}>
                           {p.ok ? `✓ ${p.ms} ms · $${p.usd.toFixed(5)}${p.toolsOk === false ? " · no llamó a la herramienta" : p.toolsOk ? " · herramientas ✓" : ""}` : `✗ ${p.error}`}
-                        </span>
+                        </div>
                       )}
+                    <details className="ai-model-details">
+                      <summary className="small muted">Detalles y opciones</summary>
+                      <div className="ai-config-actions small">
+                        <span>Calidad {m.tier}/5 · Velocidad {m.speed}/5 · {m.source}</span>
+                        {m.source === "custom" && <>
+                          <Switch on={m.tools} disabled={pending !== null} onChange={(tools) => void patch(m, { tools })} label={`Herramientas: ${m.label}`} /><span>Herramientas</span>
+                          <Switch on={m.vision} disabled={pending !== null} onChange={(vision) => void patch(m, { vision })} label={`Imágenes: ${m.label}`} /><span>Imágenes</span>
+                        </>}
+                        {m.capabilities && <span>Fusion R{m.capabilities.reasoning} · C{m.capabilities.coding} · D{m.capabilities.debugging} · H{m.capabilities.toolUse} · {m.capabilities.source} · confianza {Math.round(m.capabilities.confidence * 100)}%</span>}
+                        <span className="muted">{m.reasoningEffort === undefined ? "Esfuerzo de razonamiento sin verificar" : `Esfuerzo de razonamiento ${m.reasoningEffort ? "verificado" : "no compatible"}`}</span>
                       {m.source === "custom" && (
                         <button
                           className="ghost danger small"
@@ -246,13 +213,12 @@ export function Models() {
                           Borrar
                         </button>
                       )}
-                    </td>
-                  </tr>
+                      </div>
+                    </details>
+                  </article>
                 );
               })}
-              {!shown.length && <tr><td colSpan={8} className="empty">No hay modelos con estos filtros. <button onClick={() => { setFilter(""); setProvider(""); setOnlyUsable(false); }}>Ver todos</button></td></tr>}
-            </tbody>
-          </table>
+              {!shown.length && <div className="empty">No hay modelos con estos filtros. <button onClick={() => { setFilter(""); setProvider(""); setOnlyUsable(false); }}>Ver todos</button></div>}
         </div>
         <div className="row" style={{ flexWrap: "wrap" }}>
           <span className="small muted grow">{shown.length ? `${currentPage * SHOWN + 1}–${Math.min((currentPage + 1) * SHOWN, shown.length)} de ${shown.length}` : "0 modelos"}</span>
@@ -261,6 +227,10 @@ export function Models() {
           <button disabled={currentPage + 1 >= pages} onClick={() => setPage(currentPage + 1)}>Siguiente</button>
         </div>
       </section>
+      <div className="ai-config-summary small muted">
+        <a href="/account">Permisos de mi cuenta y valores por defecto →</a>
+        {data.openrouter.configured && <span>OpenRouter sincronizado {data.openrouter.lastSync ? timeAgo(data.openrouter.lastSync) : "nunca"}</span>}
+      </div>
 
       <details id="model-platform-permissions" open={permissionsOpen} onToggle={(event) => setPermissionsOpen(event.currentTarget.open)} className="card" style={{ padding: 16 }}>
         <summary style={{ cursor: "pointer", fontWeight: 600 }}>Permisos de la plataforma · lista blanca</summary>
@@ -327,7 +297,9 @@ function ModelEditor({ model: m, onClose, onSaved }: { model: CatalogModel; onCl
             </label>
           ))}
         </div>
-        <fieldset disabled={busy} className="stack" style={{ border: "1px solid var(--border)", borderRadius: 8, padding: 12 }}>
+        <details className="ai-editor-advanced">
+        <summary>Avanzado · perfil de Fusion</summary>
+        <fieldset disabled={busy} className="stack" style={{ border: 0, padding: "12px 0" }}>
           <strong>Perfil de Fusion</strong>
           <div className="small muted">Solo guarda valores fundamentados; la confianza y la fuente se conservan para mostrar su procedencia.</div>
           <div className="row" style={{ flexWrap: "wrap" }}>
@@ -365,6 +337,7 @@ function ModelEditor({ model: m, onClose, onSaved }: { model: CatalogModel; onCl
             ]} />
           </label>
         </fieldset>
+        </details>
         {m.source === "openrouter" && <div className="small muted">La próxima sincronización puede actualizar las capacidades, el contexto y los precios de OpenRouter.</div>}
         {error && <div className="error-box" role="alert">{error}</div>}
         <div className="row"><button className="primary" disabled={busy || !dirty}>{busy ? "Guardando…" : "Guardar cambios"}</button><button type="button" disabled={busy} onClick={onClose}>Cancelar</button></div>
@@ -495,24 +468,26 @@ function AddModel({ existing, onAdded }: { existing: Set<string>; onAdded: () =>
   if (!open)
     return (
       <div>
-        <button onClick={() => setOpen(true)}>+ Añadir modelo propio</button>
+        <button className="primary" onClick={() => setOpen(true)}>+ Añadir modelo propio</button>
       </div>
     );
-  const field = (k: keyof typeof f, label: string, type = "text", width = 120) => (
+  const field = (k: keyof typeof f, label: string, type = "text") => (
     <label className="small">
       {label}
       <input
         type={type}
         value={String(f[k])}
         onChange={(e) => setF({ ...f, [k]: type === "number" ? Number(e.target.value) : e.target.value })}
-        style={{ width }}
+        min={type === "number" ? (k === "context" ? 1000 : k === "tier" || k === "speed" ? 1 : 0) : undefined}
+        max={type === "number" ? (k === "context" ? 100_000_000 : k === "tier" || k === "speed" ? 5 : 1000) : undefined}
+        step={type === "number" ? (k === "inPrice" || k === "outPrice" ? "any" : 1) : undefined}
       />
     </label>
   );
   return (
+    <EditDialog title="Añadir modelo propio" description="Elige un modelo del proveedor o escribe su nombre en la API. Confirma sus capacidades antes de usarlo." busy={busy} onClose={() => setOpen(false)}>
     <form
-      className="card stack"
-      style={{ padding: 16 }}
+      className="stack"
       onSubmit={async (e) => {
         e.preventDefault();
         setError("");
@@ -528,14 +503,13 @@ function AddModel({ existing, onAdded }: { existing: Set<string>; onAdded: () =>
         }
       }}
     >
-      <strong>Modelo propio</strong>
-      <fieldset disabled={busy} className="row" style={{ flexWrap: "wrap", alignItems: "end" }}>
+      <fieldset disabled={busy} className="admin-form-grid">
         <label className="small">
           Proveedor
           <Select label="Proveedor del nuevo modelo" value={f.provider} disabled={busy} onValueChange={(provider) => setF({ ...f, provider, model: "", label: "" })}
-            style={{ width: 180 }} options={providers.map((p) => ({ value: p, label: p }))} />
+            options={providers.map((p) => ({ value: p, label: p }))} />
         </label>
-        <div className="small" style={{ width: 280 }}>
+        <div className="small">
           <div>Modelos disponibles</div>
           <Select label="Modelo del proveedor" value={f.model} onValueChange={pick} disabled={busy || remote.loading || !pickable.length}
             placeholder={remote.loading ? "Cargando modelos…" : "Buscar en el proveedor"}
@@ -543,9 +517,9 @@ function AddModel({ existing, onAdded }: { existing: Set<string>; onAdded: () =>
         </div>
         <label className="small">
           Nombre en la API
-          <input required maxLength={200} value={f.model} onChange={(e) => pick(e.target.value)} placeholder="Elige arriba o escribe el nombre" style={{ width: 260 }} />
+          <input required maxLength={200} value={f.model} onChange={(e) => pick(e.target.value)} placeholder="Elige arriba o escribe el nombre" />
         </label>
-        {field("label", "Nombre visible", "text", 160)}
+        {field("label", "Nombre visible")}
         <label className="row small" style={{ color: "var(--text)" }}>
           <input type="checkbox" checked={f.tools} onChange={(e) => setF({ ...f, tools: e.target.checked })} style={{ width: "auto" }} /> Herramientas
         </label>
@@ -553,19 +527,17 @@ function AddModel({ existing, onAdded }: { existing: Set<string>; onAdded: () =>
           <input type="checkbox" checked={f.vision} onChange={(e) => setF({ ...f, vision: e.target.checked })} style={{ width: "auto" }} /> Imágenes
         </label>
       </fieldset>
-      <details>
+      <details className="ai-editor-advanced">
         <summary className="small muted" style={{ cursor: "pointer" }}>Precios, contexto y rendimiento</summary>
-        <fieldset disabled={busy} className="row" style={{ flexWrap: "wrap", marginTop: 8 }}>
-          {field("inPrice", "$ entrada/MTok", "number", 90)}
-          {field("outPrice", "$ salida/MTok", "number", 90)}
-          {field("context", "Contexto", "number", 110)}
-          {field("tier", "Calidad 1–5", "number", 80)}
-          {field("speed", "Velocidad 1–5", "number", 80)}
+        <fieldset disabled={busy} className="admin-form-grid" style={{ marginTop: 8 }}>
+          {field("inPrice", "$ entrada/MTok", "number")}
+          {field("outPrice", "$ salida/MTok", "number")}
+          {field("context", "Contexto", "number")}
+          {field("tier", "Calidad 1–5", "number")}
+          {field("speed", "Velocidad 1–5", "number")}
         </fieldset>
       </details>
-      <div className="small muted">
-        Confirma las capacidades reales: Herramientas para construir, Imágenes para evaluar capturas. Los precios y el contexto se rellenan si el proveedor los publica; si no, revisa los valores antes de usarlo (0 no significa gratis).
-      </div>
+      <div className="small muted">Herramientas permite construir; Imágenes permite evaluar capturas. Revisa los precios: un valor de 0 sin verificar no significa gratis.</div>
       <div className="small muted">
         {remote.loading
           ? "Consultando los modelos del proveedor…"
@@ -584,5 +556,6 @@ function AddModel({ existing, onAdded }: { existing: Set<string>; onAdded: () =>
         </button>
       </div>
     </form>
+    </EditDialog>
   );
 }
