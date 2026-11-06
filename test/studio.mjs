@@ -327,6 +327,18 @@ async function main() {
       const modes = sandbox.getByRole("group", { name: "Modo del chat" });
       assert(await modes.getByRole("button", { name: "Plan", exact: true }).getAttribute("aria-pressed") === "true", "el punto de partida no activó Plan");
       assert((await sandbox.getByLabel("Mensaje para el constructor").inputValue()).includes("sin implementarlo"), "no se preparó el borrador");
+      const draft = await sandbox.getByLabel("Mensaje para el constructor").inputValue();
+      await sandbox.getByRole("button", { name: "Cerrar chat", exact: true }).click();
+      assert(!await sandbox.getByLabel("Mensaje para el constructor").isVisible(), "cerrar no ocultó el chat");
+      await sandbox.getByRole("button", { name: "Abrir chat", exact: true }).click();
+      assert(await sandbox.getByLabel("Mensaje para el constructor").inputValue() === draft, "cerrar el chat perdió el borrador");
+      assert(await modes.getByRole("button", { name: "Plan", exact: true }).getAttribute("aria-pressed") === "true", "cerrar el chat perdió el modo");
+      await sandbox.getByRole("button", { name: "Servicios", exact: true }).click();
+      await sandbox.getByRole("button", { name: "Cerrar chat", exact: true }).click();
+      assert(!await sandbox.getByLabel("Mensaje para el constructor").isVisible(), "no se pudo cerrar el chat desde Servicios");
+      await sandbox.getByRole("button", { name: "Abrir chat", exact: true }).click();
+      assert(await sandbox.getByLabel("Mensaje para el constructor").inputValue() === draft, "reabrir desde Servicios perdió el borrador");
+      assert(posts === 0, "reabrir el chat envió un cambio");
       await sandbox.getByLabel("Mensaje para el constructor").clear();
       await sandbox.getByRole("button", { name: /Entender mi app/ }).click();
       assert(await modes.getByRole("button", { name: "Chat", exact: true }).getAttribute("aria-pressed") === "true", "la explicación no usa el modo de solo lectura");
@@ -475,6 +487,18 @@ async function main() {
       await restored.locator(".step-diagnostic .step-output").scrollIntoViewIfNeeded();
       assert(await sandbox.evaluate(() => document.documentElement.scrollWidth) <= 321, "el diagnóstico desborda en móvil");
       await screenshot(sandbox, "builder-tool-error-mobile");
+      await standalone.getByRole("button", { name: "Descartar error de herramienta" }).click();
+      assert(await standalone.locator(".tool-step").count() === 0, "la X no descartó el error de herramienta");
+      await restored.getByRole("button", { name: "Descartar error del agente" }).click();
+      assert(await restored.count() === 0, "la X no descartó la tarjeta del agente");
+      await sandbox.getByRole("button", { name: "Cerrar chat", exact: true }).click();
+      await sandbox.getByRole("navigation", { name: "Espacio de trabajo" }).getByRole("button", { name: /Chat/ }).click();
+      assert(await sandbox.getByLabel("Mensaje para el constructor").isVisible(), "no se pudo reabrir el chat móvil");
+      assert(await restored.count() === 0, "reabrir el chat perdió los errores descartados");
+      await sandbox.reload();
+      await sandbox.getByRole("navigation", { name: "Espacio de trabajo" }).getByRole("button", { name: /Chat/ }).click();
+      await restored.waitFor();
+      assert(await restored.getByRole("button", { name: "Descartar error del agente" }).isVisible(), "descartar borró el diagnóstico del historial");
       assert(errors.length === 0, `errores de JS en diagnóstico: ${errors.join(" | ")}`);
     } finally {
       releaseHistory();

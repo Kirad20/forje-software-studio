@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Check, Cross } from "../../../shared/Icons.js";
+import { Check } from "../../../shared/Icons.js";
 import { ToolStep } from "./ToolStep.js";
 
 export interface LaneStep {
@@ -73,8 +73,10 @@ const tokens = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(
 
 function LaneCard({ lane }: { lane: Lane }) {
   const [open, setOpen] = useState(false);
+  const [dismissed, setDismissed] = useState(false);
   const role = ROLE[lane.role] ?? { label: lane.role, icon: "•" };
   const errors = lane.steps.filter((s) => s.state === "err").length;
+  if (lane.status === "failed" && dismissed) return null;
   return (
     <div className={`lane lane-${lane.status}`}>
       <div className="lane-head">
@@ -89,9 +91,10 @@ function LaneCard({ lane }: { lane: Lane }) {
             <Check />
           </span>
         ) : lane.status === "failed" ? (
-          <span style={{ color: "var(--err)" }}>
-            <Cross />
-          </span>
+          <>
+            <span style={{ color: "var(--err)" }} title="Error del agente">!</span>
+            <button className="sm icon-btn ghost" aria-label="Descartar error del agente" title="Descartar error del agente" onClick={() => setDismissed(true)}>×</button>
+          </>
         ) : (
           <span className="small muted">en espera</span>
         )}
