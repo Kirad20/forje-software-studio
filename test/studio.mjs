@@ -1109,7 +1109,7 @@ async function main() {
     await picker.click();
     await page.getByRole("combobox", { name: "Buscar en Modelo del proveedor" }).fill("flaky");
     await page.getByRole("combobox", { name: "Buscar en Modelo del proveedor" }).press("Enter");
-    const form = page.locator("form").filter({ hasText: "Modelo propio" });
+    const form = page.getByRole("dialog", { name: "Añadir modelo propio", exact: true }).locator("form");
     assert(await form.getByLabel("Nombre en la API", { exact: true }).inputValue() === "fake-flaky", "el selector no rellenó el nombre API");
     await form.getByLabel("Nombre visible", { exact: true }).fill("Modelo agregado");
     await form.getByRole("button", { name: "Añadir", exact: true }).click();
@@ -1128,7 +1128,7 @@ async function main() {
     assert(await page.getByRole("button", { name: /^Editar Paginado / }).count() === 25, "no se limitó la página de modelos");
     await page.getByRole("button", { name: "Siguiente", exact: true }).click();
     assert(await page.getByRole("button", { name: /^Editar Paginado / }).count() === 3, "faltan modelos de la segunda página");
-    await page.getByRole("textbox", { name: "Buscar modelo", exact: true }).fill("Paginado 0");
+    await page.getByRole("searchbox", { name: "Buscar modelo", exact: true }).fill("Paginado 0");
     await page.getByRole("button", { name: "Editar Paginado 0", exact: true }).waitFor();
     await page.unroute("**/api/admin/models");
     await page.setViewportSize({ width: 390, height: 844 });
@@ -1141,7 +1141,7 @@ async function main() {
     const list = page.getByRole("listbox", { name: "Calidad" });
     const listBounds = await list.boundingBox();
     assert(listBounds && listBounds.x >= 0 && listBounds.x + listBounds.width <= 391, "el selector se sale de la pantalla móvil");
-    await page.getByRole("combobox", { name: "Buscar en Calidad" }).press("Escape");
+    await list.press("Escape");
     await dialog.getByRole("button", { name: "Cancelar", exact: true }).click();
     await screenshot(page, "admin-mobile");
     await page.setViewportSize({ width: 1280, height: 800 });
