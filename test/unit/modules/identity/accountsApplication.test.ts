@@ -106,6 +106,11 @@ describe("identity account lifecycle application", () => {
     expect(deps.tokens.findAccount).not.toHaveBeenCalled();
   });
 
+  it("creates project-scoped MCP tokens", async () => {
+    expect(await service.createApiToken("account", "Claude", null, "project")).toBe("fj_token");
+    expect(deps.tokens.create).toHaveBeenCalledWith("account", "account", "Claude", "hash:fj_token", null, "project", undefined, "project");
+  });
+
   it("creates a bounded admin token with a digest and secret-free audit event", async () => {
     const before = Date.now();
     const result = await service.createAdminApiToken("account", " Diagnostics ");

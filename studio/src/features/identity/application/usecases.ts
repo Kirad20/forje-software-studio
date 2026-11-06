@@ -20,9 +20,10 @@ export function createIdentityUseCases(http: HttpPort) {
       http.request("/me/password", { method: "PUT", body }),
     updateProfile: (name: string) => http.request("/me", { method: "PATCH", body: { name } }),
     listTokens: () =>
-      http.request<{ tokens: { id: string; name: string; createdAt: string; lastUsedAt: string | null }[] }>("/tokens"),
+      http.request<{ tokens: { id: string; name: string; projectId: string | null; orgId: string | null; orgName: string | null; createdAt: string; lastUsedAt: string | null }[] }>("/tokens"),
     deleteToken: (id: string) => http.request(`/tokens/${id}`, { method: "DELETE" }),
-    createToken: (name: string) => http.request<{ token: string }>("/tokens", { body: { name } }),
+    createToken: (name: string, projectId: string | null) => http.request<{ token: string }>("/tokens", { body: { name, projectId } }),
+    listProjects: () => http.request<{ projects: { id: string; name: string }[]; shared: { id: string; name: string }[] }>("/projects"),
     signOutOtherSessions: () => http.request<{ ended: number }>("/me/sign-out-others", { body: {} }),
     deleteAccount: (confirmEmail: string) => http.request("/me", { method: "DELETE", body: { confirmEmail } }),
   };

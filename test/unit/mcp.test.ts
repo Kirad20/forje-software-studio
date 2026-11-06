@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { BUILDER_SYSTEM_PROMPT } from "../../server/modules/builder/prompt.js";
 import { builderTools } from "../../server/modules/builder/index.js";
 import { GUIDES, SECTION_IDS, guideList, readGuides } from "../../server/bootstrap/mcp/guides.js";
-import { SERVER_INSTRUCTIONS, TOOL_HINTS } from "../../server/bootstrap/mcp/server.js";
+import { projectInTokenScope, SERVER_INSTRUCTIONS, TOOL_HINTS } from "../../server/bootstrap/mcp/server.js";
 
 describe("MCP guides", () => {
   it("gives every heading of the builder manual a stable id", () => {
@@ -35,6 +35,14 @@ describe("MCP guides", () => {
 });
 
 describe("MCP tool hints", () => {
+  it("enforces project and organization token scopes", () => {
+    const project = { id: "p1", orgId: "org1" };
+    expect(projectInTokenScope({ tokenProjectId: "p1", tokenOrgId: null }, project)).toBe(true);
+    expect(projectInTokenScope({ tokenProjectId: "p1", tokenOrgId: null }, { ...project, id: "p2" })).toBe(false);
+    expect(projectInTokenScope({ tokenProjectId: null, tokenOrgId: "org1" }, project)).toBe(true);
+    expect(projectInTokenScope({ tokenProjectId: null, tokenOrgId: "org1" }, { ...project, orgId: "org2" })).toBe(false);
+  });
+
   it("annotates every tool the server exposes", () => {
     for (const name of [...builderTools.map((t) => t.name), "list_projects", "create_project", "get_guides", "get_job_status"]) {
       expect(TOOL_HINTS[name], `falta TOOL_HINTS.${name}`).toBeDefined();
@@ -52,6 +60,8 @@ describe("MCP tool hints", () => {
     expect(SERVER_INSTRUCTIONS).toContain("pages/_index.tsx");
     expect(SERVER_INSTRUCTIONS).toContain('get_guides("forja-overview")');
     expect(SERVER_INSTRUCTIONS).toContain("<project-context>");
+    expect(SERVER_INSTRUCTIONS).toContain("Los tokens limitados a un proyecto solo ven ese proyecto y no pueden crear otros");
+    expect(TOOL_HINTS.question!.readOnlyHint).toBe(true);
   });
 
   it("sets metadata before building only for new projects and avoids inventing details", () => {

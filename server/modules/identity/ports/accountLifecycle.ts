@@ -9,6 +9,7 @@ export interface PublicAccount {
   credits: number;
   platformRole: PlatformRole;
   tokenOrgId?: string | null;
+  tokenProjectId?: string | null;
   disabled?: boolean;
 }
 
@@ -69,6 +70,7 @@ export interface ApiTokenInfo {
   id: string;
   name: string;
   orgId: string | null;
+  projectId: string | null;
   orgName: string | null;
   lastUsedAt: Date | null;
   createdAt: Date;
@@ -83,7 +85,7 @@ export interface AdminApiTokenInfo extends ApiTokenInfo {
 }
 
 export interface ApiTokenRepository {
-  create(id: string, accountId: string, name: string, hash: string, orgId: string | null, purpose?: ApiTokenPurpose, expiresAt?: Date): Promise<void>;
+  create(id: string, accountId: string, name: string, hash: string, orgId: string | null, purpose?: ApiTokenPurpose, expiresAt?: Date, projectId?: string | null): Promise<void>;
   /** Resolve an active account and record usage when found. */
   findAccount(hash: string, purpose?: ApiTokenPurpose): Promise<PublicAccount | null>;
   list(accountId: string): Promise<ApiTokenInfo[]>;

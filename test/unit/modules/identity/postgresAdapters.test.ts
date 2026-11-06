@@ -49,6 +49,7 @@ describe("identity SQL adapter compatibility", () => {
       create table accounts(id text primary key, email text unique, name text, credits int, password_hash text,
         password_changed_at timestamptz, platform_role text, disabled boolean default false, created_at timestamptz default now());
       create table organizations(id text primary key, name text);
+      create table projects(id text primary key);
       create table account_sessions(token_hash text primary key, account_id text references accounts on delete cascade, expires_at timestamptz);
       create table password_resets(account_id text primary key references accounts on delete cascade, code_hash text, attempts int, expires_at timestamptz);
       create table api_tokens(id text primary key, account_id text references accounts on delete cascade, name text, token_hash text,
@@ -57,6 +58,7 @@ describe("identity SQL adapter compatibility", () => {
     await state.db.query(`insert into accounts (id, email, platform_role) values ('legacy', 'legacy@example.test', 'user');
       insert into api_tokens (id, account_id, name, token_hash) values ('legacy-token', 'legacy', 'Legacy project', 'legacy-hash');`);
     await state.db.query(readFileSync(new URL("../../../../server/shared/database/migrations/008_admin_api_tokens.sql", import.meta.url), "utf8"));
+    await state.db.query(readFileSync(new URL("../../../../server/shared/database/migrations/012_project_scoped_api_tokens.sql", import.meta.url), "utf8"));
     const legacy = await state.db.query("select purpose, expires_at, revoked_at from api_tokens where id = 'legacy-token'");
     expect(legacy.rows[0]).toEqual({ purpose: "project", expires_at: null, revoked_at: null });
     await state.db.query("delete from accounts where id = 'legacy'");
@@ -140,17 +142,21 @@ describe("identity SQL adapter compatibility", () => {
   });
 
   it("resolves scoped API tokens, records usage only for active accounts, and enforces owner deletion", async () => {
-    await tokens.create("token", "user", "build", sha256("fj_secret"), "personal_user");
+    await state.db.query("insert into projects(id) values ('project-one')");
+    await tokens.create("token", "user", "build", sha256("fj_secret"), null, "project", undefined, "project-one");
     const account = await tokens.findAccount(sha256("fj_secret"));
-    expect(account).toEqual({ id: "user", email: "user@example.test", name: null, credits: 75, platformRole: "user", tokenOrgId: "personal_user" });
+    expect(account).toEqual({ id: "user", email: "user@example.test", name: null, credits: 75, platformRole: "user", tokenOrgId: null, tokenProjectId: "project-one" });
     const list = await tokens.list("user");
-    expect(list[0]).toMatchObject({ id: "token", orgName: "user", orgId: "personal_user", name: "build" });
+    expect(list[0]).toMatchObject({ id: "token", projectId: "project-one", orgId: null, name: "build" });
     expect(list[0]!.lastUsedAt).toBeInstanceOf(Date);
     await tokens.delete("admin", "token");
     expect(await tokens.list("user")).toHaveLength(1);
     await state.db.query("update accounts set disabled = true where id = 'user'");
     expect(await tokens.findAccount(sha256("fj_secret"))).toBeNull();
     await tokens.delete("user", "token");
+    expect(await tokens.list("user")).toEqual([]);
+    await tokens.create("cascade-token", "user", "Cascade", sha256("cascade-secret"), null, "project", undefined, "project-one");
+    await state.db.query("delete from projects where id = 'project-one'");
     expect(await tokens.list("user")).toEqual([]);
   });
 

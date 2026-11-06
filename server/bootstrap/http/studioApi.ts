@@ -363,10 +363,15 @@ accountRoutes.delete("/integrations/:id", async (c) => {
 
 accountRoutes.get("/tokens", async (c) => c.json({ tokens: await accounts.listApiTokens(c.get("account").id) }));
 accountRoutes.post("/tokens", async (c) => {
-  const { name, orgId } = await c.req.json<{ name?: string; orgId?: string | null }>();
+  const { name, orgId, projectId } = await c.req.json<{ name?: string; orgId?: string | null; projectId?: string | null }>();
+  if (orgId && projectId) return c.json({ error: "Elige un alcance de organización o de proyecto, no ambos." }, 400);
+  if (projectId) {
+    const project = await projects.getProject(projectId);
+    if (!project || !(await orgs.accessOf(c.get("account").id, project))) return c.json({ error: "Proyecto no encontrado" }, 404);
+  }
   // A token may be limited to one organization: an agent wired to a client's workspace sees nothing else.
   if (orgId && !(await orgs.orgRoleOf(orgId, c.get("account").id))) return c.json({ error: "Organización no encontrada" }, 404);
-  return c.json({ token: await accounts.createApiToken(c.get("account").id, name || "Cliente MCP", orgId || null) });
+  return c.json({ token: await accounts.createApiToken(c.get("account").id, name || "Cliente MCP", orgId || null, projectId || null) });
 });
 accountRoutes.delete("/tokens/:id", async (c) => {
   await accounts.deleteApiToken(c.get("account").id, c.req.param("id"));
