@@ -801,6 +801,116 @@ async function main() {
     }
   });
 
+  await step("admin IA: proveedor a modelo sin clasificación y validación de herramientas", async () => {
+    await page.route("**/api/admin/providers/openai/models", route => route.fulfill({ json: {
+      models: [{ id: "fake-config-flow", label: "Modelo del recorrido", context: 64000, inPrice: 0.2, outPrice: 0.8 }],
+    } }));
+    try {
+      await page.goto("/admin/providers");
+      await page.getByRole("navigation", { name: "Configuración de IA" }).waitFor();
+      await page.locator('a[href="/admin/models?provider=openai&add=1"]').click();
+      await page.waitForURL(/\/admin\/models\?provider=openai&add=1$/);
+      const form = page.locator("form").filter({ hasText: "Modelo propio" });
+      await form.getByRole("button", { name: /^Proveedor del nuevo modelo: openai/ }).waitFor();
+      await form.getByRole("button", { name: /^Modelo del proveedor:/ }).click();
+      await page.getByRole("option", { name: /^fake-config-flow/ }).click();
+      assert(await form.getByLabel("Nombre visible", { exact: true }).inputValue() === "Modelo del recorrido", "se perdió el nombre publicado por el proveedor");
+      assert(!await form.getByRole("checkbox", { name: "Herramientas", exact: true }).isChecked(), "se inventó soporte de herramientas");
+      await form.getByRole("button", { name: "Añadir", exact: true }).click();
+      const row = page.getByRole("row").filter({ has: page.getByRole("button", { name: "Editar Modelo del recorrido", exact: true }) });
+      await row.waitFor();
+      const result = await (await page.request.get("/api/admin/models")).json();
+      const model = result.models.find(m => m.id === "openai:fake-config-flow");
+      assert(model?.context === 64000 && model.inPrice === 0.2 && model.outPrice === 0.8 && model.tools === false, "no persistieron los metadatos y capacidades del modelo");
+      const rejected = await page.request.post("/api/admin/agents/runs", { data: { role: "backend", modelId: model.id, prompt: "Crea un endpoint" } });
+      assert(rejected.status() === 400 && (await rejected.json()).error.includes("Herramientas"), "el servidor admitió un agente de construcción sin herramientas");
+      const updated = page.waitForResponse(r => r.url().endsWith("/api/admin/models/item/openai%3Afake-config-flow") && r.request().method() === "PATCH");
+      await row.getByRole("switch", { name: "Herramientas: Modelo del recorrido", exact: true }).click();
+      assert((await updated).ok(), "no se guardó la capacidad declarada");
+      await row.getByText("Listo para usar", { exact: true }).waitFor();
+      await page.getByRole("checkbox", { name: "Solo utilizables", exact: true }).check();
+      await row.waitFor();
+      await page.setViewportSize({ width: 390, height: 844 });
+      assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), "la configuración IA desborda el ancho móvil");
+    } finally {
+      await page.setViewportSize({ width: 1280, height: 800 });
+      await page.unroute("**/api/admin/providers/openai/models");
+    }
+  });
+
+  await step("admin IA: permisos visibles, selección compatible y recuperación de seguimiento", async () => {
+    const baseModel = { provider: "openai", model: "test", inPrice: 0, outPrice: 0, cacheReadPrice: 0, context: 128000,
+      vision: false, tier: 3, speed: 3, source: "custom", enabled: true, available: true, allowed: true };
+    let permitted = false;
+    let failLoad = true;
+    let failPoll = true;
+    let starts = 0;
+    await page.route("**/api/admin/models", route => {
+      if (failLoad) { failLoad = false; return route.fulfill({ status: 500, json: { error: "Error de catálogo de prueba" } }); }
+      return route.fulfill({ json: { models: [
+        { ...baseModel, id: "openai:tools", label: "Con herramientas", tools: true, blockers: [] },
+        { ...baseModel, id: "openai:text", label: "Solo texto de prueba", tools: false, blockers: permitted ? [] : ["No permitido en tu cuenta"] },
+      ], openrouter: { configured: false, lastSync: null } } });
+    });
+    await page.route("**/api/admin/models/permit/openai%3Atext", route => {
+      permitted = true;
+      return route.fulfill({ json: { ok: true } });
+    });
+    await page.route("**/api/admin/agents/runs", async route => {
+      if (route.request().method() !== "POST") return route.continue();
+      starts++;
+      await sleep(250);
+      return route.fulfill({ status: 202, json: { runId: "config-test-run" } });
+    });
+    await page.route("**/api/admin/agents/runs/config-test-run", route => {
+      if (failPoll) { failPoll = false; return route.fulfill({ status: 500, json: { error: "Seguimiento interrumpido" } }); }
+      return route.fulfill({ json: { id: "config-test-run", status: "done", role: "chat", modelId: "openai:text", prompt: "Hola", budgetUsd: 1, events: [] } });
+    });
+    try {
+      await page.goto("/admin/models");
+      await page.getByRole("alert").filter({ hasText: "Error de catálogo de prueba" }).waitFor();
+      await page.getByRole("button", { name: "Reintentar", exact: true }).click();
+      const row = page.getByRole("row").filter({ has: page.getByRole("button", { name: "Editar Solo texto de prueba", exact: true }) });
+      await row.getByText("No permitido en tu cuenta", { exact: true }).waitFor();
+      assert(await row.getByRole("button", { name: "Probar", exact: true }).isDisabled(), "se pudo probar un modelo bloqueado por la cuenta");
+      await page.getByRole("checkbox", { name: "Solo utilizables", exact: true }).check();
+      await row.waitFor({ state: "hidden" });
+      await page.getByRole("checkbox", { name: "Solo utilizables", exact: true }).uncheck();
+      await row.getByRole("button", { name: "Permitir Solo texto de prueba en mi cuenta", exact: true }).click();
+      await row.getByText("Listo para usar", { exact: true }).waitFor();
+      await page.getByRole("link", { name: "3. Probar un agente", exact: true }).click();
+      const picker = page.getByRole("button", { name: /^Modelo del agente:/ });
+      await picker.click();
+      await page.getByRole("option", { name: /^Con herramientas/ }).waitFor();
+      assert(!await page.getByRole("option", { name: /^Solo texto de prueba/ }).count(), "el rol backend ofreció un modelo sin herramientas");
+      await page.getByRole("combobox", { name: "Buscar en Modelo del agente" }).press("Escape");
+      await page.getByRole("button", { name: /^Rol del agente:/ }).click();
+      await page.getByRole("option", { name: "Chat (solo lee y responde)", exact: true }).click();
+      await picker.click();
+      await page.getByRole("option", { name: /^Solo texto de prueba/ }).click();
+      await page.getByPlaceholder(/^Qué tiene que hacer/).fill("Hola");
+      await page.getByText("Archivos iniciales (opcional)", { exact: true }).click();
+      const files = page.getByPlaceholder('{ "helpers/types.ts": "export type Task = { id: number; title: string };" }');
+      await files.fill('["incorrecto"]');
+      await page.getByRole("button", { name: "Ejecutar", exact: true }).click();
+      await page.getByRole("alert").filter({ hasText: "Los archivos iniciales deben ser JSON" }).waitFor();
+      assert(starts === 0, "se envió una ejecución con archivos inválidos");
+      await files.fill("{}");
+      await page.getByRole("button", { name: "Ejecutar", exact: true }).click();
+      await page.getByRole("alert").filter({ hasText: "Seguimiento interrumpido" }).waitFor();
+      assert(await page.getByRole("button", { name: "Ejecutar", exact: true }).isDisabled(), "se permitió otra ejecución sin conocer el estado de la anterior");
+      await page.getByRole("button", { name: "Reintentar seguimiento", exact: true }).click();
+      await page.getByText("Terminada", { exact: true }).waitFor();
+      assert(starts === 1, "reintentar seguimiento inició otra ejecución");
+      assert(await page.getByRole("button", { name: "Ejecutar", exact: true }).isEnabled(), "no se liberó el formulario tras terminar");
+    } finally {
+      await page.unroute("**/api/admin/models");
+      await page.unroute("**/api/admin/models/permit/openai%3Atext");
+      await page.unroute("**/api/admin/agents/runs");
+      await page.unroute("**/api/admin/agents/runs/config-test-run");
+    }
+  });
+
   await step("admin: crear, editar y borrar proveedores sin exponer cabeceras", async () => {
     await page.goto("/admin/providers");
     await page.getByRole("button", { name: "+ Añadir proveedor", exact: true }).click();

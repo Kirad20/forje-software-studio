@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../application/controller.js";
 import { Select } from "../../../shared/ui.js";
+import { playgroundModel } from "../application/model-readiness.js";
+import { ModelSetupSteps } from "./ModelSetupSteps.js";
 
 interface RoleInfo {
   role: string;
@@ -33,58 +35,89 @@ const ROLE_LABEL: Record<string, string> = {
 /** Admin → Agentes: run one agent of one role on one model, in a throwaway project, and watch it work. */
 export function Agents() {
   const [roles, setRoles] = useState<RoleInfo[]>([]);
-  const [models, setModels] = useState<{ id: string; label: string }[]>([]);
+  const [models, setModels] = useState<{ id: string; label: string; available: boolean; allowed: boolean; tools: boolean }[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [starting, setStarting] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
   const [role, setRole] = useState("backend");
   const [model, setModel] = useState("");
   const [prompt, setPrompt] = useState("");
   const [files, setFiles] = useState("");
   const [run, setRun] = useState<RunView | null>(null);
   const [error, setError] = useState("");
+  const [pollError, setPollError] = useState("");
+  const [runId, setRunId] = useState("");
   const poll = useRef<number | undefined>(undefined);
+  const generation = useRef(0);
 
+  const load = async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const [roleData, modelData] = await Promise.all([
+        api<{ roles: RoleInfo[] }>("/admin/agents/roles"),
+        api<{ models: typeof models }>("/admin/models"),
+      ]);
+      setRoles(roleData.roles);
+      setModels(modelData.models);
+    } catch (e) { setError((e as Error).message); } finally { setLoading(false); }
+  };
   useEffect(() => {
-    void api<{ roles: RoleInfo[] }>("/admin/agents/roles").then((r) => setRoles(r.roles));
-    void api<{ models: { id: string; label: string; available: boolean; allowed: boolean }[] }>("/admin/models").then((r) => {
-      const usable = r.models.filter((m) => m.available && m.allowed);
-      setModels(usable);
-      setModel((m) => m || usable[0]?.id || "");
-    });
-    return () => window.clearInterval(poll.current);
+    void load();
+    return () => { generation.current++; window.clearTimeout(poll.current); };
   }, []);
 
+  const compatible = models.filter((m) => playgroundModel(m, role));
+  useEffect(() => {
+    setModel((selected) => compatible.some((m) => m.id === selected) ? selected : compatible[0]?.id ?? "");
+  }, [models, role]);
+
   const watch = (id: string) => {
-    window.clearInterval(poll.current);
+    window.clearTimeout(poll.current);
+    const current = ++generation.current;
+    setPollError("");
     const tick = async () => {
-      const r = await api<RunView>(`/admin/agents/runs/${id}`).catch(() => null);
-      if (!r) return;
-      setRun(r);
-      if (r.status !== "running") window.clearInterval(poll.current);
+      try {
+        const r = await api<RunView>(`/admin/agents/runs/${id}`);
+        if (current !== generation.current) return;
+        setRun(r);
+        if (r.status === "running") poll.current = window.setTimeout(tick, 1500);
+      } catch (e) {
+        if (current === generation.current) setPollError(`No se pudo consultar la ejecución: ${(e as Error).message}`);
+      }
     };
     void tick();
-    poll.current = window.setInterval(tick, 1500);
   };
   const start = async () => {
     setError("");
     let initial: Record<string, string> | undefined;
     if (files.trim()) {
       try {
-        initial = JSON.parse(files);
+        const parsed: unknown = JSON.parse(files);
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed) || Object.values(parsed).some((value) => typeof value !== "string")) {
+          throw new Error("Formato no válido");
+        }
+        initial = Object.fromEntries(Object.entries(parsed));
       } catch {
         return setError("Los archivos iniciales deben ser JSON: { \"ruta\": \"contenido\" }");
       }
     }
+    setStarting(true);
     try {
       const r = await api<{ runId: string }>("/admin/agents/runs", { body: { role, modelId: model, prompt, files: initial } });
+      setRunId(r.runId);
+      setRun(null);
       watch(r.runId);
     } catch (e) {
       setError((e as Error).message);
-    }
+    } finally { setStarting(false); }
   };
   const info = roles.find((r) => r.role === role);
-  const running = run?.status === "running";
+  const running = starting || run?.status === "running" || (!!runId && !run);
 
   return (
     <div className="stack" style={{ gap: 16 }}>
+      <ModelSetupSteps current="agents" />
       <p className="small muted" style={{ margin: 0 }}>
         Ejecuta un solo agente con el modelo que elijas, en un proyecto desechable de la cuenta interna: no toca proyectos ni créditos de nadie y el enrutador no aprende de ello. El gasto cuenta para los topes de los evals.
       </p>
@@ -92,13 +125,14 @@ export function Agents() {
         <div className="row" style={{ flexWrap: "wrap" }}>
           <label className="small">
             Rol
-            <Select label="Rol del agente" value={role} onValueChange={setRole} style={{ width: 280 }}
+            <Select label="Rol del agente" value={role} onValueChange={setRole} disabled={loading || running} style={{ width: 280 }}
               options={roles.map((r) => ({ value: r.role, label: ROLE_LABEL[r.role] ?? r.role }))} />
           </label>
           <label className="small grow">
             Modelo
-            <Select label="Modelo del agente" value={model} onValueChange={setModel}
-              options={models.map((m) => ({ value: m.id, label: m.label, description: m.id }))} />
+            <Select label="Modelo del agente" value={model} onValueChange={setModel} disabled={loading || running || !compatible.length}
+              placeholder={loading ? "Cargando modelos…" : "Sin modelos compatibles"}
+              options={compatible.map((m) => ({ value: m.id, label: m.label, description: m.id }))} />
           </label>
         </div>
         {info && (
@@ -113,17 +147,26 @@ export function Agents() {
           </summary>
           <textarea className="code" rows={5} style={{ marginTop: 8, width: "100%" }} placeholder='{ "helpers/types.ts": "export type Task = { id: number; title: string };" }' value={files} onChange={(e) => setFiles(e.target.value)} />
         </details>
-        {error && <div className="error-box">{error}</div>}
+        {error && <div className="error-box" role="alert">{error} {!running && !roles.length && <button onClick={() => void load()}>Reintentar carga</button>}</div>}
+        {pollError && <div className="error-box" role="alert">{pollError} La ejecución puede seguir en curso. <button onClick={() => watch(runId)}>Reintentar seguimiento</button></div>}
         <div className="row">
-          <button className="primary" disabled={running || !prompt.trim() || !model} onClick={() => void start()}>
-            {running ? <span className="spinner" /> : "Ejecutar"}
+          <button className="primary" aria-label="Ejecutar" aria-busy={running} disabled={loading || running || !prompt.trim() || !compatible.some((m) => m.id === model) || !info} onClick={() => void start()}>
+            {running ? <><span className="spinner" /> Ejecutando…</> : "Ejecutar"}
           </button>
-          {running && (
-            <button className="danger" onClick={() => void api(`/admin/agents/runs/${run!.id}/cancel`, { body: {} })}>
+          {running && runId && !starting && (
+            <button className="danger" disabled={cancelling} onClick={async () => {
+              setCancelling(true); setError("");
+              try {
+                await api(`/admin/agents/runs/${runId}/cancel`, { body: {} });
+                watch(runId);
+              } catch (e) { setError((e as Error).message); } finally { setCancelling(false); }
+            }}>
               Cancelar
             </button>
           )}
-          {!models.length && <span className="small muted">No hay modelos utilizables: configura un proveedor primero.</span>}
+          {!loading && !compatible.length && <span className="small muted">
+            {role === "chat" ? "No hay modelos disponibles." : "Este rol necesita un modelo activo con Herramientas."} <a href="/admin/models">Configurar modelos →</a>
+          </span>}
         </div>
       </section>
 
