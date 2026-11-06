@@ -1,7 +1,7 @@
 # Graph Report - anemone  (2026-11-05)
 
 ## Corpus Check
-- 682 files · ~311,824 words
+- 682 files · ~311,832 words
 - Verdict: corpus is large enough that graph structure adds value.
 - Unclassified: 13 file(s) not represented in the graph (top: (none) 6, .css 5, .example 1)
 
@@ -11,7 +11,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `705e5d3c`
+- Built from commit: `5581de7a`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 

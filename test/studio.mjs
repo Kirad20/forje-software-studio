@@ -677,12 +677,14 @@ async function main() {
     await page.goto("/admin/models");
     const checkbox = page.getByRole("checkbox", { name: "Solo utilizables", exact: true });
     await checkbox.waitFor();
+    assert(!await checkbox.isChecked(), "el catálogo debe mostrar también los modelos pendientes de configurar");
     assert(await checkbox.evaluate(el => getComputedStyle(el).appearance) === "none", "Studio sigue mostrando el checkbox nativo sin estilo");
     await checkbox.focus();
     await page.keyboard.press("Space");
-    assert(!await checkbox.isChecked(), "Espacio no alternó el checkbox");
+    assert(await checkbox.isChecked(), "Espacio no alternó el checkbox");
     assert(await checkbox.evaluate(el => getComputedStyle(el).outlineStyle) === "solid", "el foco de teclado no es visible");
     await page.keyboard.press("Space");
+    assert(!await checkbox.isChecked(), "Espacio no restauró el estado del checkbox");
     await page.emulateMedia({ forcedColors: "active" });
     assert(await checkbox.evaluate(el => getComputedStyle(el).appearance) === "auto", "el checkbox no recuperó su apariencia accesible en alto contraste");
     await page.emulateMedia({ forcedColors: "none" });
