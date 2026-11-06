@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Check, Cross } from "../../../shared/Icons.js";
+import { Check } from "../../../shared/Icons.js";
 import { copyText } from "../../../shared/ui.js";
 
 export interface ToolStepData {
@@ -13,16 +13,21 @@ export function ToolStep({ step, label }: { step: ToolStepData; label: string })
   const [expanded, setExpanded] = useState(false);
   const [copied, setCopied] = useState(false);
   const [copyError, setCopyError] = useState(false);
+  const [dismissed, setDismissed] = useState(false);
   const failed = step.state === "err";
   const canOpen = failed || !!step.output;
+  if (failed && dismissed) return null;
   return (
     <div className={`tool-step ${failed ? "failed" : ""}`}>
-      <button className={`step ${failed ? "err" : ""}`} aria-expanded={canOpen ? expanded : undefined} disabled={!canOpen} onClick={() => setExpanded((v) => !v)}>
-        {step.state === "running" ? <span className="spinner" style={{ width: 11, height: 11 }} /> : failed ? <Cross /> : <Check />}
-        <span>{label}</span>
-        {step.summary && <span className="what">{step.summary}</span>}
-        {canOpen && <span className="step-disclosure">{expanded ? "Ocultar" : failed ? "Ver error" : "Ver salida"} {expanded ? "▾" : "▸"}</span>}
-      </button>
+      <div className="row">
+        <button className={`step ${failed ? "err" : ""}`} aria-expanded={canOpen ? expanded : undefined} disabled={!canOpen} onClick={() => setExpanded((v) => !v)}>
+          {step.state === "running" ? <span className="spinner" style={{ width: 11, height: 11 }} /> : failed ? <span aria-label="Error">!</span> : <Check />}
+          <span>{label}</span>
+          {step.summary && <span className="what">{step.summary}</span>}
+          {canOpen && <span className="step-disclosure">{expanded ? "Ocultar" : failed ? "Ver error" : "Ver salida"} {expanded ? "▾" : "▸"}</span>}
+        </button>
+        {failed && <button className="sm icon-btn ghost" aria-label="Descartar error de herramienta" title="Descartar error de herramienta" onClick={() => setDismissed(true)}>×</button>}
+      </div>
       {failed && !expanded && step.output && <div className="step-error-preview">{step.output.split("\n").find((line) => line.trim())}</div>}
       {expanded && (
         <div className="step-diagnostic">

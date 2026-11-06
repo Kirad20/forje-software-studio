@@ -1084,7 +1084,7 @@ export function Chat({
             </button>
           </div>
         ))}
-        {error && <div className="error-box" role="alert">{error}</div>}
+        {error && <div className="error-box row" role="alert"><span className="grow">{error}</span><button className="sm icon-btn ghost" aria-label="Descartar error del chat" onClick={() => setError("")}>×</button></div>}
       </div>
       {awayFromBottom && <button className="chat-jump sm" onClick={() => {
         setOnlyMarked(false);

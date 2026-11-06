@@ -137,6 +137,17 @@ export function ProjectView({
     setDrawer(true);
     setMobilePane("chat");
   }, []);
+  const closeChat = () => {
+    setDrawer(false);
+    setMobilePane("preview");
+  };
+  useEffect(() => {
+    try {
+      browser.localStorage.setItem("forja:drawer", drawer ? "1" : "0");
+    } catch {
+      /* per-viewer convenience only */
+    }
+  }, [drawer]);
   useEffect(() => {
     if (view !== "preview" && mobilePane !== "preview") setMobilePane("preview");
   }, [view, mobilePane]);
@@ -219,16 +230,8 @@ export function ProjectView({
       showChat();
       return;
     }
-    setDrawer((d) => {
-      const next = !d;
-      try {
-        browser.localStorage.setItem("forja:drawer", next ? "1" : "0");
-      } catch {
-        /* per-viewer convenience only */
-      }
-      setMobilePane(next ? "chat" : "preview");
-      return next;
-    });
+    if (drawer) closeChat();
+    else showChat();
   };
   const toggleSelect = () => {
     const on = !selecting;
@@ -361,8 +364,8 @@ export function ProjectView({
             </a>
           )}
           <div className="split-btn">
-            <button className={`sm ${drawer ? "" : "primary"}`} style={{ height: 32 }} onClick={toggleDrawer} title="Chat con el constructor">
-              ✦ {drawer ? "Ocultar chat" : "Editar"}
+            <button className={`sm ${drawer ? "" : "primary"}`} style={{ height: 32 }} onClick={toggleDrawer} title="Chat con el constructor" aria-label={drawer ? "Ocultar chat" : "Abrir chat"} aria-expanded={drawer}>
+              ✦ {drawer ? "Ocultar chat" : "Abrir chat"}
             </button>
             <Menu
               align="right"
@@ -459,8 +462,7 @@ export function ProjectView({
       </div>
 
       <div className={`ws-body ${mobilePane === "chat" ? "mobile-chat" : "mobile-preview"}`}>
-        {drawer ? (
-          <aside className="drawer">
+          <aside className="drawer" style={drawer ? undefined : { display: "none" }}>
             <div className="drawer-head">
               <strong className="grow">
                 <span className="drawer-mark" aria-hidden>
@@ -471,7 +473,7 @@ export function ProjectView({
               <span className="credits-pill" title="Créditos de la cuenta dueña">
                 ◎ {me.credits.toLocaleString()}
               </span>
-              <button className="sm icon-btn ghost" aria-label="Cerrar chat" onClick={toggleDrawer}>
+              <button className="sm icon-btn ghost" aria-label="Cerrar chat" onClick={closeChat}>
                 ×
               </button>
             </div>
@@ -502,9 +504,7 @@ export function ProjectView({
               }}
             />
           </aside>
-        ) : (
-          <div />
-        )}
+        {!drawer && <div />}
         <section style={{ minWidth: 0, minHeight: 0, display: "grid", position: "relative" }}>
           {/* The preview stays mounted while other views are open, so it does not reload. */}
           <div style={{ display: view === "preview" ? "grid" : "none", minHeight: 0 }}>
