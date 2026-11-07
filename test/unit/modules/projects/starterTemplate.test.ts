@@ -59,7 +59,7 @@ describe("opt-in orders/invoices starter", () => {
     const pg = await PGlite.create();
     await pg.exec(files["migrations/001_orders.sql"]!);
     const db = {
-      exec: (sql: string) => pg.exec(sql),
+      exec: async () => { throw new Error("Runtime schema bootstrap is forbidden"); },
       one: async (sql: string, params: unknown[] = []) => (await pg.query(sql, params)).rows[0],
       query: async (sql: string, params: unknown[] = []) => (await pg.query(sql, params)).rows,
     };
