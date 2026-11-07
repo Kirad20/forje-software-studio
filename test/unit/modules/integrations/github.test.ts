@@ -51,6 +51,21 @@ describe("GitHub synchronization usecases", () => {
     expect(s.gateway.request).toHaveBeenCalledWith("token", "PATCH", "/repos/owner/repo/git/refs/heads/main", { sha: "newhead", force: false });
     expect(s.repository.saveSync).toHaveBeenCalledWith("p", expect.objectContaining({ last_sha: "newhead", synced: { "pages/index.tsx": "sha:new" } }));
   });
+  it("does not mistake an oversized remote blob for a deletion of an imported file", async () => {
+    const s = setup();
+    s.link.last_sha = "old";
+    s.link.synced = { "pages/index.tsx": "sha:local" };
+    s.project.readAllFiles.mockResolvedValue({ "pages/index.tsx": "local" });
+    const original = s.gateway.request.getMockImplementation()!;
+    s.gateway.request.mockImplementation(async (token, method, path, body) => {
+      if (path.includes("?recursive=1")) return { tree: [{ path: "pages/index.tsx", type: "blob", sha: "huge", size: 1024 * 1024 + 1 }] };
+      return original(token, method, path, body);
+    });
+    const result = await s.service.syncProject("p");
+    expect(s.project.deleteFile).not.toHaveBeenCalled();
+    expect(result.pushed).toBeNull();
+    expect(s.repository.saveSync).toHaveBeenCalledWith("p", expect.objectContaining({ synced: { "pages/index.tsx": "sha:local" } }));
+  });
   it("serializes concurrent syncs and records lost access", async () => {
     const s = setup(), token = deferred<{ token: string; login: string }>();
     s.repository.token.mockImplementationOnce(() => token.promise);

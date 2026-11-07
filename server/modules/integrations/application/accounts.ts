@@ -5,7 +5,7 @@ export interface GithubAccountRepository {
   connect(accountId: string, login: string, token: string): Promise<void>;
   disconnect(accountId: string): Promise<void>;
   link(projectId: string): Promise<Link | null | undefined>;
-  saveLink(projectId: string, accountId: string, owner: string, repo: string, branch: string): Promise<void>;
+  saveLink(projectId: string, accountId: string, owner: string, repo: string, branch: string, installationId?: number | null, baseline?: Pick<Link, "last_sha" | "last_tree" | "synced">): Promise<void>;
   unlink(projectId: string): Promise<void>;
   webhookLinks(owner: string, repo: string, branch: string): Promise<string[]>;
 }
@@ -35,7 +35,7 @@ export function createGithubAccountService(repository: GithubAccountRepository, 
     },
     async getLink(p: string) {
       const l = await repository.link(p);
-      return l ? { owner: l.owner, repo: l.repo, branch: l.branch, url: `${gateway.webUrl()}/${l.owner}/${l.repo}`, lastSha: l.last_sha, status: l.status, error: l.error, syncedAt: l.synced_at, files: Object.keys(l.synced).length } : null;
+      return l ? { owner: l.owner, repo: l.repo, branch: l.branch, installationId: l.installation_id == null ? null : Number(l.installation_id), url: `${gateway.webUrl()}/${l.owner}/${l.repo}`, lastSha: l.last_sha, status: l.status, error: l.error, syncedAt: l.synced_at, files: Object.keys(l.synced).length } : null;
     },
     async createRepo(p: string, a: string, input: { name: string; private?: boolean; description?: string }) {
       const { token, login } = await repository.token(a), name = input.name.trim().replace(/[^\w.-]+/g, "-").slice(0, 100);
@@ -59,8 +59,12 @@ export function createGithubAccountService(repository: GithubAccountRepository, 
       if (!signature || !auth.sameSignature(signature, expected)) throw new GithubError("Firma no válida.", 401);
       const body = JSON.parse(rawBody) as { ref?: string; repository?: { name?: string; owner?: { login?: string; name?: string } } };
       const projects = await repository.webhookLinks(body.repository?.owner?.login ?? body.repository?.owner?.name ?? "", body.repository?.name ?? "", body.ref?.replace(/^refs\/heads\//, "") ?? "");
-      for (const p of projects) void sync(p).catch(() => {});
-      return projects.length;
+      let count = 0;
+      for (const p of projects) {
+        if ((await repository.link(p))?.installation_id != null) continue;
+        count++; void sync(p).catch(() => {});
+      }
+      return count;
     },
   };
 }

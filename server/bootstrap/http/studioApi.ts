@@ -95,6 +95,7 @@ const publicRoutes = new Hono<Env>();
 studioApi.onError((err, c) => {
   if (err instanceof RateLimitError) return c.json({ error: err.message }, 429, { "retry-after": String(err.retryAfterSec) });
   if (err instanceof RateLimitStoreError) return c.json({ error: err.message }, 503);
+  if (err instanceof github.GithubError) return c.json({ error: err.message }, ([400, 401, 403, 404, 409, 413, 422].includes(err.status) ? err.status : 502) as 400);
   return c.json({ error: err.message }, 400);
 });
 
@@ -214,8 +215,14 @@ publicRoutes.post("/auth/logout", async (c) => {
 
 // GitHub push webhook: signed with GITHUB_WEBHOOK_SECRET, no session.
 publicRoutes.post("/github/webhook", async (c) => {
-  if (c.req.header("x-github-event") === "ping") return c.json({ ok: true });
-  const raw = await c.req.text();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  if (c.req.raw.body) for await (const chunk of c.req.raw.body) {
+    size += chunk.byteLength;
+    if (size > 2 * 1024 * 1024) throw new github.GithubError("Webhook demasiado grande.", 413);
+    chunks.push(chunk);
+  }
+  const raw = Buffer.concat(chunks).toString("utf8");
   const projects = await github.handleWebhook(raw, c.req.header("x-hub-signature-256"));
   return c.json({ ok: true, projects });
 });
@@ -311,6 +318,25 @@ accountRoutes.post("/models/sync", async (c) => {
 
 // --- GitHub account: a token typed in the studio (never in chat), or OAuth when configured ----------
 accountRoutes.get("/github", async (c) => c.json(await github.accountStatus(c.get("account").id)));
+accountRoutes.post("/github/app/start", async (c) => {
+  await rateLimit(`github-app:${c.get("account").id}`, 10, 60 * 60_000);
+  return c.json(await github.appStart(c.get("account").id, getCookie(c, SESSION_COOKIE) ?? ""));
+});
+accountRoutes.get("/github/app/callback", async (c) => {
+  try {
+    await github.appFinish(c.get("account").id, getCookie(c, SESSION_COOKIE) ?? "", c.req.query("code") ?? "", c.req.query("state") ?? "");
+    return c.redirect("/integrations?github=app-created");
+  } catch (e) { return c.redirect(`/integrations?github=${encodeURIComponent((e as Error).message)}`); }
+});
+accountRoutes.get("/github/app/install", async (c) => c.redirect(await github.appInstallStart(c.get("account").id, getCookie(c, SESSION_COOKIE) ?? "")));
+accountRoutes.get("/github/app/install/callback", async (c) => {
+  try {
+    await github.appInstallFinish(c.get("account").id, getCookie(c, SESSION_COOKIE) ?? "", Number(c.req.query("installation_id")), c.req.query("state") ?? "");
+    return c.redirect("/integrations?github=connected");
+  } catch (e) { return c.redirect(`/integrations?github=${encodeURIComponent((e as Error).message)}`); }
+});
+accountRoutes.get("/github/repos", async (c) => c.json(await github.listRepositories(c.get("account").id, Number(c.req.query("page") ?? 1))));
+accountRoutes.get("/github/branches", async (c) => c.json(await github.listBranches(c.get("account").id, c.req.query("repo") ?? "", c.req.query("installationId") == null ? undefined : Number(c.req.query("installationId")), Number(c.req.query("page") ?? 1))));
 accountRoutes.post("/github/token", async (c) => {
   const { token } = await c.req.json<{ token: string }>();
   await rateLimit(`github-token:${c.get("account").id}`, 10, 60 * 60_000);
@@ -438,6 +464,34 @@ const projectView = async (p: Project) => ({
   suggestedSlug: p.slug ?? suggestSlug(p.name),
   building: await building(p.id),
   hasUnpublishedChanges: p.slug ? await projects.hasUnpublishedChanges(p.id) : false,
+});
+
+accountRoutes.post("/github/import", async (c) => {
+  const input = await c.req.json<{ repo: string; branch?: string; installationId?: number | null; name?: string; orgId?: string }>();
+  const accountId = c.get("account").id;
+  if (input.orgId && !(await orgs.orgRoleOf(input.orgId, accountId))) return c.json({ error: "Organización no encontrada" }, 404);
+  await rateLimit(`github-import:${accountId}`, 10, 60 * 60_000);
+  // Fetch and validate the entire native snapshot before allocating a project.
+  const prepared = await github.prepareImport(accountId, input);
+  let created: Project | undefined;
+  try {
+    created = await projects.createProject(accountId, (input.name?.trim() || prepared.repo).slice(0, 60), `Importado de ${prepared.owner}/${prepared.repo}`, prepared.files, input.orgId);
+    const result = await github.attachImport(created.id, accountId, prepared);
+    const warnings = [...prepared.warnings];
+    try {
+      const problems = await recheckBuild(created.id);
+      warnings.push(...problems.map((p) => `Compilación: ${p.title}`));
+    } catch (e) { warnings.push(`No se pudo verificar la compilación: ${(e as Error).message}`); }
+    github.watchLinked(created.id);
+    return c.json({ project: await projectView(created), result, warnings });
+  } catch (e) {
+    if (created) {
+      await github.unlink(created.id);
+      await projects.deleteProject(created.id);
+      await removeProjectData(created.id);
+    }
+    throw e;
+  }
 });
 
 accountRoutes.get("/projects", async (c) => {
@@ -699,12 +753,12 @@ projectRoutes.get("/projects/:id/github", async (c) =>
 projectRoutes.post("/projects/:id/github", async (c) => {
   const denied = ownerOnly(c);
   if (denied) return denied;
-  const body = await c.req.json<{ mode: "create" | "link"; name?: string; private?: boolean; repo?: string; branch?: string }>();
+  const body = await c.req.json<{ mode: "create" | "link"; name?: string; private?: boolean; repo?: string; branch?: string; installationId?: number | null }>();
   await rateLimit(`github-link:${c.get("account").id}`, 10, 60 * 60_000);
   try {
     const result =
       body.mode === "link"
-        ? await github.linkRepo(pid(c), c.get("account").id, { repo: body.repo ?? "", branch: body.branch })
+        ? await github.linkRepo(pid(c), c.get("account").id, { repo: body.repo ?? "", branch: body.branch, installationId: body.installationId })
         : await github.createRepo(pid(c), c.get("account").id, { name: body.name || c.get("project").name, private: body.private, description: c.get("project").description });
     github.watchLinked(pid(c));
     return c.json({ link: await github.getLink(pid(c)), result });

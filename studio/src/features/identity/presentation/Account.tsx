@@ -6,6 +6,7 @@ import { Modal } from "../../../shared/ui.js";
 import { browser } from "../../../shared/infrastructure/browser.js";
 import { applyTheme, savedTheme, type Theme } from "../../../shared/presentation/theme.js";
 import { McpTokens } from "./McpTokens.js";
+import { GithubWorkspace } from "../../integrations/index.js";
 
 const Row = ({ title, hint, children }: { title: string; hint?: ReactNode; children?: ReactNode }) => (
   <div className="row-setting" style={{ padding: "12px 0", borderTop: "1px solid var(--border)" }}>
@@ -100,6 +101,7 @@ export function Account({ me, onChange }: { me: Me; onChange: () => void }) {
       </section>
 
       <PasswordSection />
+      <GithubWorkspace allowImport={false} />
 
       <McpTokens />
 

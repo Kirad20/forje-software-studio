@@ -206,6 +206,7 @@ export function Dashboard() {
           <span className="dashboard-eyebrow"><span aria-hidden>✦</span> FORJA STUDIO</span>
           <h1>Tu próxima idea empieza aquí</h1>
           <p>Descríbela en tus palabras. Forja la convierte en una app que puedes editar y publicar.</p>
+          <button onClick={() => go("/integrations?import=github")}>Importar desde GitHub</button>
         </div>
         <label>
           Plantilla inicial

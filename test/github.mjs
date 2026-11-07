@@ -3,17 +3,17 @@
 import http from "node:http";
 import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { startFakeGithub } from "./fakeGithub.mjs";
 import { freshDatabase } from "./helpers/pg.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+process.env.PGCONNECT_TIMEOUT ||= "10";
+const pgdb = await freshDatabase();
 const gh = await startFakeGithub();
 const PORT = 5200 + Math.floor(Math.random() * 400);
-const DATA = mkdtempSync(path.join(tmpdir(), "forja-github-"));
-const pgdb = await freshDatabase();
+const DATA = mkdtempSync(path.join(ROOT, ".test-github-"));
 // Platform settings live in the database: the server applies this seed file at start-up.
 const SEED = path.join(DATA, "seed.json");
 writeFileSync(SEED, JSON.stringify({ settings: { "github.apiUrl": `http://127.0.0.1:${gh.port}`, "github.webhookSecret": "whsec", "github.pollMs": 3600000 } }));
@@ -59,11 +59,12 @@ function req(method, p, { host = "localhost", body, headers = {} } = {}) {
           try {
             json = JSON.parse(text);
           } catch {}
-          resolve({ status: res.statusCode, json, text });
+          resolve({ status: res.statusCode, json, text, location: res.headers.location });
         });
       },
     );
     r.on("error", reject);
+    r.setTimeout(45000, () => r.destroy(new Error(`Timed out: ${method} ${p}`)));
     if (data) r.write(data);
     r.end();
   });
@@ -186,13 +187,95 @@ try {
 
   // --- Unlink ---
   ok((await req("DELETE", `/api/projects/${p2.id}/github`)).status === 200 && (await req("GET", `/api/projects/${p2.id}/github`)).json.link === null, "unlink");
+
+  // --- Manifest onboarding, selected organization repositories, and pull-only import ---
+  const started = await req("POST", "/api/github/app/start", { body: {} });
+  ok(started.status === 200 && JSON.parse(started.json.manifest).default_permissions.contents === "write", "manifest needs no pasted credentials", started.text);
+  const manifestState = new URL(started.json.url).searchParams.get("state");
+  const converted = await req("GET", `/api/github/app/callback?code=fake-manifest-code&state=${encodeURIComponent(manifestState)}`);
+  ok(converted.location === "/integrations?github=app-created", "manifest converts and saves the App", converted.text);
+  const replay = await req("GET", `/api/github/app/callback?code=fake-manifest-code&state=${encodeURIComponent(manifestState)}`);
+  ok(replay.location !== "/integrations?github=app-created", "manifest state is single-use");
+  ok((await req("POST", "/api/github/app/start", { body: {} })).status === 409, "configured App cannot be replaced");
+  const appStatus = (await req("GET", "/api/github")).json;
+  ok(appStatus.app.id === gh.app.id && appStatus.canCreateRepo === false && !JSON.stringify(appStatus).includes(gh.app.client_secret) && !JSON.stringify(appStatus).includes("PRIVATE KEY"), "App status has no credentials and reports create limitation");
+  const installStart = await req("GET", "/api/github/app/install");
+  const installState = new URL(installStart.location).searchParams.get("state");
+  const installed = await req("GET", `/api/github/app/install/callback?installation_id=42&state=${encodeURIComponent(installState)}`);
+  ok(installed.location === "/integrations?github=connected", "installation authenticated against this account App");
+  gh.createEmptyRepo("existing", "example-org");
+  const existing = "example-org/existing";
+  gh.pushExternal(existing, "feature/import", { "pages/_index.tsx": "export default function Home(){return <div>Imported</div>}", "base.css": "body { color: blue; }", "package.json": "{}", "migrations/001_notes.sql": "create table notes(id integer primary key);", "README.md": "# Keep me", ".github/workflows/test.yml": "name: preserve" });
+  gh.repos.get(existing).default_branch = "feature/import";
+  gh.selectedRepos.get(42).add(existing);
+  gh.createEmptyRepo("not-selected", "example-org");
+  gh.pushExternal("example-org/not-selected", "main", { "pages/_index.tsx": "export default function Home(){return <div/>}" });
+  const picked = await req("GET", "/api/github/repos?page=1");
+  ok(picked.json.repositories.some((r) => r.fullName === existing && r.installationId === 42) && !picked.json.repositories.some((r) => r.name === "not-selected"), "only selected organization repositories are offered", picked.text);
+  const branches = await req("GET", `/api/github/branches?repo=${encodeURIComponent(existing)}&installationId=42`);
+  ok(branches.json.branches.some((b) => b.name === "feature/import"), "branch picker supports slashes");
+  const wrongBranch = await req("POST", "/api/github/import", { body: { repo: existing, installationId: 42, branch: "absent" } });
+  ok(wrongBranch.status === 422, "missing branches rejected before project creation", wrongBranch.text);
+  const unselected = await req("POST", "/api/github/import", { body: { repo: "example-org/not-selected", installationId: 42 } });
+  ok(unselected.status === 403, "public/unselected repository cannot bypass installation scope", unselected.text);
+  const remoteBefore = gh.filesAt(existing, "feature/import");
+  const callCount = gh.calls.length;
+  const imported = await req("POST", "/api/github/import", { body: { repo: existing, branch: "feature/import", installationId: 42 } });
+  ok(imported.status === 200 && imported.json.result.pushed === null && imported.json.warnings.some((w) => w.includes("migraciones")), "native repository imported with migration warning", imported.text);
+  ok(!gh.calls.slice(callCount).some((c) => /^(POST|PATCH|PUT) \/repos\//.test(c)) && JSON.stringify(gh.filesAt(existing, "feature/import")) === JSON.stringify(remoteBefore), "initial import never writes the source repository");
+  const importedId = imported.json.project.id;
+  const importedFiles = (await req("GET", `/api/projects/${importedId}/files`)).json.files.map((f) => f.path);
+  ok(importedFiles.includes("migrations/001_notes.sql") && importedFiles.length === 4, "native files only, no starter files injected", importedFiles);
+  const unchanged = await req("POST", `/api/projects/${importedId}/github/sync`, { body: {} });
+  ok(unchanged.json.result.pushed === null, "import has a correct synced baseline", unchanged.text);
+  await req("PUT", `/api/projects/${importedId}/file`, { body: { path: "helpers/edit.ts", content: "export const edit = true;" } });
+  await req("POST", `/api/projects/${importedId}/github/sync`, { body: {} });
+  ok(gh.filesAt(existing, "feature/import")["README.md"] === "# Keep me" && gh.filesAt(existing, "feature/import")[".github/workflows/test.yml"] === "name: preserve", "future two-way sync preserves unrelated GitHub paths");
+  gh.pushExternal(existing, "feature/import", { "helpers/app-hook.ts": "export const appHook = true;" }, "App webhook");
+  const appPayload = JSON.stringify({ ref: "refs/heads/feature/import", installation: { id: 42, app_id: gh.app.id }, repository: { name: "existing", owner: { login: "example-org" } } });
+  const appSig = `sha256=${createHmac("sha256", gh.app.webhook_secret).update(appPayload).digest("hex")}`;
+  const legacySig = `sha256=${createHmac("sha256", "whsec").update(appPayload).digest("hex")}`;
+  ok((await req("POST", "/api/github/webhook", { body: appPayload, headers: { "x-hub-signature-256": legacySig } })).json.projects === 0, "legacy webhook secret cannot synchronize an App-linked project");
+  const appHook = await req("POST", "/api/github/webhook", { body: appPayload, headers: { "x-hub-signature-256": appSig } });
+  ok(appHook.json.projects === 1, "own App secret verifies organization push webhook", appHook.text);
+  await sleep(1500);
+  ok((await req("GET", `/api/projects/${importedId}/files`)).json.files.some((f) => f.path === "helpers/app-hook.ts"), "App-signed webhook pulls selected repository changes");
+  gh.createEmptyRepo("unsupported", "example-org");
+  gh.pushExternal("example-org/unsupported", "main", { "src/App.tsx": "export default function App(){}" });
+  gh.selectedRepos.get(42).add("example-org/unsupported");
+  const projectCount = (await req("GET", "/api/projects")).json.projects.length;
+  const incompatible = await req("POST", "/api/github/import", { body: { repo: "example-org/unsupported", installationId: 42 } });
+  ok(incompatible.status === 422 && (await req("GET", "/api/projects")).json.projects.length === projectCount, "incompatible imports fail before allocating a project", incompatible.text);
+  gh.selectedRepos.get(42).delete(existing);
+  const selectionPayload = JSON.stringify({ action: "removed", installation: { id: 42, app_id: gh.app.id }, repositories_removed: [{ full_name: existing }] });
+  const selectionSig = `sha256=${createHmac("sha256", gh.app.webhook_secret).update(selectionPayload).digest("hex")}`;
+  await req("POST", "/api/github/webhook", { body: selectionPayload, headers: { "x-hub-signature-256": selectionSig } });
+  ok((await req("GET", `/api/projects/${importedId}/github`)).json.link.status === "lost_access", "selection webhook immediately flags removed repository access");
+  const revoked = await req("POST", `/api/projects/${importedId}/github/sync`, { body: {} });
+  ok(revoked.status >= 400 && (await req("GET", `/api/projects/${importedId}/github`)).json.link.status === "lost_access", "repository selection removal prevents further sync");
+  gh.selectedRepos.get(42).add(existing);
+  await req("POST", `/api/projects/${importedId}/github/sync`, { body: {} });
+  const pendingInstall = await req("GET", "/api/github/app/install");
+  const pendingState = new URL(pendingInstall.location).searchParams.get("state");
+  const mintCount = gh.calls.filter((c) => c === "POST /app/installations/42/access_tokens").length;
+  ok((await req("DELETE", "/api/github")).status === 200, "disconnect clears legacy and App access");
+  const disconnected = (await req("GET", "/api/github")).json;
+  ok(!disconnected.connected && disconnected.installations.length === 0 && disconnected.app.id === gh.app.id, "disconnect retains App metadata but removes registered installations");
+  const afterDisconnect = await req("POST", `/api/projects/${importedId}/github/sync`, { body: {} });
+  ok(afterDisconnect.status === 403 && gh.calls.filter((c) => c === "POST /app/installations/42/access_tokens").length === mintCount, "disconnected links cannot reuse cached tokens or silently mint new ones", afterDisconnect.text);
+  ok((await req("POST", "/api/github/webhook", { body: appPayload, headers: { "x-hub-signature-256": appSig } })).json.projects === 0, "late App webhooks cannot restart disconnected synchronization");
+  const staleInstall = await req("GET", `/api/github/app/install/callback?installation_id=42&state=${encodeURIComponent(pendingState)}`);
+  ok(staleInstall.location !== "/integrations?github=connected", "disconnect invalidates pending installation consent");
+  const reconnectStart = await req("GET", "/api/github/app/install");
+  const reconnectState = new URL(reconnectStart.location).searchParams.get("state");
+  const reconnected = await req("GET", `/api/github/app/install/callback?installation_id=42&state=${encodeURIComponent(reconnectState)}`);
+  ok(reconnected.location === "/integrations?github=connected" && (await req("GET", "/api/github")).json.connected, "reconnection requires fresh explicit installation authorization");
 } finally {
   console.log(process.exitCode ? "\nSOME CHECKS FAILED" : "\nALL CHECKS PASSED");
   if (process.exitCode) console.log("\n--- server log ---\n" + serverLog.slice(-4000));
   app.kill();
-  gh.server.close();
-  setTimeout(() => {
-    rmSync(DATA, { recursive: true, force: true });
-    pgdb.drop().catch(() => {});
-  }, 500);
+  await Promise.race([new Promise((resolve) => app.once("exit", resolve)), sleep(3000)]);
+  await new Promise((resolve) => gh.server.close(resolve));
+  rmSync(DATA, { recursive: true, force: true });
+  await pgdb.drop();
 }

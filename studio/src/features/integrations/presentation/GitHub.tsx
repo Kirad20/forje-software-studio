@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { api } from "../application/controller.js";
 import { timeAgo } from "../../../shared/presentation/format.js";
+import type { GithubAccount } from "../application/github.js";
+import { GithubRepositoryForm, GithubWorkspace } from "./GithubWorkspace.js";
 
 export interface GithubCard {
   type: "github";
@@ -84,18 +86,15 @@ interface Link {
 
 /** Project settings → GitHub: connect the account, create or link a repo, sync, disconnect. */
 export function GithubSection({ projectId, projectName }: { projectId: string; projectName: string }) {
-  const [data, setData] = useState<{ account: { connected: boolean; login: string | null; oauth: boolean }; link: Link | null; canEdit: boolean } | null>(null);
-  const [token, setToken] = useState("");
+  const [data, setData] = useState<{ account: GithubAccount; link: Link | null; canEdit: boolean } | null>(null);
   const [mode, setMode] = useState<"create" | "link">("create");
   const [name, setName] = useState(projectName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "mi-app");
   const [priv, setPriv] = useState(true);
-  const [repo, setRepo] = useState("");
-  const [branch, setBranch] = useState("");
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const load = () => api<NonNullable<typeof data>>(`/projects/${projectId}/github`).then(setData);
   useEffect(() => {
-    void load();
+    void load().catch((e: Error) => setError(e.message));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
   const run = async (key: string, f: () => Promise<unknown>) => {
@@ -110,7 +109,7 @@ export function GithubSection({ projectId, projectName }: { projectId: string; p
       setBusy("");
     }
   };
-  if (!data) return null;
+  if (!data) return <section className="card section"><h3>GitHub</h3>{error ? <><div className="error-box" role="alert">{error}</div><button onClick={() => void load().catch((e: Error) => setError(e.message))}>Reintentar GitHub</button></> : <div role="status">Cargando GitHub…</div>}</section>;
   const { account, link } = data;
 
   return (
@@ -124,26 +123,7 @@ export function GithubSection({ projectId, projectName }: { projectId: string; p
       </div>
 
       {!account.connected ? (
-        <div className="stack" style={{ gap: 8 }}>
-          {account.oauth && (
-            <a className="btn primary" href="/api/github/oauth/start" style={{ justifySelf: "start" }}>
-              <Mark /> Conectar con GitHub
-            </a>
-          )}
-          <label>
-            <span style={{ color: "var(--text)", fontWeight: 500 }}>{account.oauth ? "O con un token de acceso personal" : "Token de acceso personal"}</span>
-            <span className="small">
-              Créalo en GitHub → Settings → Developer settings → Personal access tokens, con permiso de escritura en el contenido de los repositorios. Se guarda cifrado y no se
-              vuelve a mostrar.
-            </span>
-            <div className="row">
-              <input type="password" autoComplete="off" placeholder="github_pat_…" value={token} onChange={(e) => setToken(e.target.value)} />
-              <button className="primary" disabled={!token.trim() || busy !== ""} onClick={() => run("token", () => api("/github/token", { body: { token } }).then(() => setToken("")))}>
-                {busy === "token" ? <span className="spinner" /> : "Conectar"}
-              </button>
-            </div>
-          </label>
-        </div>
+        <GithubWorkspace allowImport={false} onChange={() => void load()} />
       ) : !link ? (
         data.canEdit ? (
           <div className="stack" style={{ gap: 8 }}>
@@ -154,14 +134,14 @@ export function GithubSection({ projectId, projectName }: { projectId: string; p
               </button>
             </div>
             <div className="segmented" style={{ justifySelf: "start" }}>
-              <button className={mode === "create" ? "on" : ""} onClick={() => setMode("create")}>
+              {account.canCreateRepo !== false && <button className={mode === "create" ? "on" : ""} onClick={() => setMode("create")}>
                 Crear repositorio
-              </button>
-              <button className={mode === "link" ? "on" : ""} onClick={() => setMode("link")}>
+              </button>}
+              <button className={mode === "link" || account.canCreateRepo === false ? "on" : ""} onClick={() => setMode("link")}>
                 Usar uno existente
               </button>
             </div>
-            {mode === "create" ? (
+            {mode === "create" && account.canCreateRepo !== false ? (
               <div className="row" style={{ flexWrap: "wrap" }}>
                 <span className="small muted">{account.login}/</span>
                 <input style={{ flex: 1, minWidth: 160 }} value={name} onChange={(e) => setName(e.target.value)} aria-label="Nombre del repositorio" />
@@ -173,15 +153,15 @@ export function GithubSection({ projectId, projectName }: { projectId: string; p
                 </button>
               </div>
             ) : (
-              <div className="row" style={{ flexWrap: "wrap" }}>
-                <input style={{ flex: 2, minWidth: 180 }} placeholder="dueño/repositorio" value={repo} onChange={(e) => setRepo(e.target.value)} aria-label="Repositorio" />
-                <input style={{ flex: 1, minWidth: 100 }} placeholder="rama (main)" value={branch} onChange={(e) => setBranch(e.target.value)} aria-label="Rama" />
-                <button className="primary" disabled={!repo.trim() || busy !== ""} onClick={() => run("link", () => api(`/projects/${projectId}/github`, { body: { mode: "link", repo, branch } }))}>
-                  {busy === "link" ? <span className="spinner" /> : "Conectar"}
-                </button>
-              </div>
+              <GithubRepositoryForm label="Conectar repositorio" disabled={busy !== ""} onSubmit={async (selection) => {
+                await api(`/projects/${projectId}/github`, { body: { mode: "link", ...selection } });
+                await load();
+              }} />
             )}
-            {mode === "link" && <div className="small muted">Lo que ya haya en el repositorio entra primero en el proyecto; luego se suben los archivos de Forja.</div>}
+            {(mode === "link" || account.canCreateRepo === false) && <div className="small muted">
+              Lo que ya haya en el repositorio entra primero en este proyecto; luego se suben los archivos de Forja. Para abrir el repositorio sin subir archivos iniciales, usa «Importar desde GitHub» en Proyectos.
+              {account.app && <div><a href="/api/github/app/install">Cambiar repositorios autorizados</a> · <a href="https://github.com/new" target="_blank" rel="noreferrer">Crear repositorio en GitHub</a></div>}
+            </div>}
           </div>
         ) : (
           <div className="small muted">Solo la persona dueña puede conectar el proyecto a un repositorio.</div>

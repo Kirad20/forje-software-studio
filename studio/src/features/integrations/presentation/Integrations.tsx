@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { api } from "../application/controller.js";
 import { timeAgo } from "../../../shared/presentation/format.js";
 import { Modal } from "../../../shared/ui.js";
+import { GithubWorkspace } from "./GithubWorkspace.js";
 
 export interface Integration {
   id: string;
@@ -48,6 +49,7 @@ export function Integrations() {
           ＋ Nueva integración
         </button>
       </div>
+      <GithubWorkspace />
       {!data ? (
         <div className="empty">
           <span className="spinner" />
