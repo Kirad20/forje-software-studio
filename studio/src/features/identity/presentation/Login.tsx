@@ -106,8 +106,8 @@ export function Login({ onDone }: { onDone: () => void }) {
   };
 
   return (
-    <div style={{ minHeight: "100%", display: "grid", placeItems: "center", padding: 16 }}>
-      <form className="card stack" style={{ width: "min(380px, 100%)", padding: 28 }} onSubmit={submit}>
+    <div className="login">
+      <form className="card stack login-form" onSubmit={submit}>
         <div className="row" style={{ gap: 10 }}>
           <Logo size={34} />
           <div>
@@ -156,7 +156,7 @@ export function Login({ onDone }: { onDone: () => void }) {
         </button>
 
         {mode === "password" && (
-          <div className="row small" style={{ justifyContent: "space-between" }}>
+          <div className="row small login-actions">
             <button type="button" className="ghost sm" onClick={() => go("code")}>
               Entrar con código / crear cuenta
             </button>

@@ -41,7 +41,7 @@ export function Integrations() {
         <h1 style={{ fontSize: 24 }}>Integraciones</h1>
         <div className="muted">Tus claves de API y conexiones externas. Guárdalas una vez y conéctalas a cualquier proyecto.</div>
       </div>
-      <div className="row">
+      <div className="row integrations-toolbar">
         <input placeholder="Buscar integraciones…" value={search} onChange={(e) => setSearch(e.target.value)} style={{ maxWidth: 360 }} />
         <div className="grow" />
         <button className="primary" onClick={() => setCreating(true)}>
@@ -110,7 +110,7 @@ export function CreateDialog({ types, onClose, onDone }: { types: Types; onClose
             <h3>Tipo de integración</h3>
             <div className="small muted">Elige qué quieres añadir</div>
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+          <div className="integration-types">
             {(Object.keys(types) as Integration["type"][]).map((t) => (
               <button
                 key={t}

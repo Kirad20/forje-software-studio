@@ -45,7 +45,7 @@ export function McpTokens() {
   }, null, 2);
 
   return (
-    <section className="card stack" style={{ padding: 18 }}>
+    <section className="card stack mcp-tokens" style={{ padding: 18 }}>
       <div>
         <div className="section-title" style={{ margin: 0 }}>Agentes conectados · MCP</div>
         <div className="small muted">

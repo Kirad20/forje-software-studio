@@ -1235,7 +1235,7 @@ async function main() {
       const logout = page.getByRole("button", { name: "Cerrar sesión" });
       await logout.waitFor();
       const open = await page.evaluate(() => {
-        const r = document.querySelector(".account-mini .popover").getBoundingClientRect();
+        const r = document.querySelector(".popover.menu-content").getBoundingClientRect();
         return { left: Math.round(r.left), right: Math.round(r.right), top: Math.round(r.top), scrollWidth: document.documentElement.scrollWidth, theme: document.documentElement.dataset.theme };
       });
       assert(open.left >= 0 && open.right <= width && open.top >= 0, `el menú de cuenta abierto queda fuera de pantalla: ${JSON.stringify(open)}`);
