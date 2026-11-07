@@ -55,7 +55,7 @@ export function checkPlanDoc(source: string | undefined): string[] {
 }
 
 export const ROLE_FOLDERS: Record<SpecialistRole, RegExp> = {
-  data: /^(helpers\/|static\/__dev\/)/,
+  data: /^(migrations\/|helpers\/|static\/__dev\/)/,
   backend: /^(endpoints\/|jobs\/|helpers\/|static\/)/,
   ui: /^(pages\/|components\/|base\.css$|static\/|helpers\/)/,
 };

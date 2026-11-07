@@ -204,7 +204,7 @@ async function beginTransaction(projectId: string, run: Run): Promise<string> {
   const id = `tx${run.txs.size + 1}_${Date.now()}`;
   return new Promise((resolveBegin, rejectBegin) => {
     let settle!: (commit: boolean) => void;
-    const done = projectDb(projectId)
+    const done = projectDb(projectId, run.env)
       .transaction(async (tx) => {
         const commit = await new Promise<boolean>((res) => {
           settle = res;

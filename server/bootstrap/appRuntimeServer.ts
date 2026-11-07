@@ -4,7 +4,7 @@ import { WebSocketServer } from "ws";
 import { config } from "../shared/config.js";
 import { closePlatformDb, platformDb } from "../shared/database/index.js";
 import { createAppDataService } from "../modules/app-services/appDataService.js";
-import { closeAll, closeProject, cloneDatabase, dumpDatabase, execSql, isAwake, projectDb, projectDbMetrics } from "../modules/app-services/projectDb.js";
+import { applyProjectMigrations, closeAll, closeProject, cloneDatabase, dumpDatabase, execSql, isAwake, projectDb, projectDbMetrics } from "../modules/app-services/projectDb.js";
 import { attachSocket, stopRealtime } from "../modules/app-services/realtime.js";
 import { stopEmailTransport } from "../modules/app-services/email.js";
 import { parseAppHost, checkShareToken, cookie, serveApp, stopAppRuntime } from "../modules/app-runtime/index.js";
@@ -34,6 +34,7 @@ const app = new Hono();
 app.route("/", createAppDataService({
   projectDb,
   execSql,
+  applyProjectMigrations,
   dumpDatabase,
   closeProject,
   cloneDatabase,

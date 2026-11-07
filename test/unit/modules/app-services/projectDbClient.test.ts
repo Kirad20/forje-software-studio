@@ -19,7 +19,7 @@ it("sends project database requests with the internal service credential", async
     expect.objectContaining({
       method: "POST",
       headers: { authorization: "Bearer shared-token", "content-type": "application/json" },
-      body: JSON.stringify({ sql: "select * from users", params: ["a"] }),
+      body: JSON.stringify({ sql: "select * from users", params: ["a"], env: "published" }),
     }),
   );
 });
@@ -71,7 +71,7 @@ it("fetches project database performance metrics from the owner service", async 
   await expect(client.metrics("project-1")).resolves.toMatchObject({ active: true, operations: 4 });
   expect(fetch).toHaveBeenCalledWith(
     "http://app-runtime:4200/internal/data/project-1/metrics",
-    expect.objectContaining({ method: "POST" }),
+    expect.objectContaining({ method: "POST", body: JSON.stringify({ env: "preview" }) }),
   );
 });
 
@@ -90,6 +90,7 @@ it("preserves commit and rollback semantics across the internal HTTP boundary", 
   const app = createAppDataService({
     projectDb: () => projectDb,
     execSql: async () => [],
+    applyProjectMigrations: async () => ({ applied: [] }),
     dumpDatabase: async () => new Blob(),
     closeProject: async () => {},
     cloneDatabase: async () => {},

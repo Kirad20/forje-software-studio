@@ -79,7 +79,7 @@ async function serviceContext(projectId: string, env: AppEnv, base: string, sour
       source,
       message: args.map((a) => (typeof a === "string" ? a : JSON.stringify(a))).join(" "),
     });
-  const db = projectDb(projectId);
+  const db = projectDb(projectId, env);
   return {
     db,
     cache: createProjectCache(cacheRepository(db), env),

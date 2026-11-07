@@ -10,6 +10,7 @@ describe("Projects Domain (DDD & TDD)", () => {
       expect(new ProjectPath("endpoints/users_GET.ts").value).toBe("endpoints/users_GET.ts");
       expect(new ProjectPath("helpers/math.ts").value).toBe("helpers/math.ts");
       expect(new ProjectPath("jobs/cleanup.ts").value).toBe("jobs/cleanup.ts");
+      expect(new ProjectPath("migrations/20261106210000000_builder.sql").value).toBe("migrations/20261106210000000_builder.sql");
       expect(new ProjectPath("static/logo.png").value).toBe("static/logo.png");
       expect(new ProjectPath("base.css").value).toBe("base.css");
       expect(new ProjectPath("package.json").value).toBe("package.json");
@@ -18,6 +19,8 @@ describe("Projects Domain (DDD & TDD)", () => {
     it("rejects invalid project paths, directory traversal, or double slashes", () => {
       expect(() => new ProjectPath("../secret.txt")).toThrow("Ruta no válida");
       expect(() => new ProjectPath("pages//index.tsx")).toThrow("Ruta no válida");
+      expect(() => new ProjectPath("migrations/current.sql")).toThrow("Ruta no válida");
+      expect(() => new ProjectPath("migrations/20261106120000000_notes.ts")).toThrow("Ruta no válida");
       expect(() => new ProjectPath("random/file.txt")).toThrow("Ruta no válida");
     });
 

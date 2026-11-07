@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { assertSafeAgentSql } from "../../../../server/modules/builder/domain/AgentSqlPolicy.js";
+import { assertSafeAgentSql, assertSafePreviewSql, containsDataChange, containsSchemaChange } from "../../../../server/modules/builder/domain/AgentSqlPolicy.js";
 import { assertOwnerRequestedForget, assertOwnerSourcedMemory } from "../../../../server/modules/builder/domain/MemoryProvenance.js";
 import { assertOwnerRequestedAuthSetup, assertOwnerRequestedPublish, assertOwnerRequestedSecret } from "../../../../server/modules/builder/domain/OwnerActionPolicy.js";
-import { isSafeProjectPath, ownsFile } from "../../../../server/modules/builder/domain/FinishGatePolicy.js";
+import { isMigrationPath, isSafeProjectPath, ownsFile } from "../../../../server/modules/builder/domain/FinishGatePolicy.js";
 import { assertRoleToolAccess, ROLE_PROMPTS, ROLE_TOOLS } from "../../../../server/modules/builder/infrastructure/roles.js";
+import { BUILDER_SYSTEM_PROMPT } from "../../../../server/modules/builder/infrastructure/prompt.js";
 
 describe("agent trust boundaries", () => {
   it("includes the untrusted-data policy in every role prompt", () => {
@@ -53,6 +54,18 @@ describe("agent trust boundaries", () => {
     }
     expect(ownsFile({ owned: ["pages/", "base.css"] }, "pages/home.tsx")).toBe(true);
     expect(ownsFile({ owned: ["pages/", "base.css"] }, "endpoints/admin_POST.ts")).toBe(false);
+    expect(isMigrationPath("migrations")).toBe(true);
+    expect(isMigrationPath("migrations/001_create_notes.sql")).toBe(true);
+    expect(isMigrationPath("helpers/migrations.ts")).toBe(false);
+  });
+
+  it("explains migration-only schema changes and isolated preview data to builders and roles", () => {
+    expect(BUILDER_SYSTEM_PROMPT).toContain("Every schema change must be a new, forward-only SQL migration under migrations/*.sql");
+    expect(BUILDER_SYSTEM_PROMPT).toContain("publishing never copies preview rows into production");
+    expect(ROLE_PROMPTS.data).toContain("execute_sql");
+    expect(ROLE_PROMPTS.data).toContain("never edit, rename or delete one");
+    expect(ROLE_PROMPTS.backend).toContain("never issue DDL or schema-changing SQL from endpoints/jobs");
+    expect(ROLE_PROMPTS.qa).toContain("Use preview for test data");
   });
 });
 
@@ -83,6 +96,27 @@ describe("agent SQL policy", () => {
     'CREATE INDEX ix ON "_forja_users" (email)',
   ])("rejects destructive or executable SQL: %s", (sql) => {
     expect(() => assertSafeAgentSql(sql)).toThrow(/SQL del agente rechazado/);
+  });
+
+  it("allows preview-only data edits without weakening the platform-safe SQL policy", () => {
+    expect(() => assertSafePreviewSql(`
+      INSERT INTO notes (body) VALUES ('preview');
+      UPDATE notes SET body = 'edited';
+      DELETE FROM notes WHERE id = 1;
+      TRUNCATE TABLE notes;
+    `)).not.toThrow();
+    expect(() => assertSafeAgentSql("UPDATE notes SET body = 'edited'")).toThrow(/SQL del agente rechazado/);
+    expect(() => assertSafePreviewSql("TRUNCATE notes, _forja_users")).toThrow(/SQL del agente rechazado/);
+    expect(() => assertSafePreviewSql("DELETE FROM _forja_users")).toThrow(/SQL del agente rechazado/);
+    expect(() => assertSafePreviewSql("DROP TABLE notes")).toThrow(/SQL del agente rechazado/);
+  });
+
+  it("detects schema changes while ignoring SQL-looking text and comments", () => {
+    expect(containsSchemaChange(`CREATE TABLE notes (id int); INSERT INTO notes VALUES ('CREATE TABLE fake');`)).toBe(true);
+    expect(containsSchemaChange(`-- CREATE TABLE fake\nUPDATE notes SET body = 'ALTER TABLE fake';`)).toBe(false);
+    expect(containsDataChange("UPDATE notes SET body = 'sample'")).toBe(true);
+    expect(containsDataChange("UPDATE notes SET body = 'INSERT INTO fake'")).toBe(true);
+    expect(containsDataChange("SELECT 'DELETE FROM notes'")).toBe(false);
   });
 });
 

@@ -15,6 +15,7 @@ import { bindSecurityPorts, runQuickScan } from "../modules/project-observabilit
 import { configureAppServiceObserver } from "../modules/app-services/context.js";
 import { configureSecretIntegrations } from "../modules/app-services/secrets.js";
 import { configureJobRuntime, initializeAppServices } from "../modules/app-services/jobs.js";
+import { applyProjectMigrations } from "../modules/app-services/projectDb.js";
 import { sendPlatformEmail } from "../modules/app-services/email.js";
 import { cloneDatabase, projectDb } from "../modules/app-services/projectDb.js";
 
@@ -77,7 +78,11 @@ export function createMonolith() {
         () => configureSecretIntegrations({ integrationEnv }),
         () => configureJobRuntime({
           publishedFiles: modules.projects.publishedFiles,
-          readAllFiles: modules.projects.readAllFiles,
+          readAllFiles: async (projectId) => {
+            const files = await modules.projects.readAllFiles(projectId);
+            await applyProjectMigrations(projectId, files, "preview");
+            return files;
+          },
           jobFiles: runtime.jobFiles,
           resolveExecution: runtime.resolveServiceExecution,
           readJobSettings: runtime.readJobSettings,

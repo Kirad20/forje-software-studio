@@ -204,7 +204,8 @@ if (!config.secretsKey) {
 }
 
 export const paths = {
-  projectDb: (projectId: string) => path.join(config.dataDir, "projects", projectId, "db"),
+  projectDb: (projectId: string, env: "preview" | "published" = "published") =>
+    path.join(config.dataDir, "projects", projectId, env === "preview" ? "preview-db" : "db"),
   projectStorage: (projectId: string) => path.join(config.dataDir, "projects", projectId, "storage"),
   // Compiled endpoints import npm packages by name, so they must live where Node resolves
   // Forja's node_modules — not under DATA_DIR, which may be anywhere.

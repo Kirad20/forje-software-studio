@@ -111,9 +111,8 @@ const pv = `pv-${project.id}.localhost`;
 const share = new URL(project.previewUrl).searchParams.get("share");
 
 // Schema + code (what the builder would write)
-const sql = await req("POST", `/api/projects/${project.id}/db/sql`, { body: { sql: `create table todos (id serial primary key, user_id text references _forja_users(id), title text not null, done boolean not null default false, created_at timestamptz not null default now());` } });
-ok(sql.status === 200, "create table", sql.text);
 const files = {
+  "migrations/001_todos.sql": "create table todos (id serial primary key, user_id text references _forja_users(id), title text not null, done boolean not null default false, created_at timestamptz not null default now());",
   "endpoints/todos/list_GET.ts": `export default async function (ctx: any) {\n  const user = ctx.requireUser();\n  return { todos: await ctx.db.query("select * from todos where user_id = $1 order by id", [user.id]) };\n}\n`,
   "endpoints/todos/create_POST.ts": `import { z } from "zod";\nconst Input = z.object({ title: z.string().min(1) });\nexport default async function (ctx: any) {\n  const user = ctx.requireUser();\n  const { title } = Input.parse(ctx.body);\n  const todo = await ctx.db.one("insert into todos (user_id, title) values ($1, $2) returning *", [user.id, title]);\n  ctx.realtime.publish("todos", todo);\n  await ctx.jobs.run("notify", { title });\n  return { todo };\n}\n`,
   "jobs/notify.ts": `export const schedule = "0 8 * * *";\nexport default async function (ctx: any) {\n  await ctx.email.send({ to: "someone@else.com", subject: "Nueva tarea", html: "<p>" + (ctx.payload?.title ?? "resumen") + "</p>" });\n}\n`,
@@ -230,6 +229,12 @@ const pub = await req("POST", `/api/projects/${project.id}/publish`, { body: { s
 ok(pub.status === 200 && pub.json.slug === "tareas-equipo", "publish", pub.text);
 const live = await req("GET", "/", { host: "tareas-equipo.localhost" });
 ok(live.status === 200 && live.text.includes("Hecho con Forja"), "published app served");
+const liveSignup = await req("POST", "/_baas/auth/signup", {
+  host: "tareas-equipo.localhost", body: { email: "ana@example.com", password: "nuevaClave99" },
+});
+ok(liveSignup.status === 200, "preview users are not copied to production", liveSignup.text);
+const liveTodos = await req("GET", "/_api/todos/list", { host: "tareas-equipo.localhost" });
+ok(liveTodos.status === 200 && liveTodos.json?.todos?.length === 0, "publish applies schema without preview rows", liveTodos.text);
 const jobs2 = await req("GET", `/api/projects/${project.id}/jobs`);
 ok(jobs2.json.jobs[0].nextRun, "cron armed after publish", JSON.stringify(jobs2.json.jobs[0]));
 // Preview change does not leak to live until republish
@@ -371,7 +376,7 @@ ok(listed.folderId === folder.json.id && listed.favorite === true, "folder and f
 const dup = await req("POST", `/api/projects/${project.id}/duplicate`, { body: {} });
 ok(dup.json.project?.name.endsWith("(copia)"), "duplicate project", dup.text);
 const dupRows = await req("GET", `/api/projects/${dup.json.project.id}/db/rows?table=todos`);
-ok(dupRows.json.total === 1, "duplicate copies the database", dupRows.text);
+ok(dupRows.json.total === 0 && dupRows.json.columns.some((column) => column.name === "title"), "duplicate copies production schema, not preview rows", dupRows.text);
 
 // MCP with an API token
 const tok = (await req("POST", "/api/tokens", { body: { name: "test" } })).json.token;

@@ -75,6 +75,23 @@ Pruebas: necesitan un Postgres en `TEST_DATABASE_URL` (por defecto `postgres://f
 
 ## Cómo está hecho
 
+**Bases de datos de las apps.** El estudio y el constructor usan una base de
+vista previa independiente, creada como copia de producción. Los cambios de
+esquema se versionan en `migrations/<timestamp>_nombre.sql`; el constructor
+registra una migración antes de ejecutar SQL de esquema. Al publicar, se aplican
+las migraciones pendientes a producción, sin copiar las filas de prueba del
+estudio sobre los datos reales. Las migraciones aplicadas deben conservarse sin
+editar; un cambio posterior necesita otra migración. Las migraciones de la
+plataforma (`npm run db:migrate`) son independientes de las de cada app.
+
+La copia de vista previa se crea una sola vez, al usarla por primera vez; no se
+refresca en cada sesión. Endpoints y tareas de vista previa aplican sus migraciones
+pendientes automáticamente. Respaldar producción antes de cambios destructivos y
+usar migraciones compatibles con la versión anterior (expand/contract): cada
+archivo SQL es transaccional, pero las migraciones y la publicación de archivos
+no forman una sola transacción; si falla guardar la publicación, el esquema ya
+puede estar actualizado y se debe reintentar.
+
 La aplicación conserva un núcleo modular y sus APIs públicas, pero Compose ejecuta tres procesos Node: `forja` (studio/API/MCP), `app-runtime` (apps y propietario único de PGlite) y `builder` (turnos de agentes y tools). Comparten Postgres y el volumen de archivos; las llamadas internas están autenticadas. En desarrollo sin Compose, los límites de servicios siguen siendo opcionales y los adaptadores locales se conservan. Los contextos de negocio están en `server/modules/`:
 
 | Contexto DDD | Responsabilidad |

@@ -74,9 +74,9 @@ it("runs one project's extracted API and filtered durable worker in separate pro
     });
     const created = await studio("POST", "/api/projects", { prompt: "Orders with independent invoice processing" });
     const projectId = created.project.id as string;
-    await studio("POST", `/api/projects/${projectId}/db/sql`, {
-      sql: "create table orders (id text primary key, status text not null default 'queued', worker_pid integer);",
-    });
+    const schema = "create table orders (id text primary key, status text not null default 'queued', worker_pid integer);";
+    const migrationPath = "migrations/20261106000000000_orders.sql";
+    await studio("PUT", `/api/projects/${projectId}/file`, { path: migrationPath, content: schema });
     const files = {
       "endpoints/orders/create_POST.ts": `export default async (ctx) => {
         await ctx.db.query("insert into orders (id) values ($1)", [ctx.body.id]);

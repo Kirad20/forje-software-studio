@@ -2,6 +2,7 @@ import { sha256 } from "../../../shared/crypto.js";
 import { config } from "../../../shared/config.js";
 import { appAiChat, AiUnavailableError } from "../../app-services/ai.js";
 import * as auth from "../../app-services/auth.js";
+import { applyProjectMigrations } from "../../app-services/projectDb.js";
 import { HttpError, serviceContext, type AppEnv, type EndpointContext } from "../../app-services/context.js";
 import { getObject, MAX_FILE_BYTES, putObject, StorageLimitError } from "../../app-services/storage.js";
 import { log, projectEvents, watchProblems } from "./observation.js";
@@ -71,7 +72,10 @@ export const cookie = (name: string, value: string, path: string, maxAge: number
   }; Max-Age=${maxAge}`;
 
 async function loadFiles(t: AppTarget): Promise<FileMap> {
-  return t.env === "preview" ? readAllFiles(t.project.id) : ((await publishedFiles(t.project.id)) ?? {});
+  if (t.env === "published") return (await publishedFiles(t.project.id)) ?? {};
+  const files = await readAllFiles(t.project.id);
+  await applyProjectMigrations(t.project.id, files, "preview");
+  return files;
 }
 
 /** Handles every request under an app's base path. `rest` is the path after the base. */
@@ -361,7 +365,7 @@ async function callEndpoint(req: Request, t: AppTarget, routePath: string): Prom
 
   const url = new URL(req.url);
   const cookies = parseCookies(req.headers.get("cookie"));
-  const user = await auth.userFromSession(t.project.id, cookies[auth.sessionCookie(t.project.id)]);
+  const user = await auth.userFromSession(t.project.id, cookies[auth.sessionCookie(t.project.id)], t.env);
   if (method === "POST" && Number(req.headers.get("content-length") ?? 0) > MAX_BODY_BYTES) return json({ error: "Petición demasiado grande" }, 413);
   const rawBody = method === "POST" ? new Uint8Array(await req.arrayBuffer()) : undefined;
   if (rawBody && rawBody.byteLength > MAX_BODY_BYTES) return json({ error: "Petición demasiado grande" }, 413);
@@ -450,26 +454,26 @@ async function baasRoute(req: Request, t: AppTarget, p: string): Promise<Respons
 
     switch (key) {
       case "GET auth/me":
-        return json({ user: await auth.userFromSession(pid, token) });
+        return json({ user: await auth.userFromSession(pid, token, t.env) });
       case "POST auth/signup": {
-        const r = await auth.signUp(pid, (await body()) as never);
+        const r = await auth.signUp(pid, (await body()) as never, t.env);
         return json({ user: r.user }, 200, sessionCookie(r.token, 3600 * 24 * 30));
       }
       case "POST auth/login": {
-        const r = await auth.signIn(pid, (await body()) as never);
+        const r = await auth.signIn(pid, (await body()) as never, t.env);
         return json({ user: r.user }, 200, sessionCookie(r.token, 3600 * 24 * 30));
       }
       case "POST auth/logout":
-        if (token) await auth.signOut(pid, token);
+        if (token) await auth.signOut(pid, token, t.env);
         return json({ ok: true }, 200, sessionCookie("", 0));
       case "POST auth/reset/request":
-        await auth.requestPasswordReset(pid, (await body()).email ?? "", t.project.name);
+        await auth.requestPasswordReset(pid, (await body()).email ?? "", t.project.name, t.env);
         return json({ ok: true });
       case "POST auth/reset/confirm":
-        await auth.confirmPasswordReset(pid, (await body()) as never);
+        await auth.confirmPasswordReset(pid, (await body()) as never, t.env);
         return json({ ok: true });
       case "POST storage/upload": {
-        const user = await auth.userFromSession(pid, token);
+        const user = await auth.userFromSession(pid, token, t.env);
         if (!user && t.env === "published") return json({ error: "Inicia sesión para subir archivos." }, 401);
         const contentLength = Number(req.headers.get("content-length") ?? 0);
         if (contentLength > MAX_FILE_BYTES + 1024 * 1024) return json({ error: "La petición supera el límite de carga de 100 MB" }, 413);
@@ -481,7 +485,7 @@ async function baasRoute(req: Request, t: AppTarget, p: string): Promise<Respons
         return json({ ...obj, url: `${t.base}/_baas/storage/files/${encodeURIComponent(obj.key)}` });
       }
       case "POST ai/chat": {
-        const user = await auth.userFromSession(pid, token);
+        const user = await auth.userFromSession(pid, token, t.env);
         if (!user) return json({ error: "Inicia sesión para usar la IA." }, 401);
         const b = (await req.json()) as { messages: { role: "user" | "assistant"; content: string }[]; system?: string; model?: string };
         const r = await appAiChat(pid, { messages: b.messages, system: b.system, model: b.model });

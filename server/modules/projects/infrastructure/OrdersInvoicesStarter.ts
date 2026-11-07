@@ -29,6 +29,18 @@ export function invoiceFor(order: Order): Invoice | null {
     : null;
 }
 `,
+    "migrations/001_orders.sql": `create table if not exists orders (
+  id text primary key,
+  amount_cents integer not null check (amount_cents > 0),
+  status text not null default 'pending' check (status in ('pending', 'invoiced')),
+  invoice_amount_cents integer check (invoice_amount_cents > 0),
+  created_at timestamptz not null default now()
+);
+create table if not exists invoices (
+  order_id text primary key,
+  amount_cents integer not null check (amount_cents > 0),
+  created_at timestamptz not null default now()
+);\n`,
     "helpers/orderTypes.ts": `export type { Invoice, Order, OrderStatus } from "./orders/domain";
 `,
     "helpers/orders/ports.ts": `import type { Order } from "./domain";
@@ -62,29 +74,15 @@ export async function markOrderInvoiced(orders: OrderRepository, orderId: string
 import type { Order } from "./domain";
 import type { OrderRepository } from "./ports";
 
-async function ensureOrdersSchema(db: Ctx["db"]) {
-  await db.exec(\`
-    create table if not exists orders (
-      id text primary key,
-      amount_cents integer not null check (amount_cents > 0),
-      status text not null default 'pending' check (status in ('pending', 'invoiced')),
-      invoice_amount_cents integer check (invoice_amount_cents > 0),
-      created_at timestamptz not null default now()
-    );
-  \`);
-}
 export function postgresOrders(db: Ctx["db"]): OrderRepository {
   return {
     async createIfAbsent(order) {
-      await ensureOrdersSchema(db);
       await db.query("insert into orders (id, amount_cents) values ($1, $2) on conflict (id) do nothing", [order.id, order.amount_cents]);
     },
     async findById(id) {
-      await ensureOrdersSchema(db);
       return db.one<Order>("select id, amount_cents, status, invoice_amount_cents from orders where id = $1", [id]);
     },
     async markInvoiced(id, amountCents) {
-      await ensureOrdersSchema(db);
       return Boolean(await db.one<{ id: string }>(
         "update orders set status = 'invoiced', invoice_amount_cents = $2 where id = $1 returning id",
         [id, amountCents],
@@ -114,19 +112,9 @@ export async function issueInvoice(invoices: InvoiceRepository, events: OrderEve
     "helpers/invoices/adapters.ts": `import type { Ctx } from "@forja/server";
 import type { Invoice } from "./domain";
 import type { InvoiceRepository } from "./ports";
-async function ensureInvoicesSchema(db: Ctx["db"]) {
-  await db.exec(\`
-    create table if not exists invoices (
-      order_id text primary key,
-      amount_cents integer not null check (amount_cents > 0),
-      created_at timestamptz not null default now()
-    );
-  \`);
-}
 export function postgresInvoices(db: Ctx["db"]): InvoiceRepository {
   return {
     async saveIfAbsent(value) {
-      await ensureInvoicesSchema(db);
       await db.query("insert into invoices (order_id, amount_cents) values ($1, $2) on conflict (order_id) do nothing", [value.order_id, value.amount_cents]);
     },
   };

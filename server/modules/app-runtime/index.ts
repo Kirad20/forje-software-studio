@@ -1,4 +1,5 @@
 import { scheduleProject } from "../app-services/jobs.js";
+import { applyProjectMigrations } from "../app-services/projectDb.js";
 import { getProject, isSlugTaken, readAllFiles, recordPublish, unpublish, configureRuntimeProjects as configureProjects } from "./infrastructure/projects.js";
 import { createPublication } from "./application/publication.js";
 import * as bundler from "./infrastructure/bundler.js";
@@ -29,6 +30,7 @@ const publication = createPublication({
     return project;
   },
   isSlugTaken, readAllFiles, recordPublish, unpublish, scheduleProject,
+  applyMigrations: (id, files) => applyProjectMigrations(id, files, "published"),
   checkProject: bundler.checkProject, scan, appUrl: urls.appUrl,
 });
 

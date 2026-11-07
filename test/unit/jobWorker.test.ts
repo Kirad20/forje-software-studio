@@ -18,13 +18,26 @@ it("boots an independent queue-only worker, executes durable jobs through remote
     requests.push(req.url ?? "");
     expect(req.headers.authorization).toBe("Bearer worker-test-token");
     res.setHeader("content-type", "application/json");
-    res.end('[{"answer":42}]');
+    if (req.url?.endsWith("/migrations/apply")) {
+      let body = "";
+      req.on("data", (chunk) => { body += String(chunk); });
+      req.on("end", () => {
+        expect(JSON.parse(body)).toEqual({
+          env: "preview",
+          migrations: [{ path: "migrations/001_answer.sql", sql: "create table answer (value integer);" }],
+        });
+        res.end('{"applied":["migrations/001_answer.sql"]}');
+      });
+    } else {
+      res.end('[{"answer":42}]');
+    }
   });
   await new Promise<void>((resolve) => data.listen(0, "127.0.0.1", resolve));
   const dataPort = (data.address() as { port: number }).port;
   await migrate(pool);
   await pool.query("insert into accounts (id, email) values ('a', 'worker@example.test')");
   await pool.query("insert into projects (id, owner_id, name) values ('p', 'a', 'Worker')");
+  await pool.query("insert into project_files (project_id, path, content) values ('p', 'migrations/001_answer.sql', 'create table answer (value integer);')");
   await pool.query("insert into project_files (project_id, path, content) values ('p', 'jobs/task.ts', $1)", [
     "export default async function(ctx) { const rows = await ctx.db.query('select 42 as answer'); if(rows[0].answer !== 42) throw new Error('wrong DB'); ctx.log('remote worker completed'); }",
   ]);
@@ -54,6 +67,8 @@ it("boots an independent queue-only worker, executes durable jobs through remote
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
     expect(completed, output).toBe(true);
+    expect(requests.indexOf("/internal/data/p/migrations/apply")).toBeGreaterThanOrEqual(0);
+    expect(requests.indexOf("/internal/data/p/migrations/apply")).toBeLessThan(requests.indexOf("/internal/data/p/query"));
     expect(requests).toContain("/internal/data/p/query");
     expect((await pool.query("select status from job_timers")).rows[0].status).toBe("pending");
     expect((await pool.query("select pending from job_queue_capacity")).rows[0].pending).toBe(0);

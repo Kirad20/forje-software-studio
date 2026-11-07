@@ -7,7 +7,7 @@ export async function runFixture() {
   const { createMonolith } = await import("../../server/bootstrap/composition.js");
   const monolith = createMonolith();
   const projects = monolith.projects;
-  const { execSql, closeAll } = await import("../../server/modules/app-services/projectDb.js");
+  const { applyProjectMigrations, execSql, closeAll } = await import("../../server/modules/app-services/projectDb.js");
   await monolith.startBindings();
   release = async () => {
     await closeAll();
@@ -19,9 +19,14 @@ export async function runFixture() {
   const p = await projects.createProject("acc", "Fixture", "", {
     "pages/_index.tsx": "export default function Home() {\n  return <h1>Hola</h1>;\n}\n",
     "helpers/sum.ts": "export const sum = (a: number, b: number) => a + b;\n",
+    "migrations/20260101000000000_fixture.sql": "create table items (id serial primary key, name text not null, price numeric default 0);",
     "endpoints/items_GET.ts": "export default async function handler() {\n  return Response.json({ ok: true });\n}\n",
   });
-  await execSql(p.id, "create table items (id serial primary key, name text not null, price numeric default 0); insert into items (name) values ('a'), ('b');");
+  await applyProjectMigrations(p.id, [{
+    path: "migrations/20260101000000000_fixture.sql",
+    sql: "create table items (id serial primary key, name text not null, price numeric default 0);",
+  }], "preview");
+  await execSql(p.id, "insert into items (name) values ('a'), ('b');", "preview");
   const account = await monolith.identity.getAccount("acc");
   if (!account) throw new Error("Fixture account is missing");
   const ctx = { account, projectId: p.id, author: "builder" as const };

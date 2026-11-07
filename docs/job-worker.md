@@ -24,6 +24,10 @@ app-runtime. The main server uses `FORJA_JOB_WORKER_MODE=external` and never con
 the queue. Without external mode, the main server runs an embedded consumer.
 Workers always start a **queue-only** runner, never project cron schedulers.
 
+Project database access follows the job's environment: preview jobs use the
+studio database copy, while published jobs use production. Publishing applies
+pending schema migrations; it does not promote preview job data into production.
+
 Start manually with `npm run start:worker` (or `npm run dev:worker`). Set:
 
 | Variable | Default / purpose |
