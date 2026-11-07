@@ -59,7 +59,7 @@ function script(body) {
             ].join("\n"),
             later: ["Editar y borrar notas"],
             tasks: [
-              { id: "db", role: "data", goal: "Crea la tabla notes", files: ["helpers/types.ts"], depends_on: [], done_when: ["la tabla notes existe"] },
+              { id: "db", role: "data", goal: "Crea la tabla notes", files: ["migrations/", "helpers/types.ts"], depends_on: [], done_when: ["la tabla notes existe"] },
               { id: "api", role: "backend", goal: "Endpoint GET notes/list", files: ["endpoints/notes/"], depends_on: ["db"], done_when: ["GET notes/list responde la lista"] },
               { id: "page", role: "ui", goal: "Página /notes que lista las notas", files: ["pages/notes.tsx"], depends_on: ["db"], done_when: ["/notes muestra las notas"] },
             ],
@@ -96,10 +96,11 @@ function script(body) {
       return {
         role: "data",
         res: reply(null, [
-          call("execute_sql", { sql: "create table if not exists notes (id serial primary key, body text not null); insert into notes (body) values ('hola');" }),
+          call("execute_sql", { sql: "create table if not exists notes (id serial primary key, body text not null);" }),
           call("write_file", { path: "helpers/types.ts", content: "export type Note = { id: number; body: string };\n" }),
         ]),
       };
+    if (step === 1) return { role: "data", res: reply(null, [call("execute_sql", { sql: "insert into notes (body) values ('hola');" })]) };
     return { role: "data", res: reply("Tabla notes creada y tipo Note en helpers/types.ts.") };
   }
   if (task === "backend") {

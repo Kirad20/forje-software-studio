@@ -1,7 +1,7 @@
 # Graph Report - pr-integration  (2026-11-06)
 
 ## Corpus Check
-- 700 files · ~323,757 words
+- 700 files · ~323,808 words
 - Verdict: corpus is large enough that graph structure adds value.
 - Unclassified: 13 file(s) not represented in the graph (top: .css 6, (none) 5, .example 1)
 
@@ -11,7 +11,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `f0a6cc23`
+- Built from commit: `067ce230`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -846,7 +846,7 @@ Nodes (6): environment, expose, restart, stop_grace_period, volumes, forja
 _Questions this graph is uniquely positioned to answer:_
 
 - **Why does `vitest` connect `bundler.ts` to `Chat.tsx`, `q`, `BuilderTurnAdapter.ts`, `react`, `bootstrap/server.ts`, `projects/application/usecases.ts`, `ProjectView.tsx`, `builderServer.ts`, `database/index.ts`, `infrastructure/playground.ts`, `app-runtime/index.ts`, `FusionOrchestrator.ts`, `roles.ts`, `admission.ts`, `FileMap`, `app-runtime/index.ts`, `app-runtime/services.test.ts`, `modules/collaboration/index.ts`, `server/index.ts`, `config.ts`, `modules/builder/index.ts`, `ServicePanels.tsx`, `deps.ts`, `modules/identity/index.ts`, `composition.ts`, `modules/project-knowledge/index.ts`, `BuilderToolsAdapter.ts`, `composition.ts`, `policies.test.ts`, `builder/contracts.ts`, `app-services/context.ts`, `createIdentityModule`, `model-management/router.ts`, `ProjectsApplication.ts`, `domain/services.ts`, `domain/messages.ts`, `model-management/index.ts`, `PostgresProjectsStore`, `policies.test.ts`, `application/context.ts`, `dependencies`, `Plan.ts`, `ref_node_fs`, `roles.ts`, `BootstrapService`, `package.json`, `github.mjs`, `createJobs`, `FinishGatePolicy.ts`, `Account`, `Panel de administración del sistema — diseño`, `index.tsx`, `OrgRole`, `adminApi.ts`, `agents.mjs`, `mcp/server.ts`, `urls.ts`, `BuilderWorkflow.ts`, `client/index.ts`, `IPasswordHasher`, `model-management/providers.ts`, `starterTemplate.test.ts`, `mcp/server.ts`, `AppEnv`, `SettingDefinition`, `Desplegar Forja en Coolify`, `compilerOptions`, `sandboxWorker.mjs`, `Inventario de funciones de Lovable → Forja`, `Tx`, `createSecrets`, `AuthPorts`, `adminServer.ts`, `domain/routing.ts`, `PostgresProjectFileRepository`, `database/index.ts`, `Audit.tsx`, `infrastructure/openaiCompat.ts`, `models/presentation/Models.tsx`, `adminServer.ts`, `collaboration/postgresAdapters.test.ts`, `Panel de administración del sistema — diseño`, `ProjectServices`, `app-services/context.ts`, `createCollaborationModule`, `ProjectDbClient`, `ApiError`, `http.test.ts`, `ProjectSnapshot`, `guides.ts`, `securityScan.test.ts`, `transports/mcp.test.ts`, `identity/boundaries.test.ts`?**
-  _High betweenness centrality (0.303) - this node is a cross-community bridge._
+  _High betweenness centrality (0.300) - this node is a cross-community bridge._
 - **Are the 2 inferred relationships involving `q()` (e.g. with `infrastructure/repositories.ts` and `shared/security.ts`) actually correct?**
   _`q()` has 2 INFERRED edges - model-reasoned connections that need verification._
 - **What connects `./dynamic.js`, `./inlineType.js`, `./dynamicTemplate.js` to the rest of the system?**

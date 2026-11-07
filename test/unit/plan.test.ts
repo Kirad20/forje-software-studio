@@ -44,6 +44,13 @@ describe("validatePlan", () => {
     expect(all).toMatch(/depende de "nada"/);
   });
 
+  it("assigns migrations to the data task without granting other roles migration ownership", () => {
+    expect(validatePlan(plan([task({ files: ["migrations/", "helpers/types.ts"] })])).errors).toEqual([]);
+    for (const role of ["backend", "ui"]) {
+      expect(validatePlan(plan([task({ role, files: ["migrations/001_notes.sql"] })])).errors.join("\n")).toMatch(/queda fuera/);
+    }
+  });
+
   it("detects overlap between a folder and a file inside it", () => {
     const { errors } = validatePlan(plan([task({ id: "a", role: "ui", files: ["components/"] }), task({ id: "b", role: "ui", files: ["components/Button.tsx"] })]));
     expect(errors.join("\n")).toMatch(/a y b comparten archivos/);
