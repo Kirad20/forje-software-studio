@@ -138,14 +138,14 @@ input[type="checkbox"]:focus-visible { outline: 2px solid var(--accent); outline
 input[type="checkbox"]:disabled { opacity: .45; cursor: not-allowed; }
 @media (prefers-reduced-motion: reduce) { input[type="checkbox"] { transition: none; } }
 @media (forced-colors: active) { input[type="checkbox"] { appearance: auto; background-image: none; } }
-label { display: grid; gap: 4px; font-size: 13px; color: var(--muted); }
+label { display: grid; gap: 4px; font-size: 13px; color: var(--muted); min-width: 0; }
 fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
 
 .muted { color: var(--muted); }
 .small { font-size: 12.5px; }
 .row { display: flex; align-items: center; gap: 8px; }
 .grow { flex: 1; min-width: 0; }
-.stack { display: grid; gap: 12px; }
+.stack { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
 .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); }
 .pill { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 99px; font-size: 12px; font-weight: 500; background: var(--surface-2); color: var(--muted); }
 .pill.ok { background: var(--ok-soft); color: var(--ok); }
@@ -177,6 +177,15 @@ table.grid td { max-width: 320px; overflow: hidden; text-overflow: ellipsis; whi
 .nav a.active { background: var(--accent-soft); color: var(--accent); }
 .main { overflow: auto; min-width: 0; min-height: 0; }
 .page { width: 100%; max-width: 1280px; margin: 0 auto; padding: 42px 40px 56px; }
+.login { min-height: 100dvh; display: grid; grid-template-columns: minmax(0, 1fr); place-items: center; padding: 16px; }
+.login-form { width: min(380px, 100%); padding: 28px; overflow-wrap: anywhere; }
+.login-form .row > svg { flex: none; }
+.login-actions { justify-content: space-between; flex-wrap: wrap; }
+.login-actions button { white-space: normal; height: auto; padding-block: 6px; }
+.plan-overview { padding: 16px; display: grid; grid-template-columns: minmax(220px, 300px) minmax(0, 1fr); gap: 18px; }
+.plan-overview > * { min-width: 0; }
+.integration-types { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.integration-types button { white-space: normal; }
 
 @media (max-width: 760px) {
   .shell { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
@@ -184,12 +193,12 @@ table.grid td { max-width: 320px; overflow: hidden; text-overflow: ellipsis; whi
   .brand { grid-area: brand; padding: 0; }
   .nav { grid-area: nav; display: flex !important; width: 100%; min-width: 0; gap: 4px !important; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; }
   .nav::-webkit-scrollbar { display: none; }
-  .nav a { flex: none; min-height: 38px; padding: 7px 10px; font-size: 13px; }
+  .nav a { flex: none; min-height: 38px; padding: 7px 10px; font-size: 13px; white-space: nowrap; }
   .sidebar .spacer { display: none; }
   .sidebar .account-mini { grid-area: account; display: flex !important; align-items: center; margin: 0; max-width: min(52vw, 260px); }
   .sidebar .account-mini > .small { display: none; }
-  .sidebar .account-mini button { width: auto !important; height: 36px !important; padding: 0 6px !important; }
-  .sidebar .account-mini button > span:not(.mini-avatar) { display: none; }
+  .sidebar .account-mini .account-menu-trigger { width: auto !important; height: 36px !important; padding: 0 6px !important; }
+  .sidebar .account-mini .account-menu-trigger > span:not(.mini-avatar) { display: none; }
   .sidebar .account-mini .popover.up { top: 100%; bottom: auto; left: auto; right: 0; margin: 6px 0 0; max-width: calc(100vw - 24px); }
   .main { overscroll-behavior: contain; }
   .page { padding: 28px 18px 40px; }
@@ -279,7 +288,7 @@ table.grid td { max-width: 320px; overflow: hidden; text-overflow: ellipsis; whi
 }
 
 .modal-backdrop { position: fixed; inset: 0; background: rgb(0 0 0 / 0.4); display: grid; place-items: center; z-index: 50; padding: 16px; }
-.modal { width: min(480px, 100%); padding: 22px; display: grid; gap: 14px; }
+.modal { width: min(480px, 100%); max-height: calc(100dvh - 32px); overflow: auto; padding: 22px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; overflow-wrap: anywhere; }
 
 .section-title { font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); font-weight: 600; margin: 4px 0; }
 .kv { display: grid; grid-template-columns: 140px 1fr; gap: 6px 12px; font-size: 13px; }
@@ -374,6 +383,22 @@ button.ai-provider-open { display: block; flex: 1; min-width: 0; padding: 0; tex
 .bar > span { display: block; height: 100%; background: var(--accent); }
 
 @media (max-width: 600px) {
+  .login-form { padding: 22px 18px; }
+  .login-actions { flex-direction: column; align-items: stretch; }
+  input:not([type="checkbox"]):not([type="color"]), textarea, select { font-size: 16px; min-width: 0; }
+  .plan-overview { grid-template-columns: minmax(0, 1fr); }
+  .plan-overview .row, .page .row-setting .row { flex-wrap: wrap; }
+  .plan-overview .pill { white-space: normal; }
+  .row-setting { flex-direction: column; gap: 8px; }
+  .row-setting > div { width: 100%; min-width: 0; overflow-wrap: anywhere; }
+  .row-setting input { max-width: 100%; }
+  .row-setting .segmented { flex-wrap: wrap; }
+  .kv { grid-template-columns: minmax(0, 1fr); overflow-wrap: anywhere; }
+  .mcp-tokens form > .row { flex-direction: column; align-items: stretch; }
+  .mcp-tokens .pill { overflow-wrap: anywhere; }
+  .mcp-tokens .pill button { white-space: normal; height: auto; padding-block: 8px; }
+  .integrations-toolbar { flex-wrap: wrap; }
+  .integrations-toolbar > input { flex: 1 1 200px; width: auto; }
   .page { padding: 24px 14px 32px; }
   .dashboard-intro { margin-bottom: 20px; }
   .dashboard-intro h1 { font-size: clamp(26px, 8vw, 34px); }

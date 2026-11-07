@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { Popover } from "radix-ui";
 export { Select } from "./Select.js";
 
 /** Closes on outside click and Escape. */
@@ -28,11 +29,24 @@ export function Menu(props: {
 }) {
   const [open, setOpen] = useState(false);
   const close = () => setOpen(false);
-  const ref = useDismiss<HTMLDivElement>(open, close);
   return (
-    <div className="menu-anchor" ref={ref}>
-      {props.button(open, () => setOpen((o) => !o))}
-      {open && <div className={`${props.className ?? "popover"} ${props.align ?? "left"} ${props.up ? "up" : ""}`}>{props.children(close)}</div>}
+    <div className="menu-anchor">
+      <Popover.Root open={open} onOpenChange={setOpen}>
+        <Popover.Trigger asChild>
+          {props.button(open, () => setOpen((o) => !o))}
+        </Popover.Trigger>
+        <Popover.Portal>
+          <Popover.Content
+            className={`${props.className ?? "popover"} menu-content`}
+            side={props.up ? "top" : "bottom"}
+            align={props.align === "right" ? "end" : "start"}
+            sideOffset={6}
+            collisionPadding={10}
+          >
+            {props.children(close)}
+          </Popover.Content>
+        </Popover.Portal>
+      </Popover.Root>
     </div>
   );
 }

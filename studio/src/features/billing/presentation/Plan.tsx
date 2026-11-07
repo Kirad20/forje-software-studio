@@ -50,7 +50,7 @@ export function Plan() {
       </div>
 
       {tab === "plan" && (
-        <div className="card" style={{ padding: 16, display: "grid", gridTemplateColumns: "minmax(220px, 300px) 1fr", gap: 18 }}>
+        <div className="card plan-overview">
           <div className="plan-card">
             <span className="pill" style={{ justifySelf: "start", background: "#1f2937", color: "#d1d5db" }}>AUTOALOJADO</span>
             <div style={{ fontSize: 30, fontWeight: 700 }}>

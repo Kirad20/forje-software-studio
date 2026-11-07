@@ -85,7 +85,7 @@ export function UserMenu({ me, up, asLogo }: { me: Me; up?: boolean; asLogo?: bo
             <Logo size={24} /> ▾
           </button>
         ) : (
-        <button className="ghost" style={{ width: "100%", justifyContent: "flex-start", height: 40, padding: "0 8px" }} onClick={toggle}>
+        <button className="ghost account-menu-trigger" aria-label="Menú de cuenta" style={{ width: "100%", justifyContent: "flex-start", height: 40, padding: "0 8px" }} onClick={toggle}>
           <span className="mini-avatar" style={{ background: "#4f46e5" }}>
             {(me.name || me.email).slice(0, 1).toUpperCase()}
           </span>
@@ -105,7 +105,9 @@ export function UserMenu({ me, up, asLogo }: { me: Me; up?: boolean; asLogo?: bo
           <div className="menu-sep" />
           <MenuItem onClick={() => (close(), go("/"))}>Proyectos</MenuItem>
           <MenuItem onClick={() => (close(), go("/plan"))}>Plan y uso</MenuItem>
+          <MenuItem onClick={() => (close(), go("/integrations"))}>Integraciones</MenuItem>
           <MenuItem onClick={() => (close(), go("/account"))}>Cuenta</MenuItem>
+          {me.platformRole === "admin" && <MenuItem onClick={() => (close(), go("/admin"))}>Administración</MenuItem>}
           <div className="menu-sep" />
           <div className="row" style={{ padding: "4px 10px" }}>
             <span className="small grow">Tema</span>
