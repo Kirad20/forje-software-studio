@@ -6,6 +6,7 @@ export interface PublicationPorts {
   readAllFiles(id: string): Promise<FileMap>;
   checkProject(files: FileMap): Promise<BuildProblem[]>;
   scan(id: string, files: FileMap): Promise<PublicationFinding[]>;
+  applyMigrations(id: string, files: FileMap): Promise<{ applied: string[] }>;
   recordPublish(id: string, slug: string, files: FileMap, author: Author): Promise<unknown>;
   unpublish(id: string): Promise<unknown>;
   scheduleProject(id: string): Promise<unknown>;

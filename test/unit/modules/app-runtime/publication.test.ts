@@ -11,6 +11,7 @@ function fixture() {
     readAllFiles: vi.fn(async () => files),
     checkProject: vi.fn(async () => []),
     scan: vi.fn(async () => []),
+    applyMigrations: vi.fn(async () => ({ applied: [] })),
     recordPublish: vi.fn(async (_id, slug, snapshot) => { live.slug = slug; live.files = snapshot as typeof live.files; }),
     unpublish: vi.fn(async () => {}),
     scheduleProject: vi.fn(async () => {}),
@@ -27,6 +28,7 @@ describe("publication application", () => {
     expect(live).toEqual({ slug: "live-app", files: { "pages/_index.tsx": "old" } });
     expect(ports.recordPublish).not.toHaveBeenCalled();
     expect(ports.scheduleProject).not.toHaveBeenCalled();
+    expect(ports.applyMigrations).not.toHaveBeenCalled();
     expect(ports.scan).not.toHaveBeenCalled();
   });
 
@@ -36,6 +38,7 @@ describe("publication application", () => {
     await expect(runtime.publishProject("p", "replacement")).rejects.toThrow("seguridad críticos");
     expect(live.slug).toBe("live-app");
     expect(ports.recordPublish).not.toHaveBeenCalled();
+    expect(ports.applyMigrations).not.toHaveBeenCalled();
   });
 
   it("snapshots exactly the verified files before refreshing jobs; ignored critical findings do not block", async () => {
@@ -44,6 +47,8 @@ describe("publication application", () => {
     await expect(runtime.publishProject("p", "Nueva app", "builder")).resolves.toEqual({ slug: "nueva-app", url: "https://nueva-app.example.test" });
     expect(live).toEqual({ slug: "nueva-app", files });
     expect(ports.recordPublish).toHaveBeenCalledWith("p", "nueva-app", files, "builder");
+    expect(ports.applyMigrations).toHaveBeenCalledWith("p", files);
+    expect(vi.mocked(ports.applyMigrations).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(ports.recordPublish).mock.invocationCallOrder[0]!);
     expect(vi.mocked(ports.recordPublish).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(ports.scheduleProject).mock.invocationCallOrder[0]!);
   });
 
@@ -52,6 +57,33 @@ describe("publication application", () => {
     vi.mocked(ports.isSlugTaken).mockResolvedValue(true);
     await expect(runtime.publishProject("p", "taken-name")).rejects.toThrow("ya está en uso");
     expect(ports.readAllFiles).not.toHaveBeenCalled();
+  });
+
+  it("does not advance the published files or schedule jobs when a migration fails", async () => {
+    const { ports, runtime, live } = fixture();
+    vi.mocked(ports.applyMigrations).mockRejectedValueOnce(new Error("Migration failed"));
+    await expect(runtime.publishProject("p", "replacement")).rejects.toThrow("Migration failed");
+    expect(live.slug).toBe("live-app");
+    expect(ports.recordPublish).not.toHaveBeenCalled();
+    expect(ports.scheduleProject).not.toHaveBeenCalled();
+  });
+
+  it("serializes concurrent publishes for the same project", async () => {
+    const { ports, runtime } = fixture();
+    let releaseFirst!: () => void;
+    const firstMigration = new Promise<void>((resolve) => { releaseFirst = resolve; });
+    vi.mocked(ports.applyMigrations)
+      .mockImplementationOnce(async () => { await firstMigration; return { applied: [] }; })
+      .mockImplementation(async () => ({ applied: [] }));
+
+    const first = runtime.publishProject("p");
+    await vi.waitFor(() => expect(ports.applyMigrations).toHaveBeenCalledOnce());
+    const second = runtime.publishProject("p");
+    await Promise.resolve();
+    expect(ports.applyMigrations).toHaveBeenCalledOnce();
+    releaseFirst();
+    await Promise.all([first, second]);
+    expect(ports.applyMigrations).toHaveBeenCalledTimes(2);
   });
 
   it("withdraws the snapshot before rescheduling jobs", async () => {

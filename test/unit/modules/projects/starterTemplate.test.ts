@@ -57,6 +57,7 @@ describe("opt-in orders/invoices starter", () => {
     const invoice = load(files, "jobs/invoice.ts").default;
     const orderInvoiced = load(files, "jobs/order-invoiced.ts").default;
     const pg = await PGlite.create();
+    await pg.exec(files["migrations/001_orders.sql"]!);
     const db = {
       exec: (sql: string) => pg.exec(sql),
       one: async (sql: string, params: unknown[] = []) => (await pg.query(sql, params)).rows[0],

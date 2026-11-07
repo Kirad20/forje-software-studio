@@ -19,7 +19,7 @@ export interface ContextPorts extends ObserverPorts {
   getObject(projectId: string, key: string): Promise<{ data: Uint8Array; contentType: string; filename: string } | null>;
   deleteObject(projectId: string, key: string): Promise<void>;
   listObjects(projectId: string): Promise<(StoredObject & { createdAt: string })[]>;
-  projectDb(projectId: string): ProjectDb;
+  projectDb(projectId: string, env: AppEnv): ProjectDb;
   cacheRepository(db: ProjectDb): CacheRepository;
   secretEnv(projectId: string): Promise<Record<string, string>>;
   publish(projectId: string, channel: string, data: unknown): number;

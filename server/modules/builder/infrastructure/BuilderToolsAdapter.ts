@@ -4,7 +4,7 @@ import { fetchPublicText } from "../../../shared/safeFetch.js";
 import { callRuntimeEndpoint, serveApp } from "../../app-runtime/index.js";
 import { config } from "../../../shared/config.js";
 import { runJob } from "../../app-services/jobs.js";
-import { describeSchema, execSql } from "../../app-services/projectDb.js";
+import { applyProjectMigrations, describeSchema, execSql } from "../../app-services/projectDb.js";
 import { listSecrets, requestSecret } from "../../app-services/secrets.js";
 import type { Account } from "../../identity/contracts.js";
 import { readLogs } from "../../project-observability/events.js";
@@ -22,11 +22,11 @@ import { publishProject } from "../../app-runtime/index.js";
 import { previewOrigin, previewUrl } from "../../app-runtime/index.js";
 import { findSymbol, projectMap, relatedFiles } from "./projectIndex.js";
 import { rewriteImports } from "./rename.js";
-import { isSafeProjectPath, ownsFile } from "../domain/FinishGatePolicy.js";
+import { isMigrationPath, isSafeProjectPath, ownsFile } from "../domain/FinishGatePolicy.js";
 import { allSkills, findSkill, renderSkill } from "./skills.js";
 import { standardsScan } from "../domain/Standards.js";
 import { normalizeProjectProfile } from "../../projects/index.js";
-import { assertSafeAgentSql } from "../domain/AgentSqlPolicy.js";
+import { assertSafePreviewSql, containsDataChange, containsSchemaChange } from "../domain/AgentSqlPolicy.js";
 import { assertOwnerRequestedForget, assertOwnerSourcedMemory } from "../domain/MemoryProvenance.js";
 import { assertOwnerRequestedAuthSetup, assertOwnerRequestedPublish, assertOwnerRequestedSecret } from "../domain/OwnerActionPolicy.js";
 
@@ -65,6 +65,29 @@ function assertOwned(ctx: ToolContext, p: string) {
       `Este archivo no es tuyo en esta tarea: ${p}. Tus archivos: ${ctx.owned.join(", ")}. Si de verdad hace falta cambiarlo, dilo en tu resumen final y el planificador lo asignará.`,
     );
   }
+}
+
+function assertNotMigrationFile(p: string) {
+  if (isMigrationPath(p)) {
+    throw new Error("Los archivos de migrations/ se crean únicamente con execute_sql; no los escribas, edites, renombres ni borres directamente.");
+  }
+}
+
+function nextMigrationPath(files: Record<string, string>) {
+  const timestamp = BigInt(new Date().toISOString().replace(/\D/g, "").slice(0, 17));
+  const lastId = Object.keys(files).reduce((max, path) => {
+    const match = /^migrations\/(\d+)_.*\.sql$/.exec(path);
+    if (!match) return max;
+    const id = BigInt(match[1]!);
+    return id > max ? id : max;
+  }, 0n);
+  let id = timestamp > lastId ? timestamp : lastId + 1n;
+  let path = `migrations/${id.toString().padStart(17, "0")}_builder.sql`;
+  while (Object.hasOwn(files, path)) {
+    id++;
+    path = `migrations/${id.toString().padStart(17, "0")}_builder.sql`;
+  }
+  return path;
 }
 
 const noteWrite = (ctx: ToolContext, ...paths: string[]) => {
@@ -212,7 +235,7 @@ export const builderTools: BuilderTool[] = [
   {
     name: "project_map",
     description:
-      "Mapa compacto del proyecto: rutas, endpoints y sus tablas, componentes y quién los usa, helpers, tareas, notas y el esquema de la base de datos. Empieza por aquí en vez de leer todo.",
+      "Mapa compacto del proyecto: rutas, endpoints y sus tablas, componentes y quién los usa, helpers, tareas, notas y el esquema de la base de datos de vista previa. Empieza por aquí en vez de leer todo.",
     input_schema: obj({}),
     async run(_i, ctx) {
       return clip(projectMap(await builderCoreModules().projects.readAllFiles(ctx.projectId), await describeSchema(ctx.projectId, true)));
@@ -287,9 +310,10 @@ export const builderTools: BuilderTool[] = [
   }),
   {
     name: "write_file",
-    description: "Crea o reemplaza un archivo completo. Para cambios en un archivo existente usa edit_file (gasta muchos menos tokens).",
+    description: "Crea o reemplaza un archivo completo, excepto migrations/*.sql, que se generan únicamente con execute_sql. Para cambios en un archivo existente usa edit_file (gasta muchos menos tokens).",
     input_schema: obj({ path: str("Ruta, p. ej. pages/_index.tsx"), content: str("Contenido completo") }, ["path", "content"]),
     async run(i: { path: string; content: string }, ctx) {
+      assertNotMigrationFile(i.path);
       assertOwned(ctx, i.path);
       await builderCoreModules().projects.writeFile(ctx.projectId, i.path, i.content, ctx.author, ctx.actor);
       noteWrite(ctx, i.path);
@@ -315,6 +339,7 @@ export const builderTools: BuilderTool[] = [
       ["path"],
     ),
     async run(i: { path: string; old_text?: string; new_text?: string; replace_all?: boolean; edits?: { old_text: string; new_text: string; replace_all?: boolean }[] }, ctx) {
+      assertNotMigrationFile(i.path);
       assertOwned(ctx, i.path);
       const edits = i.edits?.length ? i.edits : i.old_text !== undefined && i.new_text !== undefined ? [{ old_text: i.old_text, new_text: i.new_text, replace_all: i.replace_all }] : [];
       if (!edits.length) throw new Error("Hace falta old_text y new_text, o una lista edits.");
@@ -340,6 +365,7 @@ export const builderTools: BuilderTool[] = [
       "Borra un archivo. Antes revisa con related_files o find_symbol quién lo importa y quita esos imports, o la compilación fallará. Queda en el registro de cambios y se puede restaurar.",
     input_schema: obj({ path: str("Ruta") }, ["path"]),
     async run(i: { path: string }, ctx) {
+      assertNotMigrationFile(i.path);
       assertOwned(ctx, i.path);
       await builderCoreModules().projects.deleteFile(ctx.projectId, i.path, ctx.author);
       noteWrite(ctx, i.path);
@@ -352,6 +378,8 @@ export const builderTools: BuilderTool[] = [
       "Mueve o renombra un archivo y reescribe los imports que apuntan a él (y los imports relativos del propio archivo si cambia de carpeta). No mueve archivos hermanos como <Nombre>.module.css o <Nombre>.example.tsx: renómbralos con otra llamada si hace falta. Falla si la ruta nueva ya existe. Después corre check_build.",
     input_schema: obj({ from: str("Ruta actual"), to: str("Ruta nueva") }, ["from", "to"]),
     async run(i: { from: string; to: string }, ctx) {
+      assertNotMigrationFile(i.from);
+      assertNotMigrationFile(i.to);
       assertOwned(ctx, i.from);
       assertOwned(ctx, i.to);
       if (i.from === i.to) return "La ruta nueva es igual a la actual; no se cambió nada.";
@@ -471,7 +499,7 @@ export const builderTools: BuilderTool[] = [
       const qs = i.query ? "?" + new URLSearchParams(Object.entries(i.query).map(([k, v]) => [k, String(v)])) : "";
       const query = i.query ? Object.fromEntries(Object.entries(i.query).map(([k, v]) => [k, String(v)])) : undefined;
       const route = i.route.replace(/^\/?(_api\/)?/, "");
-      const session = i.as_user_email ? await testSession(ctx.projectId, i.as_user_email) : null;
+      const session = i.as_user_email ? await testSession(ctx.projectId, i.as_user_email, "preview") : null;
       try {
         const cookieHeader = session ? `${sessionCookie(ctx.projectId)}=${session.token}` : undefined;
         let status: number;
@@ -534,7 +562,7 @@ export const builderTools: BuilderTool[] = [
     ),
     async run(i: { steps: BrowserStep[]; viewport?: "desktop" | "tablet" | "mobile"; as_user_email?: string }, ctx) {
       const project = (await builderCoreModules().projects.getProject(ctx.projectId))!;
-      const session = i.as_user_email ? await testSession(ctx.projectId, i.as_user_email) : null;
+      const session = i.as_user_email ? await testSession(ctx.projectId, i.as_user_email, "preview") : null;
       try {
         return await runBrowserTest(project, {
           steps: i.steps,
@@ -637,7 +665,7 @@ export const builderTools: BuilderTool[] = [
   },
   typed({
     name: "describe_database",
-    description: "Muestra las tablas y columnas de la base de datos Postgres del proyecto.",
+    description: "Muestra las tablas y columnas de la base de datos de vista previa (una copia aislada de producción); consulta esta estructura para planear migraciones.",
     input_schema: obj({ include_internal: { type: "boolean", description: "Incluir tablas _forja_* (usuarios, sesiones)" } }),
     output_schema: out({ tables: arr(out({ name: S, columns: arr(out({ name: S, type: S, nullable: B, default: nullable("string") })) })) }),
     async data(i: { include_internal?: boolean }, ctx) {
@@ -652,21 +680,43 @@ export const builderTools: BuilderTool[] = [
   {
     name: "execute_sql",
     description:
-      "Ejecuta SQL de Postgres 18 (puede ser varias sentencias): crea/altera tablas, índices, inserta datos. La vista previa y la app publicada comparten esta base de datos: los cambios son reales.",
-    input_schema: obj({ sql: str("SQL a ejecutar") }, ["sql"]),
-    async run(i: { sql: string }, ctx) {
-      assertSafeAgentSql(i.sql);
-      const results = await execSql(ctx.projectId, i.sql);
-      return clip(
-        results
-          .map((r) => (r.fields.length ? `${r.rows.length} filas: ${JSON.stringify(r.rows.slice(0, 50))}` : `OK (${r.affectedRows} filas afectadas)`))
-          .join("\n") || "OK",
-      );
+      "Ejecuta SQL de Postgres 18 únicamente en la vista previa. El DDL se guarda primero como una migración nueva e inmutable en migrations/*.sql y luego se aplica a la vista previa; no edites ese archivo directamente. El DML de datos solamente cambia la vista previa y no se copia al publicar. Incluye la opción migration=true solo para un backfill intencional que también deba ejecutarse en producción al publicar.",
+    input_schema: obj({ sql: str("SQL a ejecutar"), migration: { type: "boolean", description: "Usar solo para un backfill de datos intencional que deba publicarse en producción; crea una migración" } }, ["sql"]),
+    async run(i: { sql: string; migration?: boolean }, ctx) {
+      assertSafePreviewSql(i.sql);
+      if (containsSchemaChange(i.sql) && containsDataChange(i.sql) && !i.migration) {
+        throw new Error("Separa el DDL del SQL de datos, o marca migration=true si esos datos son un backfill intencional que debe aplicarse también en producción.");
+      }
+      let migrationPath: string | undefined;
+      if (containsSchemaChange(i.sql) || i.migration) {
+        const projects = builderCoreModules().projects;
+        const files = await projects.readAllFiles(ctx.projectId);
+        migrationPath = nextMigrationPath(files);
+        assertOwned(ctx, migrationPath);
+        await projects.writeFile(ctx.projectId, migrationPath, i.sql, ctx.author, ctx.actor);
+      }
+      let results: Awaited<ReturnType<typeof execSql>> = [];
+      try {
+        if (migrationPath) {
+          const migrations = await builderCoreModules().projects.readAllFiles(ctx.projectId);
+          await applyProjectMigrations(ctx.projectId, migrations, "preview");
+        } else {
+          results = await execSql(ctx.projectId, i.sql, "preview");
+        }
+      } catch (error) {
+        if (migrationPath) await builderCoreModules().projects.deleteFile(ctx.projectId, migrationPath, ctx.author);
+        throw error;
+      }
+      if (migrationPath) noteWrite(ctx, migrationPath);
+      const output = results
+        .map((r) => (r.fields.length ? `${r.rows.length} filas: ${JSON.stringify(r.rows.slice(0, 50))}` : `OK (${r.affectedRows} filas afectadas)`))
+        .join("\n");
+      return clip(`${migrationPath ? `Migración ${migrationPath} aplicada en vista previa y registrada.` : "SQL aplicado solo en vista previa."}${output ? `\n${output}` : ""}`);
     },
   },
   typed({
     name: "query_database",
-    description: "Lectura: ejecuta una consulta SELECT y devuelve hasta 100 filas.",
+    description: "Lectura: ejecuta una consulta SELECT en la base de datos de vista previa y devuelve hasta 100 filas.",
     input_schema: obj({ sql: str("SELECT ...") }, ["sql"]),
     output_schema: out({ rowCount: { type: "integer", description: "Filas que devolvió la consulta" }, rows: arr({ type: "object", description: "Hasta 100 filas" }) }),
     async data(i: { sql: string }, ctx) {
@@ -806,7 +856,7 @@ export const builderTools: BuilderTool[] = [
     input_schema: obj({}),
     async run(_i, ctx) {
       if (ctx.author !== "mcp") assertOwnerRequestedAuthSetup(ctx.ownerMessage);
-      const created = await ensureOwnerAdmin(ctx.projectId, ctx.account.email);
+      const created = await ensureOwnerAdmin(ctx.projectId, ctx.account.email, "preview");
       return created
         ? `Cuenta admin creada para ${ctx.account.email} sin contraseña. El dueño la fija con «¿Olvidaste tu contraseña?» en la página de login.`
         : `Ya existía una cuenta para ${ctx.account.email}; se dejó como estaba.`;
@@ -817,7 +867,7 @@ export const builderTools: BuilderTool[] = [
     description: "Pone una contraseña temporal a un usuario de la app (solo si el dueño lo pide).",
     input_schema: obj({ email: str("Correo del usuario"), password: str("Contraseña temporal") }, ["email", "password"]),
     async run(i: { email: string; password: string }, ctx) {
-      await setTemporaryPassword(ctx.projectId, i.email, i.password);
+      await setTemporaryPassword(ctx.projectId, i.email, i.password, "preview");
       return `Contraseña temporal puesta para ${i.email}.`;
     },
   },

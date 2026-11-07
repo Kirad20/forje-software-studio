@@ -217,6 +217,18 @@ describe("app service capability boundaries", () => {
     api.stopRealtime();
   });
 
+  it("binds endpoint and job contexts to the requested database environment", async () => {
+    const projectDb = vi.fn(() => ({ query: vi.fn(), one: vi.fn(), exec: vi.fn(), transaction: vi.fn() }));
+    const api = createContext({
+      secretEnv: async () => ({}), projectDb, log: vi.fn(),
+      paymentsFor: vi.fn(), putObject: vi.fn(), getObject: vi.fn(), deleteObject: vi.fn(),
+      listObjects: vi.fn(), sendEmail: vi.fn(), appAiChat: vi.fn(), publish: vi.fn(),
+    });
+    await api.serviceContext("p", "preview", "https://preview", "endpoint");
+    await api.serviceContext("p", "published", "https://app", "job");
+    expect(projectDb.mock.calls).toEqual([["p", "preview"], ["p", "published"]]);
+  });
+
   it("requires explicit jobs binding and reports background failure without blocking requests", async () => {
     const log = vi.fn();
     const api = createContext({

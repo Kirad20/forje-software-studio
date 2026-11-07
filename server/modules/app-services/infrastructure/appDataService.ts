@@ -2,21 +2,25 @@ import { randomUUID } from "node:crypto";
 import { Hono } from "hono";
 import { isInternalServiceRequest } from "../../../shared/internalServiceAuth.js";
 import type { ProjectDb } from "../ports/database.js";
+import type { AppEnv } from "../domain/contracts.js";
 import type { SqlExecutionResult } from "./projectDbClient.js";
+import type { ProjectMigration } from "./projectDb.js";
 
 interface AppDataPorts {
-  projectDb(projectId: string): ProjectDb;
-  execSql(projectId: string, sql: string): Promise<SqlExecutionResult[]>;
-  dumpDatabase(projectId: string): Promise<Blob>;
-  closeProject(projectId: string): Promise<void>;
+  projectDb(projectId: string, env?: AppEnv): ProjectDb;
+  execSql(projectId: string, sql: string, env?: AppEnv): Promise<SqlExecutionResult[]>;
+  applyProjectMigrations(projectId: string, migrations: ProjectMigration[], env?: AppEnv): Promise<{ applied: string[] }>;
+  dumpDatabase(projectId: string, env?: AppEnv): Promise<Blob>;
+  closeProject(projectId: string, env?: AppEnv): Promise<void>;
   cloneDatabase(fromProjectId: string, toProjectId: string): Promise<void>;
   closeAll(): Promise<void>;
-  isAwake(projectId: string): boolean | Promise<boolean>;
-  dbMetrics(projectId: string): unknown | Promise<unknown>;
+  isAwake(projectId: string, env?: AppEnv): boolean | Promise<boolean>;
+  dbMetrics(projectId: string, env?: AppEnv): unknown | Promise<unknown>;
 }
 
 interface TransactionSession {
   projectId: string;
+  env: AppEnv;
   tx: Pick<ProjectDb, "query" | "one">;
   running: Promise<unknown>;
   commit(): Promise<void>;
@@ -42,24 +46,30 @@ export function createAppDataService(ports: AppDataPorts, token: string) {
     return c.json({ ok: true });
   });
   app.post("/internal/data/:projectId/query", async (c) => {
-    const { sql, params = [] } = await c.req.json<{ sql: string; params?: unknown[] }>();
-    return c.json(await ports.projectDb(c.req.param("projectId")).query(sql, params));
+    const { sql, params = [], env = "published" } = await c.req.json<{ sql: string; params?: unknown[]; env?: AppEnv }>();
+    return c.json(await ports.projectDb(c.req.param("projectId"), env).query(sql, params));
   });
   app.post("/internal/data/:projectId/exec", async (c) => {
-    const { sql } = await c.req.json<{ sql: string }>();
-    await ports.projectDb(c.req.param("projectId")).exec(sql);
+    const { sql, env = "published" } = await c.req.json<{ sql: string; env?: AppEnv }>();
+    await ports.projectDb(c.req.param("projectId"), env).exec(sql);
     return c.json({ ok: true });
   });
   app.post("/internal/data/:projectId/exec-sql", async (c) => {
-    const { sql } = await c.req.json<{ sql: string }>();
-    return c.json(await ports.execSql(c.req.param("projectId"), sql));
+    const { sql, env = "preview" } = await c.req.json<{ sql: string; env?: AppEnv }>();
+    return c.json(await ports.execSql(c.req.param("projectId"), sql, env));
+  });
+  app.post("/internal/data/:projectId/migrations/apply", async (c) => {
+    const { migrations, env = "preview" } = await c.req.json<{ migrations: ProjectMigration[]; env?: AppEnv }>();
+    return c.json(await ports.applyProjectMigrations(c.req.param("projectId"), migrations, env));
   });
   app.post("/internal/data/:projectId/dump", async (c) => {
-    const dump = await ports.dumpDatabase(c.req.param("projectId"));
+    const { env = "preview" } = await c.req.json<{ env?: AppEnv }>();
+    const dump = await ports.dumpDatabase(c.req.param("projectId"), env);
     return c.json({ data: Buffer.from(await dump.arrayBuffer()).toString("base64") });
   });
   app.post("/internal/data/:projectId/close", async (c) => {
-    await ports.closeProject(c.req.param("projectId"));
+    const { env } = await c.req.json<{ env?: AppEnv }>();
+    await ports.closeProject(c.req.param("projectId"), env);
     return c.json({ ok: true });
   });
   app.post("/internal/data/:projectId/clone", async (c) => {
@@ -67,10 +77,17 @@ export function createAppDataService(ports: AppDataPorts, token: string) {
     await ports.cloneDatabase(c.req.param("projectId"), toProjectId);
     return c.json({ ok: true });
   });
-  app.post("/internal/data/:projectId/awake", async (c) => c.json(await ports.isAwake(c.req.param("projectId"))));
-  app.post("/internal/data/:projectId/metrics", async (c) => c.json(await ports.dbMetrics(c.req.param("projectId"))));
+  app.post("/internal/data/:projectId/awake", async (c) => {
+    const { env } = await c.req.json<{ env?: AppEnv }>();
+    return c.json(await ports.isAwake(c.req.param("projectId"), env));
+  });
+  app.post("/internal/data/:projectId/metrics", async (c) => {
+    const { env = "preview" } = await c.req.json<{ env?: AppEnv }>();
+    return c.json(await ports.dbMetrics(c.req.param("projectId"), env));
+  });
   app.post("/internal/data/:projectId/transaction/begin", async (c) => {
     const projectId = c.req.param("projectId");
+    const { env = "published" } = await c.req.json<{ env?: AppEnv }>();
     const transactionId = randomUUID();
     let resolveReady!: (tx: Pick<ProjectDb, "query" | "one">) => void;
     let rejectReady!: (error: unknown) => void;
@@ -84,14 +101,14 @@ export function createAppDataService(ports: AppDataPorts, token: string) {
       finish = resolve;
       abort = reject;
     });
-    const running = ports.projectDb(projectId).transaction(async (tx) => {
+    const running = ports.projectDb(projectId, env).transaction(async (tx) => {
       resolveReady(tx);
       await completion;
     });
     void running.catch(rejectReady);
     const tx = await ready;
     const session: TransactionSession = {
-      projectId,
+      projectId, env,
       tx,
       running,
       async commit() {

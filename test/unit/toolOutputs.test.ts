@@ -23,7 +23,7 @@ afterAll(async () => {
  * so the split must not change a byte.
  */
 const BEFORE: Record<string, string> = {
-  "list_files {}": "Archivos:\n  endpoints/items_GET.ts (82 B)\n  helpers/sum.ts (52 B)\n  pages/_index.tsx (59 B)\n\nPáginas: / ← pages/_index.tsx\nEndpoints: GET /_api/items\nTareas: ninguna",
+  "list_files {}": "Archivos:\n  endpoints/items_GET.ts (82 B)\n  helpers/sum.ts (52 B)\n  migrations/20260101000000000_fixture.sql (88 B)\n  pages/_index.tsx (59 B)\n\nPáginas: / ← pages/_index.tsx\nEndpoints: GET /_api/items\nTareas: ninguna",
   "read_files {\"paths\":[\"helpers/sum.ts\",\"pages/_index.tsx:2-3\",\"nope.ts\"]}": "### helpers/sum.ts\n   1\texport const sum = (a: number, b: number) => a + b;\n   2\t\n\n### pages/_index.tsx (líneas 2-3 de 4)\n   2\t  return <h1>Hola</h1>;\n   3\t}\n\n### nope.ts\n(no existe)",
   "search_code {\"pattern\":\"export\",\"path_prefix\":\"helpers/\"}": "helpers/sum.ts:1: export const sum = (a: number, b: number) => a + b;",
   "search_code {\"pattern\":\"zzz_nothing\"}": "Sin coincidencias.",

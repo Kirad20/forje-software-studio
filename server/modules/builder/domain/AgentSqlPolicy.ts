@@ -151,7 +151,10 @@ export function assertSafeAgentSql(sql: string): void {
       assertProjectObject(statement, /^CREATE\s+(?:UNIQUE\s+)?INDEX\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:"(?:""|[^"])+"|[a-z_][a-z_0-9$]*)\s+ON\s+/i);
       continue;
     }
-    if (/^CREATE\s+TYPE\b/i.test(statement) && /\bAS\s+ENUM\b/i.test(statement)) continue;
+    if (/^CREATE\s+TYPE\b/i.test(statement) && /\bAS\s+ENUM\b/i.test(statement)) {
+      assertProjectObject(statement, /^CREATE\s+TYPE\s+(?:IF\s+NOT\s+EXISTS\s+)?/i);
+      continue;
+    }
     if (
       /^ALTER\s+TABLE\b/i.test(statement) &&
       /\bADD\b/i.test(statement) &&
@@ -165,5 +168,55 @@ export function assertSafeAgentSql(sql: string): void {
       continue;
     }
     throw new Error("SQL del agente rechazado: solo se permiten CREATE TABLE/INDEX, CREATE TYPE AS ENUM, ALTER TABLE aditivo e INSERT sin UPDATE por conflicto.");
+  }
+}
+
+export function containsSchemaChange(sql: string): boolean {
+  return redactSqlData(sql)
+    .split(";")
+    .some((statement) => /^\s*(?:CREATE\s+(?:(?:UNIQUE|TEMP|TEMPORARY)\s+)?(?:TABLE|INDEX)\b|CREATE\s+TYPE\b|ALTER\s+TABLE\b)/i.test(statement));
+}
+
+export function containsDataChange(sql: string): boolean {
+  return redactSqlData(sql)
+    .split(";")
+    .some((statement) => /^\s*(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM|TRUNCATE)\b/i.test(statement));
+}
+
+/** Builder SQL is confined to preview; it may change preview rows but not platform-owned objects. */
+export function assertSafePreviewSql(sql: string): void {
+  const statements = redactSqlData(sql).split(";").map((statement) => statement.trim()).filter(Boolean);
+  if (!statements.length) throw new Error("No hay ninguna sentencia SQL para ejecutar.");
+
+  for (const statement of statements) {
+    if (/^CREATE\s+(?:(?:UNIQUE|TEMP|TEMPORARY)\s+)?TABLE\b/i.test(statement) ||
+        /^CREATE\s+(?:UNIQUE\s+)?INDEX\b/i.test(statement) ||
+        /^CREATE\s+TYPE\b/i.test(statement) ||
+        /^ALTER\s+TABLE\b/i.test(statement)) {
+      assertSafeAgentSql(statement);
+      continue;
+    }
+    if (/^INSERT\s+INTO\b/i.test(statement)) {
+      assertProjectObject(statement, /^INSERT\s+INTO\s+(?:ONLY\s+)?/i);
+      continue;
+    }
+    if (/^UPDATE\b/i.test(statement)) {
+      assertProjectObject(statement, /^UPDATE\s+(?:ONLY\s+)?/i);
+      continue;
+    }
+    if (/^DELETE\s+FROM\b/i.test(statement)) {
+      assertProjectObject(statement, /^DELETE\s+FROM\s+(?:ONLY\s+)?/i);
+      continue;
+    }
+    if (/^TRUNCATE\s+(?:TABLE\s+)?(?:ONLY\s+)?/i.test(statement)) {
+      const prefix = /^TRUNCATE\s+(?:TABLE\s+)?(?:ONLY\s+)?/i;
+      const target = statement.slice(prefix.exec(statement)?.[0].length ?? 0);
+      if (!/^(?:"(?:""|[^"])+"|[a-z_][a-z_0-9$]*)(?:\.(?:"(?:""|[^"])+"|[a-z_][a-z_0-9$]*))?$/i.test(target)) {
+        throw new Error("SQL del agente rechazado: TRUNCATE solo puede afectar una tabla de la app.");
+      }
+      assertProjectObject(statement, prefix);
+      continue;
+    }
+    throw new Error("SQL del agente rechazado: solo se permite SQL de datos en vista previa y DDL aditivo registrado como migración.");
   }
 }

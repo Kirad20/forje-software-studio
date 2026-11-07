@@ -42,8 +42,8 @@ The public projects module also exports `starterFiles(name, template?)`.
 This demo has no payment, email, authentication or personal data. Its endpoints
 are intentionally public. Before using it for real orders, add authentication,
 owner checks, quotas, and private status access. The fixed price is computed on
-the server, never trusted from a browser. Demo tables initialize additively on the
-first API request; do not use that bootstrap on an existing incompatible schema.
+the server, never trusted from a browser. Demo tables are created through the starter's SQL migration in preview and
+applied to production at publication; do not use it on an incompatible schema.
 
 The starter applies DDD and hexagonal boundaries within Forja's project layout:
 `helpers/<context>/domain.ts` holds pure domain types and rules,
@@ -93,8 +93,9 @@ validation rather than silently reverting topology.
 All public HTTP paths stay `/_api/<route>`. Ordinary relative and `~/` helper
 imports continue working. Isolation is separate process replica pools keyed by
 **project + environment + service**. It is not database-per-service isolation:
-all services use the **same project database**, owned by app-runtime, including
-the existing shared preview/published data. Process-local memory is not a durable
+all services in an environment use the **same project database**, owned by
+app-runtime. Preview uses an independent copy of production; changes to preview
+data do not affect published data. Process-local memory is not a durable
 coordination mechanism.
 
 ## Run and scale
@@ -178,9 +179,12 @@ The authenticated project API uses existing owner/editor project membership:
   it to return entrypoints to the monolith without changing routes or data.
   Drain in-flight/queued work before changing worker routing, especially when
   using service-filtered consumers.
-- Inspect the existing database first. Apply additive migrations using
-  `describe_database` / `execute_sql`; preserve rows and existing constraints.
-  Do not overwrite unrelated project tables with the demo schema.
+- Inspect preview with `describe_database`. Record schema changes with `execute_sql`
+  in `migrations/<timestamp>_name.sql` before applying them. Data-only changes stay
+  in preview; use `migration: true` only for intentional production backfills.
+  Publishing applies pending migrations, never preview rows. Keep applied files
+  immutable and add new files for later changes. Review destructive migrations:
+  a preview copy is not a production backup. Do not overwrite unrelated tables.
 - `ctx.jobs.run` starts immediately in the background and resolves before the
   job completes; failures are written to project logs. `ctx.jobs.runAt` schedules
   work. Use `enqueue` for durable asynchronous acceptance and retries.

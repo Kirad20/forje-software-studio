@@ -21,6 +21,7 @@ function databasePorts() {
     query, exec, transaction,
     projectDb: () => db,
     execSql: vi.fn(async () => [{ fields: ["id"], rows: [{ id: "u1" }], affectedRows: 0 }]),
+    applyProjectMigrations: vi.fn(async () => ({ applied: ["migrations/001_schema.sql"] })),
     dumpDatabase: vi.fn(async () => new Blob(["database"])),
     closeProject: vi.fn(async () => {}),
     cloneDatabase: vi.fn(async () => {}),
@@ -79,13 +80,16 @@ it("returns the supported database lifecycle operations", async () => {
   await expect((await post("/internal/data/project-1/exec-sql", { sql: "select 1" })).json()).resolves.toEqual([
     { fields: ["id"], rows: [{ id: "u1" }], affectedRows: 0 },
   ]);
+  await expect((await post("/internal/data/project-1/migrations/apply", {
+    env: "preview", migrations: [{ path: "migrations/001_schema.sql", sql: "create table notes(id int);" }],
+  })).json()).resolves.toEqual({ applied: ["migrations/001_schema.sql"] });
   const dump = await post("/internal/data/project-1/dump");
   await expect(dump.json()).resolves.toEqual({ data: Buffer.from("database").toString("base64") });
   await post("/internal/data/project-1/close");
   await post("/internal/data/project-1/clone", { toProjectId: "project-2" });
   await post("/internal/data/close-all");
 
-  expect(ports.closeProject).toHaveBeenCalledWith("project-1");
+  expect(ports.closeProject).toHaveBeenCalledWith("project-1", undefined);
   expect(ports.cloneDatabase).toHaveBeenCalledWith("project-1", "project-2");
   expect(ports.closeAll).toHaveBeenCalledOnce();
 });
@@ -101,5 +105,5 @@ it("exposes project database timing metrics through the internal service", async
 
   expect(response.status).toBe(200);
   await expect(response.json()).resolves.toMatchObject({ active: true, opens: 1, operations: 2 });
-  expect(ports.dbMetrics).toHaveBeenCalledWith("project-1");
+  expect(ports.dbMetrics).toHaveBeenCalledWith("project-1", "preview");
 });

@@ -43,4 +43,4 @@ export function createProjectRowsRepository(database: (projectId: string) => Pro
     },
   };
 }
-export const projectRowsRepository = createProjectRowsRepository(projectDb, one);
+export const projectRowsRepository = createProjectRowsRepository((projectId) => projectDb(projectId, "preview"), one);

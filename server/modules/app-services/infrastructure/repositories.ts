@@ -2,6 +2,7 @@ import { one, q } from "../../../shared/database/index.js";
 import { projectDb } from "./projectDb.js";
 import type { AuthRepository, QueryRepository } from "../ports/repositories.js";
 import type { ProjectDb, DatabasePorts } from "../ports/database.js";
+import type { AppEnv } from "../domain/contracts.js";
 
 const statements: Record<string, string> = {
   authEmailExists: `select 1 from _forja_users where email = $1`,
@@ -152,8 +153,8 @@ export function createQueryRepository(driver: DatabasePorts): QueryRepository {
   };
 }
 export const platformRepository = createQueryRepository({ q, one });
-export function authRepository(projectId: string): AuthRepository {
-  return createAuthRepository(projectDb(projectId));
+export function authRepository(projectId: string, env: AppEnv = "published"): AuthRepository {
+  return createAuthRepository(projectDb(projectId, env));
 }
 export function createAuthRepository(db: ProjectDb): AuthRepository {
   return {
@@ -166,5 +167,5 @@ export function createAuthRepository(db: ProjectDb): AuthRepository {
   };
 }
 export function schemaRows(projectId: string) {
-  return projectDb(projectId).query<{ table_name: string; column_name: string; data_type: string; is_nullable: string; column_default: string | null }>(statement("projectSchema"));
+  return projectDb(projectId, "preview").query<{ table_name: string; column_name: string; data_type: string; is_nullable: string; column_default: string | null }>(statement("projectSchema"));
 }
