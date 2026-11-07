@@ -4,12 +4,12 @@
 - cluster-only mode — file stats not available
 
 ## Summary
-- 4612 nodes · 12037 edges · 198 communities (161 shown, 37 thin omitted)
-- Extraction: 95% EXTRACTED · 5% INFERRED · 0% AMBIGUOUS · INFERRED: 626 edges (avg confidence: 0.86)
+- 4621 nodes · 12066 edges · 190 communities (158 shown, 32 thin omitted)
+- Extraction: 95% EXTRACTED · 5% INFERRED · 0% AMBIGUOUS · INFERRED: 627 edges (avg confidence: 0.86)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `d2bc2de3`
+- Built from commit: `fe23b59a`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -189,7 +189,6 @@
 - GithubRepository
 - forja
 - Cómo está hecho
-- JobCron
 - IdentityRandom
 - motion.tsx
 - RealtimeTransport
@@ -197,18 +196,11 @@
 - CLAUDE.md
 - Durable jobs worker
 - CoreModulesDependencies
+- service-worker.js
 - { api, auth, storage, ai }
 - { BuildError, buildClient, buildExamples, checkProject, compileServerModule, endpointRoutes, pageRoutes, exampleFiles, jobFiles, readJobSettings, formatProblem }
 - { BUILTIN_PACKAGES, MANIFEST, readDeps, writeDeps, isValidPackageName, packageName, isNodeBuiltin, depsDir, ensureDeps, resolvePackage, withManifestLock }
 - { publishProject, unpublishProject }
-- { quickScan, findSecret, formatFinding }
-- { runBrowserTest, inspectPreview, allowedRequest, closeBrowser }
-- { SandboxRunError, runInSandbox, stopSandbox, stopAllSandboxes, getSandboxServices, restartSandboxService }
-- { serveApp, parseCookies, cookie }
-- { SHARE_COOKIE, RESERVED_SLUG, shareToken, checkShareToken, previewOrigin, previewUrl, appUrl, parseAppHost }
-- { typecheckProject, parseDiagnostics, verifyBuild }
-- { syncProject, holdSync, releaseSync, watchLinked, startGithubSync, stopGithubSync, reschedulePoll }
-- { getSecurity, saveScan, startDeepScan, setIgnored }
 - TEST_DATABASE_URL
 
 ## God Nodes (most connected - your core abstractions)
@@ -230,679 +222,667 @@
   docs/superpowers/plans/2026-11-01-panel-admin.md → studio/src/features/files/presentation/Panels.tsx
 - `1. Chat y agente del constructor` --references--> `selectContext()`  [INFERRED]
   docs/inventario-lovable.md → server/modules/builder/infrastructure/projectIndex.ts
+- `Conexión` --references--> `Tx`  [INFERRED]
+  docs/superpowers/specs/2026-11-01-panel-admin-design.md → server/shared/database/index.ts
 - `Task 2: Registro y almacén de ajustes` --references--> `SettingsError`  [INFERRED]
   docs/superpowers/plans/2026-11-01-panel-admin.md → server/modules/settings/domain/PlatformSetting.ts
-- `9. Publicar, hosting y crecimiento` --references--> `useHead()`  [INFERRED]
-  docs/inventario-lovable.md → sdk/client/internal/router.ts
 
 ## Import Cycles
 - None detected.
 
-## Communities (198 total, 37 thin omitted)
+## Communities (190 total, 32 thin omitted)
 
 ### Community 0 - "Chat.tsx"
-Cohesion: 0.05
-Nodes (71): ChatStreamEvent, api, builderController, streamGet, streamPost, fusionDisplay(), FusionEvent, PHASES (+63 more)
+Cohesion: 0.06
+Nodes (70): lucide-react, radix-ui, react, go(), listeners, administrationController, api, modelBlockers() (+62 more)
 
 ### Community 1 - "q"
-Cohesion: 0.04
-Nodes (21): PostgresMemberRepository, PostgresOrganizationSkillsRepository, PostgresAccountLifecycleRepository, PostgresApiTokenRepository, PostgresLoginCodeRepository, PostgresPasswordResetRepository, PostgresSessionRepository, AdminApiTokenInfo (+13 more)
+Cohesion: 0.05
+Nodes (74): ChatStreamEvent, api, builderController, streamGet, streamPost, fusionDisplay(), FusionEvent, PHASES (+66 more)
 
 ### Community 2 - "BuilderTurnAdapter.ts"
-Cohesion: 0.06
-Nodes (64): Implementation plan document (`static/__dev/plan.md`), describeSchema, rewardOf(), checkPlanDoc(), criteriaOf(), planOverview(), formatStandard(), toolByName (+56 more)
+Cohesion: 0.07
+Nodes (16): LoginWithPasswordUseCase, RequestLoginCodeUseCase, UpdateAccountNameUseCase, VerifyLoginCodeUseCase, Account, AccountProps, Email, COMMON_PASSWORDS (+8 more)
 
 ### Community 3 - "react"
-Cohesion: 0.08
-Nodes (56): lucide-react, radix-ui, react, administrationController, api, modelBlockers(), ModelReadiness, playgroundModel() (+48 more)
+Cohesion: 0.07
+Nodes (43): createCatalogService(), allowedModels(), deleteModel(), importProviderModels(), listCatalog(), modelReadiness(), permitAccountModel(), saveModel() (+35 more)
 
 ### Community 4 - "bootstrap/server.ts"
-Cohesion: 0.04
-Nodes (44): AppEnv, appErrorPage(), AppHost, AppRuntimeHttpPorts, createAppRuntimeHttpApp(), handleAppRuntimeRequest(), RequestPorts, resolveApp() (+36 more)
+Cohesion: 0.08
+Nodes (54): Implementation plan document (`static/__dev/plan.md`), describeSchema, ScheduleTasksUseCase, rewardOf(), checkPlanDoc(), criteriaOf(), planOverview(), active (+46 more)
 
 ### Community 5 - "studioApi.ts"
-Cohesion: 0.05
-Nodes (50): createStudioApi(), Env, SESSION_COOKIE, StudioApiModules, aiUsage, analyticsSummary, listEmails, receiveEmail (+42 more)
+Cohesion: 0.10
+Nodes (52): api, appServicesController, AddRowDialog(), Analytics, AnalyticsPanel(), Bars(), Col, DataPanel() (+44 more)
 
 ### Community 6 - "AgentExecution.ts"
 Cohesion: 0.06
-Nodes (30): RunAgentUseCase, RunTaskLaneUseCase, ScheduleTasksUseCase, addUsage(), AgentEvent, AgentExecutionResult, AgentExecutionSpec, Block (+22 more)
+Nodes (50): createStudioApi(), Env, SESSION_COOKIE, StudioApiModules, aiUsage, analyticsSummary, listEmails, receiveEmail (+42 more)
 
 ### Community 7 - "projects/application/usecases.ts"
 Cohesion: 0.06
-Nodes (40): createIdentityUseCases(), ProjectEvent, ProjectLogLine, projectsController, transport, CreateProjectOptions, createProjectUseCases(), isProjectLogLine() (+32 more)
+Nodes (50): createDependencyResolution(), PackageRegistryPort, KIT_BUILTIN, KitEntry, BUILTIN_PACKAGES, Deps, isValidPackageName(), MANIFEST (+42 more)
 
 ### Community 8 - "ProjectView.tsx"
-Cohesion: 0.07
-Nodes (54): api, Dashboard(), DeleteDialog(), IDEAS, Sort, SORT_LABEL, Status, STATUS_LABEL (+46 more)
+Cohesion: 0.06
+Nodes (9): isDevFile(), ProjectsApplication, beforeImages(), restoredFiles(), turnFileChange(), TurnChanges, createProjectsModule(), ProjectsStore (+1 more)
 
 ### Community 9 - "ProjectsStore"
 Cohesion: 0.07
-Nodes (5): isDevFile(), ProjectsApplication, createProjectsModule(), ProjectsStore, fixture()
+Nodes (42): app, monolith, AgentExecutionResult, AgentResult, calculateSpendUseCase, toolRegistry, AgentSpec, runAgent() (+34 more)
 
 ### Community 10 - "database/index.ts"
-Cohesion: 0.08
-Nodes (31): createCoreModules(), authRepository(), platformRepository, statements, NodeBootstrapCrypto, tokenFor(), encryptHeaders(), Input (+23 more)
+Cohesion: 0.10
+Nodes (45): anthropicChat(), createFusionOrchestrator(), callModel(), invoke(), proposal(), rank(), targetFor(), taskClass() (+37 more)
 
 ### Community 11 - "infrastructure/playground.ts"
-Cohesion: 0.05
-Nodes (33): admission, evaluationBuilder(), admitPlayground(), execute(), InternalRun, PLAYGROUND_ROLES, PlaygroundError, PlaygroundRole (+25 more)
+Cohesion: 0.07
+Nodes (39): ProjectEvent, ProjectLogLine, projectsController, transport, CreateProjectOptions, createProjectUseCases(), isProjectLogLine(), isProjectProblem() (+31 more)
 
 ### Community 12 - "app-runtime/index.ts"
 Cohesion: 0.06
-Nodes (36): RuntimeProjectsPort, bindRuntimeObservation(), configureRuntimeProjects(), publication, suggestSlug, AppTarget, allowedRequest(), BrowserStep (+28 more)
+Nodes (31): createLogService(), LogEntry, LogRepository, ProjectEvent, BuildProblem, createProblemService(), changed(), clearProblems() (+23 more)
 
 ### Community 13 - "FusionOrchestrator.ts"
-Cohesion: 0.09
-Nodes (35): AgentSpec, TurnState, KEYWORDS, RoleProfile, ROLES, ExecutionContextMetrics, FUSION_BUDGETS, FusionBudget (+27 more)
+Cohesion: 0.05
+Nodes (33): CalculateSpendUseCase, AgentRole, RoleName, SPECIALIST_ROLES, VALID_ROLES, ExecutionMetrics, ExecutionMetricsProps, AgentToolRole (+25 more)
 
 ### Community 14 - "http-client.ts"
 Cohesion: 0.07
-Nodes (29): api, collaborationController, EMPTY, OrgSkill, OrgSkillsSection(), View, createEvaluationUseCases(), api (+21 more)
+Nodes (25): CoreModulesDependencies, createCoreModules(), depsKey(), BcryptArgonPasswordHasher, NodeBootstrapCrypto, PlatformMailerService, PostgresLoginCodeRepository, PostgresSessionRepository (+17 more)
 
 ### Community 15 - "roles.ts"
-Cohesion: 0.05
-Nodes (32): CalculateSpendUseCase, AgentRole, RoleName, SPECIALIST_ROLES, VALID_ROLES, ExecutionMetrics, ExecutionMetricsProps, AgentToolRole (+24 more)
+Cohesion: 0.08
+Nodes (39): ADMIN_MCP_INSTRUCTIONS, AdminMcpModules, createAdminMcpHandler(), accountExists(), execute(), existingModelIds(), nonSecretKeys(), projectExists() (+31 more)
 
 ### Community 16 - "ProjectDb"
-Cohesion: 0.07
-Nodes (17): @electric-sql/pglite, CACHE_LIMITS, PROJECT_CACHE_SCHEMA, ProjectCache, AppDataPorts, createAppDataService(), TransactionSession, SqlExecutionResult (+9 more)
+Cohesion: 0.08
+Nodes (46): formatProblem(), pageRoutes(), analyticsBeacon(), appOrigin(), baasRoute(), badge(), callEndpoint(), clientBundle() (+38 more)
 
 ### Community 17 - "admission.ts"
-Cohesion: 0.07
-Nodes (20): ActiveRun, AdmissionPorts, AdmissionState, JudgeModel, MAX_JOBS, MAX_REPEATS, planRun(), runBudget() (+12 more)
+Cohesion: 0.06
+Nodes (28): AgentEvent, accountSchema, ActiveBuilderStream, BuilderServicePorts, BuilderStreamSubscriber, BuilderToolResult, BuilderTurnInput, createBuilderService() (+20 more)
 
 ### Community 18 - "FileMap"
-Cohesion: 0.09
-Nodes (21): createBuildVerification(), BuildPorts, PublicationPorts, RuntimeEvent, RuntimeObservationPorts, createProjectCheck(), ProjectCompilerPort, createPublication() (+13 more)
+Cohesion: 0.07
+Nodes (25): api, billingController, Meter(), Plan(), Usage, createEvaluationUseCases(), createIdentityUseCases(), api (+17 more)
 
 ### Community 19 - "appServer.ts"
-Cohesion: 0.09
-Nodes (44): formatProblem(), resolveServiceExecution(), analyticsBeacon(), appOrigin(), baasRoute(), badge(), callEndpoint(), clientBundle() (+36 more)
+Cohesion: 0.07
+Nodes (16): Ctx, JobCtx, ServiceCtx, Db, AppUser, Ai, AiMessage, Cache (+8 more)
 
 ### Community 20 - "sandbox.ts"
 Cohesion: 0.07
-Nodes (27): ServiceExecution, checkProject, beginTransaction(), dispatch(), getSandboxServices(), ProjectSandbox, restartSandboxService(), Run (+19 more)
+Nodes (26): ControlledService, RuntimeService, ServiceControlSnapshot, ServiceQueueEntry, ServiceReplica, ServiceRuntimeSnapshot, bindRuntimeObservation(), configureRuntimeProjects() (+18 more)
 
 ### Community 21 - "models.ts"
-Cohesion: 0.09
-Nodes (27): createCatalogService(), deleteModel(), importProviderModels(), listCatalog(), modelReadiness(), permitAccountModel(), saveModel(), ClassifiedProviderModel (+19 more)
-
-### Community 22 - "builderServer.ts"
-Cohesion: 0.08
-Nodes (29): ApplicationLifecycle, LifecycleService, startAppRuntimeEventRelay(), lifecycle, shutdown(), app, lifecycle, monolith (+21 more)
-
-### Community 23 - "domain/contracts.ts"
 Cohesion: 0.08
 Nodes (21): AiUnavailableError, createAi(), appAiChat(), AiBlock, AiContextMetrics, AiFusionTrace, AiUsage, AppAiInput (+13 more)
 
+### Community 22 - "builderServer.ts"
+Cohesion: 0.07
+Nodes (27): ServiceExecution, checkProject, beginTransaction(), dispatch(), getSandboxServices(), ProjectSandbox, restartSandboxService(), Run (+19 more)
+
+### Community 23 - "domain/contracts.ts"
+Cohesion: 0.07
+Nodes (38): api, collaborationController, EMPTY, OrgSkill, OrgSkillsSection(), View, api, memoryController (+30 more)
+
 ### Community 24 - "modules/collaboration/index.ts"
 Cohesion: 0.10
-Nodes (17): CheckAccessUseCase, ProjectIdentity, ClaimInvitesUseCase, InviteMemberResult, InviteMemberUseCase, ProjectTarget, OrganizationNamesQuery, RemoveMemberUseCase (+9 more)
+Nodes (18): BuilderWorkflowUseCase, FastBuildUseCase, ReviewAndFixUseCase, TeamBuildUseCase, assertRunning(), BuilderRequestFeatures, Cancellation, ChatMode (+10 more)
 
 ### Community 25 - "server/index.ts"
-Cohesion: 0.08
-Nodes (15): Ctx, JobCtx, ServiceCtx, Db, AppUser, Ai, AiMessage, Cache (+7 more)
+Cohesion: 0.09
+Nodes (17): createBuildVerification(), BuildPorts, PublicationPorts, RuntimeEvent, RuntimeObservationPorts, RuntimeProjectsPort, createPublication(), assertPublishable() (+9 more)
 
 ### Community 26 - "App.tsx"
-Cohesion: 0.10
-Nodes (29): Admin, App(), NAV, Redirect(), Shell(), UserMenu(), InstallEvent, Pwa() (+21 more)
+Cohesion: 0.09
+Nodes (22): pg, DEV_FIXTURE, Fixture, config, DEFAULT_MODELS_ALLOW, env, resolvePublicUrl(), ROOT_DIR (+14 more)
 
 ### Community 27 - "modules/builder/index.ts"
-Cohesion: 0.09
-Nodes (32): GATE_FIXES, AgentResult, calculateSpendUseCase, toolRegistry, runAgent(), readFile(), estTokens(), GATE_THRESHOLD (+24 more)
-
-### Community 28 - "ServicePanels.tsx"
-Cohesion: 0.15
-Nodes (36): api, appServicesController, AddRowDialog(), Analytics, AnalyticsPanel(), Bars(), Col, DataPanel() (+28 more)
-
-### Community 29 - "deps.ts"
-Cohesion: 0.09
-Nodes (31): createDependencyResolution(), PackageRegistryPort, KIT_BUILTIN, KitEntry, BUILTIN_PACKAGES, Deps, isValidPackageName(), MANIFEST (+23 more)
-
-### Community 30 - "modules/identity/index.ts"
-Cohesion: 0.11
-Nodes (11): LoginWithPasswordUseCase, RequestLoginCodeUseCase, UpdateAccountNameUseCase, VerifyLoginCodeUseCase, IdentityModuleDependencies, PlatformMailerService, IdentityAccountsDependencies, IAccountRepository (+3 more)
-
-### Community 31 - "infrastructure/runner.ts"
-Cohesion: 0.13
-Nodes (35): removeProjectData, removeProjectData(), sessionCookie(), endSession, testSession, EvalError, RunRequest, recoverRuns() (+27 more)
-
-### Community 32 - "application/problems.ts"
 Cohesion: 0.07
-Nodes (20): createLogService(), LogEntry, LogRepository, BuildProblem, locate(), Problem, ProblemKind, ProblemPorts (+12 more)
-
-### Community 33 - "modules/project-knowledge/index.ts"
-Cohesion: 0.10
-Nodes (19): createKnowledgeService(), KnowledgeEngine, KnowledgeFiles, prepareCorpus(), KnowledgeAnswer, KnowledgeEdge, KnowledgeGraph, KnowledgeNode (+11 more)
-
-### Community 34 - "BuilderToolsAdapter.ts"
-Cohesion: 0.08
 Nodes (20): assertProjectObject(), assertSafeAgentSql(), objectName(), redactSqlData(), isSafeProjectPath(), assertOwnerRequestedForget(), assertOwnerSourcedMemory(), normalized() (+12 more)
 
+### Community 28 - "ServicePanels.tsx"
+Cohesion: 0.09
+Nodes (18): ActiveRun, admission, AdmissionPorts, JudgeModel, MAX_JOBS, MAX_REPEATS, RunConfiguration, executeRun() (+10 more)
+
+### Community 29 - "deps.ts"
+Cohesion: 0.10
+Nodes (27): createProviderService(), deleteProvider(), ensureProviders(), listProviders(), reloadProviders(), saveProvider(), speedFor(), tierFor() (+19 more)
+
+### Community 30 - "modules/identity/index.ts"
+Cohesion: 0.09
+Nodes (16): DeleteFileUseCase, RenameFileUseCase, WriteFileUseCase, Author, CheckpointProps, IProjectFileRepository, LogChangeInput, app (+8 more)
+
+### Community 31 - "infrastructure/runner.ts"
+Cohesion: 0.10
+Nodes (27): createMonolith(), startBindings(), stopBindings(), createSecrets(), projectSecretEnv(), secretEnv(), bindJobs, SECRET_NAME (+19 more)
+
+### Community 32 - "application/problems.ts"
+Cohesion: 0.10
+Nodes (26): Admin, App(), NAV, Redirect(), Shell(), UserMenu(), InstallEvent, Pwa() (+18 more)
+
+### Community 33 - "modules/project-knowledge/index.ts"
+Cohesion: 0.11
+Nodes (25): createRouterAdministration(), routerStats(), creditsForUsd(), ExecutionContextMetrics, FUSION_BUDGETS, FusionBudget, FusionEffort, FusionPattern (+17 more)
+
+### Community 34 - "BuilderToolsAdapter.ts"
+Cohesion: 0.07
+Nodes (39): dependencies, @anthropic-ai/sdk@^1.3.0, clsx@^2.1.1, croner@^11.0.0, @electric-sql/pglite@^0.5.13, esbuild@^0.28.2, hono@^4.13.14, @hono/node-server@^2.1.5 (+31 more)
+
 ### Community 35 - "with"
+Cohesion: 0.09
+Nodes (30): SharePorts, createShareAccess(), DAY, parseHost(), PREVIEW_PREFIX, SHARE_COOKIE, ShareScope, tokenParts() (+22 more)
+
+### Community 36 - "projects/postgres.test.ts"
+Cohesion: 0.09
+Nodes (13): MemberQueries, OrganizationNamesQuery, OrganizationQueries, CollaborationModuleDependencies, createCollaborationModule(), IMemberQueries, InviteView, IOrganizationNameDirectory (+5 more)
+
+### Community 37 - "builderService.ts"
+Cohesion: 0.08
+Nodes (11): PlatformRole, PostgresAccountLifecycleRepository, AccountRow, SessionAccountRow, AccountAccessUpdate, AccountAdminView, AccountCreation, AccountLifecycleRepository (+3 more)
+
+### Community 38 - "domain/score.ts"
 Cohesion: 0.06
 Nodes (38): env, runs-on, services, steps, runs-on, steps, PLAYWRIGHT_BROWSERS_PATH, POSTGRES_PASSWORD (+30 more)
 
-### Community 36 - "projects/postgres.test.ts"
-Cohesion: 0.11
-Nodes (15): DeleteFileUseCase, RenameFileUseCase, WriteFileUseCase, Author, CheckpointProps, IProjectFileRepository, app, database (+7 more)
-
-### Community 37 - "builderService.ts"
+### Community 39 - "composition.ts"
 Cohesion: 0.10
-Nodes (14): ChatMode, accountSchema, ActiveBuilderStream, BuilderServicePorts, BuilderStreamSubscriber, BuilderToolResult, BuilderTurnInput, createBuilderService() (+6 more)
+Nodes (18): createKnowledgeService(), KnowledgeEngine, KnowledgeFiles, prepareCorpus(), KnowledgeAnswer, KnowledgeEdge, KnowledgeGraph, KnowledgeNode (+10 more)
 
-### Community 38 - "domain/score.ts"
+### Community 40 - "policies.test.ts"
+Cohesion: 0.11
+Nodes (5): AdminApiTokenError, IdentityAccountsService, createIdentityModule(), PublicAccount, fixture()
+
+### Community 41 - "builder/contracts.ts"
+Cohesion: 0.07
+Nodes (21): startAppRuntimeEventRelay(), withDefaultHeaders(), app, handleAdminMcp, handleMcp, listening(), monolith, reactions (+13 more)
+
+### Community 42 - "app-services/context.ts"
 Cohesion: 0.10
 Nodes (32): EvalSize, aggregate, clamp01(), counted(), FileMap, hygieneScore(), JUDGE_DIMENSIONS, JudgeDimension (+24 more)
 
-### Community 39 - "composition.ts"
-Cohesion: 0.11
-Nodes (29): createMonolith(), startBindings(), stopBindings(), configureJobRuntime(), configureAppServiceObserver(), configureSecretIntegrations(), initializeAppServices, bindEvaluationBuilder() (+21 more)
-
-### Community 40 - "policies.test.ts"
-Cohesion: 0.10
-Nodes (19): createAnalytics(), analyticsSummary(), browserOf(), recordPageView(), visitorId(), createEmail(), sendEmail(), sendPlatformEmail() (+11 more)
-
-### Community 41 - "builder/contracts.ts"
-Cohesion: 0.12
-Nodes (27): page(), summarize(), applySummary(), blockTokens(), callLabel(), estimateTokens(), hasResults(), KEEP_RECENT_RESULTS (+19 more)
-
-### Community 42 - "app-services/context.ts"
-Cohesion: 0.08
-Nodes (15): DEFAULT_LIMITS, RealtimeLimits, bindJobs, jobPorts, log(), storagePorts, JobRuntimePorts, RealtimeSocket (+7 more)
-
 ### Community 43 - "createIdentityModule"
-Cohesion: 0.12
-Nodes (5): AdminApiTokenError, IdentityAccountsService, createIdentityModule(), PublicAccount, fixture()
+Cohesion: 0.11
+Nodes (25): Catalog, createModelManagementQueries(), routerAudit(), updateProjectModels(), isMode(), createModelRouter(), pick(), bindModelAudit() (+17 more)
 
 ### Community 44 - "model-management/router.ts"
-Cohesion: 0.10
-Nodes (24): useFastPath(), createTurnFeedback(), penalizeTurn(), posteriors, gamma(), gaussian(), Posterior, prior() (+16 more)
+Cohesion: 0.06
+Nodes (16): Block, BuilderTool, EvaluationAgentSpec, EvaluationBuilderPort, PlaygroundRole, Role, ToolContext, ToolOutput (+8 more)
 
 ### Community 45 - "modules/projects/index.ts"
-Cohesion: 0.15
-Nodes (21): CreateProjectInput, BeforeImage, beforeImages(), restoredFiles(), turnFileChange(), ChangeEntry, normalizeProjectProfile(), ProjectPatch (+13 more)
+Cohesion: 0.10
+Nodes (13): CreateCheckpointUseCase, CreateProjectInput, CreateProjectUseCase, Checkpoint, ProjectSnapshot, parseStarterTemplate(), starterFiles(), StarterTemplate (+5 more)
 
 ### Community 46 - "domain/services.ts"
 Cohesion: 0.11
-Nodes (25): createServiceControl(), restart(), scale(), snapshot(), endpointRoutes(), jobFiles(), ControlledService, RuntimeService (+17 more)
+Nodes (17): CreateFinishGateUseCase, BuildProblem, newBuildProblems(), newRuntimeProblems(), Ownership, ownsFile(), problemKey(), RuntimeProblem (+9 more)
 
 ### Community 47 - "domain/messages.ts"
-Cohesion: 0.10
-Nodes (28): ClassificationPorts, createModelClassification(), importProviderModels(), analyzeHeuristic(), createModelRouter(), analyzeRequest(), pick(), parseModelClassifications() (+20 more)
+Cohesion: 0.14
+Nodes (24): page(), GATE_FIXES, summarize(), addUsage(), AgentExecutionSpec, emptyUsage(), applySummary(), blockTokens() (+16 more)
 
 ### Community 48 - "model-management/index.ts"
 Cohesion: 0.12
-Nodes (22): Catalog, createModelManagementQueries(), routerAudit(), updateProjectModels(), isMode(), routerStats(), bindCatalogService(), bindCatalogSync() (+14 more)
+Nodes (26): createProjectCheck(), ProjectCompilerPort, createServiceControl(), restart(), scale(), snapshot(), EndpointInfo, endpointRoutes() (+18 more)
 
 ### Community 49 - "infrastructure/routing.ts"
+Cohesion: 0.08
+Nodes (7): PostgresApiTokenRepository, AdminApiTokenInfo, ApiTokenInfo, ApiTokenPurpose, ApiTokenRepository, IdentityRandom, PasswordResetRepository
+
+### Community 50 - "PostgresProjectsStore"
 Cohesion: 0.12
-Nodes (24): anthropicChat(), Block, LlmMessage, LlmRequest, ModelCallError, CompatEndpoint, anthropicChat(), getClient() (+16 more)
+Nodes (10): @electric-sql/pglite, AppDataPorts, createAppDataService(), TransactionSession, SqlExecutionResult, TransactionAction, createProjectRowsRepository(), createAuthRepository() (+2 more)
 
 ### Community 51 - "IOrganizationRepository"
-Cohesion: 0.12
-Nodes (6): CreateOrgResult, CreateOrgUseCase, ManageOrgMemberUseCase, ORG_ROLES, OrgPolicy, IOrganizationRepository
+Cohesion: 0.10
+Nodes (14): createEmail(), sendEmail(), sendPlatformEmail(), createStorage(), putObject(), MAX_PROJECT_STORAGE_BYTES, StorageLimitError, StoredObject (+6 more)
 
 ### Community 52 - "application/context.ts"
-Cohesion: 0.09
-Nodes (11): AppUser, createProjectCache(), createContext(), serviceContext(), EndpointContext, enqueue(), HttpError, JobContext (+3 more)
+Cohesion: 0.11
+Nodes (15): RunAgentUseCase, Block, BuilderContextMetrics, BuilderFusionStep, BuilderFusionTrace, ContextAuditEvent, ExecutionContext, ExecutionTool (+7 more)
 
 ### Community 53 - "dependencies"
-Cohesion: 0.07
-Nodes (30): dependencies, @anthropic-ai/sdk@^1.3.0, @electric-sql/pglite@^0.5.13, esbuild@^0.28.2, hono@^4.13.14, @hono/node-server@^2.1.5, lucide-react@^1.66.0, @modelcontextprotocol/sdk@^1.32.2 (+22 more)
+Cohesion: 0.14
+Nodes (7): CreateOrgResult, CreateOrgUseCase, ManageOrgMemberUseCase, ORG_ROLES, OrgPolicy, OrgRole, IOrganizationRepository
 
 ### Community 54 - "SqlAgentTaskRepository.ts"
-Cohesion: 0.13
-Nodes (9): ListAgentTasksUseCase, TaskLifecycleUseCase, requiresFinishGate(), SqlAgentTaskRepository, AgentTaskQueries, AgentTaskView, AgentTask, AgentTaskRepository (+1 more)
-
-### Community 55 - "skills.test.ts"
-Cohesion: 0.13
-Nodes (19): builderTools, BUILDER_SYSTEM_PROMPT, AUTHORED_SKILLS, BUILTIN_SKILLS, readVendored(), Skill, unix(), VENDORED (+11 more)
+Cohesion: 0.09
+Nodes (6): PostgresMemberRepository, PostgresOrganizationRepository, PostgresOrganizationSkillsRepository, OrganizationRecord, PostgresPasswordResetRepository, q()
 
 ### Community 56 - "Plan.ts"
 Cohesion: 0.11
-Nodes (19): CheckPlanUseCase, checkContract(), CONTRACT_FILE, covers(), MAX_CONTRACT, MAX_GOAL, MAX_PLAN_DOC, MAX_TASKS (+11 more)
+Nodes (21): CheckPlanUseCase, reviewFixTasks(), checkContract(), CONTRACT_FILE, contractRoutes(), covers(), MAX_CONTRACT, MAX_GOAL (+13 more)
 
 ### Community 57 - "ref_node_fs"
-Cohesion: 0.14
-Nodes (16): Task 1: Postgres, migraciones y helper de tests, 9. Pruebas, pg, migrate(), MIGRATIONS_DIR, drop(), freshDatabase(), TEST_DATABASE_URL (+8 more)
+Cohesion: 0.10
+Nodes (11): RunTaskLaneUseCase, TaskLifecycleUseCase, ExecutionModel, requiresFinishGate(), AgentTaskRepository, LaneTask, TaskLaneHooks, TaskLanePorts (+3 more)
 
 ### Community 58 - "app-services/auth.ts"
+Cohesion: 0.10
+Nodes (15): AppEnv, appErrorPage(), AppHost, AppRuntimeHttpPorts, createAppRuntimeHttpApp(), handleAppRuntimeRequest(), RequestPorts, resolveApp() (+7 more)
+
+### Community 59 - "execution-audit/index.ts"
+Cohesion: 0.16
+Nodes (24): sessionCookie(), endSession, testSession, EvalError, RunRequest, EVAL_EMAIL, spentLast24h(), defaultJudge() (+16 more)
+
+### Community 60 - "Project"
+Cohesion: 0.14
+Nodes (25): removeProjectData, removeProjectData(), runBudget(), designSignals, ensureEvalAccount(), sweepEvalProjects(), evaluationBuilder(), evaluationResources() (+17 more)
+
+### Community 61 - "projectIndex.ts"
+Cohesion: 0.09
+Nodes (16): app, DATA, app, DATA, MODELS, ROOT, SEED, MODELS (+8 more)
+
+### Community 62 - "appRuntimeServer.ts"
+Cohesion: 0.13
+Nodes (23): lifecycle, lifecycle, stopRuntimeEventRelay(), lifecycle, monolith, server, lifecycle, seedLocal (+15 more)
+
+### Community 63 - "BootstrapService"
+Cohesion: 0.15
+Nodes (22): cloneDatabase(), closeAll(), closeProject(), dumpDatabase(), execSql(), get(), isAwake(), metricsFor() (+14 more)
+
+### Community 64 - "bundler.ts"
+Cohesion: 0.11
+Nodes (16): Task 1: Postgres, migraciones y helper de tests, 9. Pruebas, createTestCoreModules(), drop(), freshDatabase(), TEST_DATABASE_URL, dataDir, pool (+8 more)
+
+### Community 65 - "OrganizationSkillsService.ts"
+Cohesion: 0.09
+Nodes (15): vite, studioPwa(), here, blobId(), sha1(), startFakeGithub(), app, DATA (+7 more)
+
+### Community 66 - "package.json"
+Cohesion: 0.13
+Nodes (18): BUILDER_SYSTEM_PROMPT, AUTHORED_SKILLS, BUILTIN_SKILLS, readVendored(), Skill, unix(), VENDORED, VENDORED_INFO (+10 more)
+
+### Community 67 - "IPersonalOrganizationRepository"
 Cohesion: 0.13
 Nodes (21): createAuth(), confirmPasswordReset(), createSession(), ensureOwnerAdmin(), requestPasswordReset(), setTemporaryPassword(), signIn(), signUp() (+13 more)
 
-### Community 59 - "execution-audit/index.ts"
-Cohesion: 0.18
-Nodes (16): auditWindow(), ExecutionAudit, identifier(), AuditContext, AuditFilter, AuditReport, AuditStage, AuditStep (+8 more)
-
-### Community 60 - "Project"
+### Community 68 - "ProviderService.ts"
 Cohesion: 0.10
 Nodes (6): Project, ProjectProps, Visibility, PostgresProjectRepository, ProjectRow, IProjectRepository
 
-### Community 61 - "projectIndex.ts"
+### Community 69 - "github.mjs"
 Cohesion: 0.13
 Nodes (20): 2026-11-02 - Reusing ProjectIndex in Graph Traversal, buildIndex(), cache, declaredDeps(), factsOf(), FileFacts, findSymbol(), kindOf() (+12 more)
 
-### Community 62 - "appRuntimeServer.ts"
-Cohesion: 0.17
-Nodes (21): app, monolith, runtimePorts, wss, cloneDatabase(), closeAll(), closeProject(), dumpDatabase() (+13 more)
-
-### Community 63 - "BootstrapService"
-Cohesion: 0.14
-Nodes (8): BootstrapService, SetupError, COMMON_PASSWORDS, Password, BootstrapAccounts, BootstrapCrypto, BootstrapPolicy, setup()
-
-### Community 64 - "bundler.ts"
-Cohesion: 0.14
-Nodes (22): packageName(), EndpointInfo, JobInfo, PageInfo, pageRoutes(), buildClient(), BuildError, bundleBrowser() (+14 more)
-
-### Community 65 - "OrganizationSkillsService.ts"
-Cohesion: 0.18
-Nodes (9): OrganizationSkillsService, canWriteOrganizationSkill(), OrganizationSkill, OrganizationSkillContent, OrgSkillError, validateOrganizationSkill(), OrganizationSkillsRepository, SecretDetector (+1 more)
-
-### Community 66 - "package.json"
-Cohesion: 0.10
-Nodes (24): croner@^11.0.0, zod@^4.6.7, devDependencies, @babel/parser@^7.28.0, concurrently@^10.0.6, tsx@^4.23.15, @types/nodemailer@^8.0.2, @types/ws@^8.18.2 (+16 more)
-
-### Community 67 - "IPersonalOrganizationRepository"
-Cohesion: 0.14
-Nodes (6): PersonalOrganizationUseCase, Organization, OrganizationProps, PostgresPersonalOrganizationRepository, IPersonalOrganizationRepository, QueryHandle
-
-### Community 68 - "ProviderService.ts"
-Cohesion: 0.15
-Nodes (14): createProviderService(), deleteProvider(), ensureProviders(), listProviders(), reloadProviders(), saveProvider(), missingProvider(), OPENROUTER_URL (+6 more)
-
-### Community 69 - "github.mjs"
-Cohesion: 0.10
-Nodes (14): playwright-core@1.64.1, playwright-core, blobId(), sha1(), startFakeGithub(), app, DATA, jar (+6 more)
-
 ### Community 70 - "model-management/catalog.ts"
-Cohesion: 0.16
-Nodes (20): createLocalSeed(), readSeedFile(), SeedFile, tasks, allowedModels(), availableModels(), catalog(), creditsForUsd() (+12 more)
+Cohesion: 0.11
+Nodes (19): playwright-core@1.64.1, playwright-core, assertPublic(), fetchPublicText(), isPrivate(), ADMIN, assert(), cleanup() (+11 more)
 
 ### Community 71 - "createJobs"
+Cohesion: 0.10
+Nodes (10): AppUser, createProjectCache(), createContext(), serviceContext(), EndpointContext, enqueue(), HttpError, publish() (+2 more)
+
+### Community 72 - "FinishGatePolicy.ts"
+Cohesion: 0.09
+Nodes (13): createMemoryService(), labels, limits, MAX_MEMORY_CHARS, Memory, MEMORY_KINDS, MemoryKind, MemoryRepository (+5 more)
+
+### Community 73 - "Account"
+Cohesion: 0.13
+Nodes (8): CACHE_LIMITS, ProjectCache, ClaimedJob, AppEnv, createProjectCacheRepository(), PROJECT_CACHE_SCHEMA, CacheRepository, JobsApi
+
+### Community 74 - "FusionPolicy.ts"
+Cohesion: 0.09
+Nodes (5): EmailInput, AuthPorts, AuthRepository, QueryRepository, StoragePorts
+
+### Community 75 - "settings/index.ts"
+Cohesion: 0.15
+Nodes (6): PersonalOrganizationUseCase, Organization, OrganizationProps, PostgresPersonalOrganizationRepository, IPersonalOrganizationRepository, QueryHandle
+
+### Community 76 - "platform.ts"
+Cohesion: 0.14
+Nodes (22): 3. Proveedores y modelos, `llm/catalog.ts`, Pruebas de conexión, Tablas (`002_admin.sql`), tasks, availableModels(), catalog(), createPlatformCatalogService() (+14 more)
+
+### Community 77 - "Panel de administración del sistema — diseño"
+Cohesion: 0.19
+Nodes (9): OrganizationSkillsService, canWriteOrganizationSkill(), OrganizationSkill, OrganizationSkillContent, OrgSkillError, validateOrganizationSkill(), OrganizationSkillsRepository, SecretDetector (+1 more)
+
+### Community 78 - "index.tsx"
+Cohesion: 0.16
+Nodes (18): hono, AdminApiModules, body(), createAdminApi(), me(), modelIdOf(), AdministrationEnv, AdministrationRouteGroups (+10 more)
+
+### Community 79 - "createCollaborationModule"
 Cohesion: 0.16
 Nodes (19): createJobs(), addTimer(), enqueueJob(), executeJob(), fireDueTimers(), initializeAppServices(), report(), runJob() (+11 more)
 
-### Community 72 - "FinishGatePolicy.ts"
-Cohesion: 0.16
-Nodes (9): CreateFinishGateUseCase, BuildProblem, newBuildProblems(), newRuntimeProblems(), Ownership, ownsFile(), problemKey(), RuntimeProblem (+1 more)
-
-### Community 73 - "Account"
-Cohesion: 0.11
-Nodes (4): Account, AccountProps, Email, PostgresAccountRepository
-
-### Community 74 - "FusionPolicy.ts"
-Cohesion: 0.23
-Nodes (21): createFusionOrchestrator(), callModel(), invoke(), proposal(), rank(), targetFor(), taskClass(), contextMetrics() (+13 more)
-
-### Community 75 - "settings/index.ts"
-Cohesion: 0.20
-Nodes (17): PlatformSettingType, SettingDef, SettingGroup, SettingView, MOVED_ENV, createPlatformSettings(), byKey, Def (+9 more)
-
-### Community 76 - "platform.ts"
-Cohesion: 0.11
-Nodes (6): PostgresSettingsRepository, SettingsRepository, AuditAction, SettingWrite, StoredSetting, ISecretCipher
-
-### Community 77 - "Panel de administración del sistema — diseño"
-Cohesion: 0.09
-Nodes (20): 10. Documentación, 3. Proveedores y modelos, 4. Playground de agentes, 5. Enrutador, 7. Studio, 8. Errores y seguridad, Decisiones tomadas con el usuario, Fuera de alcance (+12 more)
-
-### Community 78 - "index.tsx"
-Cohesion: 0.17
-Nodes (16): clsx@^2.1.1, sonner@^2.0.8, clsx, sonner, Button, ButtonProps, Badge(), Card() (+8 more)
-
-### Community 79 - "createCollaborationModule"
-Cohesion: 0.15
-Nodes (6): MemberQueries, OrganizationQueries, createCollaborationModule(), IMemberQueries, IOrganizationQueries, fixture()
-
 ### Community 80 - "OrgRole"
-Cohesion: 0.15
-Nodes (7): OrgRole, PostgresOrganizationRepository, InviteView, MemberView, Org, OrgMemberView, OrganizationRecord
+Cohesion: 0.14
+Nodes (7): CheckAccessUseCase, ProjectIdentity, ClaimInvitesUseCase, RemoveMemberUseCase, Access, MemberAccess, IMemberRepository
 
 ### Community 81 - "PlatformSettingsService"
-Cohesion: 0.17
-Nodes (5): PlatformSettingsService, PostgresPlatformSettingsStoreAdapter, SettingsDependencies, fixture(), fixture()
+Cohesion: 0.12
+Nodes (13): KEYWORDS, RoleProfile, ROLES, Effort, AnalysisContext, Candidate, DecisionLog, Domain (+5 more)
 
 ### Community 82 - "adminApi.ts"
-Cohesion: 0.18
-Nodes (16): hono, AdminApiModules, body(), createAdminApi(), me(), modelIdOf(), AdministrationEnv, AdministrationRouteGroups (+8 more)
+Cohesion: 0.13
+Nodes (13): createSecurityService(), Finding, ScanRow, ScanView, SecurityPorts, SecurityRepository, SecurityView, securityRepository (+5 more)
 
 ### Community 83 - "memory/application/service.ts"
 Cohesion: 0.11
-Nodes (10): createMemoryService(), labels, limits, MAX_MEMORY_CHARS, Memory, MemoryKind, MemoryRepository, MemoryScope (+2 more)
+Nodes (6): PostgresSettingsRepository, SettingsRepository, AuditAction, SettingWrite, StoredSetting, ISecretCipher
 
 ### Community 84 - "agents.mjs"
-Cohesion: 0.12
-Nodes (15): app, DATA, app, DATA, MODELS, ROOT, SEED, MODELS (+7 more)
+Cohesion: 0.18
+Nodes (18): 6. API de administración, providerOf(), ollamaBaseUrl(), ollamaChat(), OllamaMessage, call(), ECHO_TOOL, errorOf() (+10 more)
 
 ### Community 85 - "client.ts"
-Cohesion: 0.20
-Nodes (11): createClient(), createAi(), createApiWorkflow(), createAuth(), { apiUrl }, createRealtime(), Handler, createStorage() (+3 more)
+Cohesion: 0.10
+Nodes (15): buildServer(), CONTEXT_TOOLS, DESTRUCTIVE, expectedVersionProp, extraTools, Hints, hintsOf(), McpModules (+7 more)
 
 ### Community 86 - "urls.ts"
-Cohesion: 0.17
-Nodes (13): SharePorts, createShareAccess(), DAY, parseHost(), PREVIEW_PREFIX, SHARE_COOKIE, ShareScope, tokenParts() (+5 more)
+Cohesion: 0.13
+Nodes (9): InviteMemberResult, InviteMemberUseCase, ProjectTarget, ProjectInvite, ProjectInviteProps, PostgresCollaborationAccountRepository, CollaborationAccount, ICollaborationAccountRepository (+1 more)
 
 ### Community 87 - "BuilderWorkflow.ts"
-Cohesion: 0.20
-Nodes (9): BuilderWorkflowUseCase, FastBuildUseCase, TeamBuildUseCase, assertRunning(), BuilderRequestFeatures, Cancellation, useFastPath(), fixture() (+1 more)
+Cohesion: 0.19
+Nodes (12): BeforeImage, ChangeEntry, normalizeProjectProfile(), ProjectPatch, ProjectProfile, SeoSettings, TurnFileChange, ordersInvoicesFiles() (+4 more)
 
 ### Community 88 - "scripts"
+Cohesion: 0.19
+Nodes (15): sonner@^2.0.8, clsx, sonner, Button, ButtonProps, Badge(), Card(), EmptyState() (+7 more)
+
+### Community 89 - "client/index.ts"
+Cohesion: 0.11
+Nodes (6): vitest, { KIT_BUILTIN }, root, sources(), files(), scopes
+
+### Community 90 - "createProjectRows"
+Cohesion: 0.20
+Nodes (16): PlatformSettingType, SettingGroup, MOVED_ENV, createPlatformSettings(), byKey, Def, defs, getPath() (+8 more)
+
+### Community 91 - "IPasswordHasher"
+Cohesion: 0.20
+Nodes (8): Task 2: Registro y almacén de ajustes, PlatformSettingsService, SettingDef, SettingsError, SettingView, SettingsDependencies, fixture(), fixture()
+
+### Community 92 - "model-management/providers.ts"
+Cohesion: 0.15
+Nodes (14): react-dom@^19.3.1, react-dom, serviceControlController, transport, Actions, failed(), Filter, KIND_LABEL (+6 more)
+
+### Community 93 - "starterTemplate.test.ts"
+Cohesion: 0.19
+Nodes (6): BootstrapService, SetupError, BootstrapAccounts, BootstrapCrypto, BootstrapPolicy, setup()
+
+### Community 94 - "mcp/server.ts"
+Cohesion: 0.14
+Nodes (18): accountStatus, connectAccount, createRepo, disconnectAccount, getLink, handleWebhook, linkRepo, oauthFinish (+10 more)
+
+### Community 95 - "AppEnv"
+Cohesion: 0.12
+Nodes (16): validateToolInput(), author, features, gemini, gpt, reply(), req, review() (+8 more)
+
+### Community 96 - "BuilderWorkflowPorts"
 Cohesion: 0.10
 Nodes (20): scripts, build, db:migrate, db:reset, db:seed, db:seed:dev, dev, dev:server (+12 more)
 
-### Community 89 - "client/index.ts"
-Cohesion: 0.17
-Nodes (14): ChatMessage, AppUser, realtime, Contract, createApi(), RouteInput, RouteOutput, Routes (+6 more)
-
-### Community 90 - "createProjectRows"
+### Community 97 - "PostgresRouterAdministrationRepository.ts"
 Cohesion: 0.15
 Nodes (10): createProjectData(), createProjectRows(), columnsFor(), createProjectRow(), deleteProjectRows(), listProjectRows(), mask(), ProjectDataError (+2 more)
 
-### Community 91 - "IPasswordHasher"
-Cohesion: 0.13
-Nodes (3): BcryptArgonPasswordHasher, IPasswordHasher, passwordNeedsRehash()
-
-### Community 92 - "model-management/providers.ts"
-Cohesion: 0.22
-Nodes (16): providers(), speedFor(), tierFor(), createCatalogSync(), lastSync(), startCatalogSync(), syncOpenRouter(), postgresProviderRepository (+8 more)
-
-### Community 93 - "starterTemplate.test.ts"
-Cohesion: 0.13
-Nodes (8): CreateCheckpointUseCase, CreateProjectUseCase, Checkpoint, starterFiles(), starterFiles(), ordersInvoicesFiles(), creation(), load()
-
-### Community 94 - "mcp/server.ts"
-Cohesion: 0.11
-Nodes (11): CONTEXT_TOOLS, DESTRUCTIVE, expectedVersionProp, extraTools, Hints, McpModules, projectIdProp, READ (+3 more)
-
-### Community 95 - "AppEnv"
-Cohesion: 0.15
-Nodes (10): ClaimedJob, createJobQueue(), poll(), processJob(), pump(), start(), stop(), AppEnv (+2 more)
-
-### Community 97 - "PostgresRouterAdministrationRepository.ts"
-Cohesion: 0.25
-Nodes (9): createRouterAdministration(), FusionPattern, RouterPosteriorRow, RouterStats, listFusionTraces(), postgresRouterAdministrationRepository, RouterAdministrationRepository, resetRouter() (+1 more)
-
 ### Community 98 - "SettingDefinition"
+Cohesion: 0.15
+Nodes (8): createUsageService(), DAILY_ACTIONS, UsageRepository, countAction(), usageRepository, actionsToday, countAction, mocks
+
+### Community 99 - "Changes.tsx"
+Cohesion: 0.11
+Nodes (15): Global Constraints, Panel de administración + Postgres — plan de implementación, Review Focus, Task 3: Proveedores y modelos en BD + seeders, Task 4: API de administración (ajustes, proveedores, modelos, sondas), Task 5: Playground de agentes y enrutador, Task 6: Studio — página de administración, Task 7: `.env`, documentación y verificación final (+7 more)
+
+### Community 100 - "Desplegar Forja en Coolify"
+Cohesion: 0.16
+Nodes (7): createIntegrationService(), Integration, INTEGRATION_TYPES, IntegrationInput, IntegrationRepository, IntegrationType, integrationRepository
+
+### Community 101 - "infrastructure/probe.ts"
 Cohesion: 0.15
 Nodes (5): SettingDefinition, SettingDefinitionProps, SettingType, SettingValue, PlatformSettingsRegistryAdapter
 
-### Community 99 - "Changes.tsx"
-Cohesion: 0.19
-Nodes (16): DiffLine, diffLines(), hunks(), baseName(), cache, ChangeCard(), diffStats(), FileChange (+8 more)
-
-### Community 100 - "Desplegar Forja en Coolify"
-Cohesion: 0.11
-Nodes (15): 1. Certificado comodín (una vez por servidor), 2. Crear el recurso, 3. Primer acceso, 4. Comprobaciones, Desplegar Forja en Coolify, Local, sin Coolify, Notas de diseño, Operación (+7 more)
-
-### Community 101 - "infrastructure/probe.ts"
-Cohesion: 0.24
-Nodes (15): 6. API de administración, providerOf(), call(), ECHO_TOOL, errorOf(), listProviderModels(), ModelProbe, perMillion() (+7 more)
-
 ### Community 102 - "internal/router.ts"
+Cohesion: 0.23
+Nodes (15): api, integrationsController, GithubCard, GithubCommitCard(), GithubSection(), Link, Mark(), CreateDialog() (+7 more)
+
+### Community 103 - "ISettingsStore"
+Cohesion: 0.20
+Nodes (12): AppUser, realtime, Contract, createApi(), RouteInput, RouteOutput, Routes, RouteSpec (+4 more)
+
+### Community 104 - "integrations/index.ts"
 Cohesion: 0.20
 Nodes (15): base(), Window, client, currentPath(), ForjaApp(), Link(), listeners, matchRoute() (+7 more)
 
-### Community 103 - "ISettingsStore"
+### Community 105 - "compilerOptions"
+Cohesion: 0.22
+Nodes (6): ListAgentTasksUseCase, SqlAgentTaskRepository, AgentTaskQueries, AgentTaskView, AgentTask, TaskCompletion
+
+### Community 107 - "sandboxWorker.mjs"
 Cohesion: 0.24
 Nodes (6): GetPlatformSettingsUseCase, UpdatePlatformSettingsUseCase, createSettingsModule(), SettingsModuleDependencies, ISettingsRegistry, ISettingsStore
 
-### Community 104 - "integrations/index.ts"
-Cohesion: 0.24
-Nodes (14): api, integrationsController, GithubCard, GithubCommitCard(), GithubSection(), Link, Mark(), CreateDialog() (+6 more)
-
-### Community 105 - "compilerOptions"
+### Community 108 - "OrchestrationPolicy.ts"
 Cohesion: 0.11
 Nodes (17): compilerOptions, esModuleInterop, isolatedModules, jsx, lib, module, moduleResolution, noEmit (+9 more)
 
-### Community 106 - "domain/securityScan.ts"
+### Community 109 - "accountLifecycle.ts"
 Cohesion: 0.21
 Nodes (15): FileMap, Finding, findSecret(), formatFinding(), isClient(), isCode(), isServer(), lineOf() (+7 more)
 
-### Community 107 - "sandboxWorker.mjs"
+### Community 110 - "IntegrationRepository"
 Cohesion: 0.19
 Nodes (13): calls, deepEqual(), expect(), fmt(), HttpError, load(), modules, rpc() (+5 more)
 
-### Community 108 - "OrchestrationPolicy.ts"
-Cohesion: 0.29
-Nodes (8): ReviewAndFixUseCase, Review, reviewFixTasks(), PlanTask, SpecialistRole, FixResult, ReviewAndFixPorts, TeamReviewOutcome
-
-### Community 109 - "accountLifecycle.ts"
-Cohesion: 0.26
-Nodes (7): PlatformRole, AccountRow, SessionAccountRow, AccountAccessUpdate, AccountAdminView, AccountCreation, AccountSecurity
-
-### Community 110 - "IntegrationRepository"
-Cohesion: 0.17
-Nodes (6): createIntegrationService(), Integration, INTEGRATION_TYPES, IntegrationInput, IntegrationRepository, IntegrationType
-
 ### Community 111 - "Inventario de funciones de Lovable → Forja"
-Cohesion: 0.13
-Nodes (15): 10. Colaboración, workspace y empresa, 1. Chat y agente del constructor, 2. Verificación, pruebas y calidad, 3. Editor y vista previa, 4. Proyectos, 5. Backend incluido («Cloud»), 6. IA dentro de las apps, 7. Conectores e integraciones (+7 more)
+Cohesion: 0.21
+Nodes (14): DiffLine, diffLines(), hunks(), baseName(), cache, ChangeCard(), diffStats(), FileChange (+6 more)
 
 ### Community 112 - "unit/catalog.test.ts"
 Cohesion: 0.13
-Nodes (9): out(), recordClassificationUsage(), dir, monolith, seedLocal, dir, BEFORE, conforms() (+1 more)
+Nodes (15): 10. Colaboración, workspace y empresa, 1. Chat y agente del constructor, 2. Verificación, pruebas y calidad, 3. Editor y vista previa, 4. Proyectos, 5. Backend incluido («Cloud»), 6. IA dentro de las apps, 7. Conectores e integraciones (+7 more)
 
 ### Community 113 - "architecture.test.ts"
-Cohesion: 0.16
-Nodes (11): SourceImport, sourceImports(), visit(), stringLiteral(), featuresRoot, files(), findCycles(), visit() (+3 more)
+Cohesion: 0.27
+Nodes (9): createClient(), ChatMessage, createAi(), createApiWorkflow(), createAuth(), createRealtime(), createStorage(), StoredFile (+1 more)
 
 ### Community 114 - "Tx"
-Cohesion: 0.14
-Nodes (11): Task 3: Proveedores y modelos en BD + seeders, 1. Capa de datos, Conexión, `.env` resultante, Infraestructura, Migraciones, Seeders, Tx (+3 more)
+Cohesion: 0.17
+Nodes (6): ApplicationLifecycle, LifecycleService, shutdown(), shutdown(), shutdown(), shutdown()
 
 ### Community 115 - "mcp/jobs.ts"
-Cohesion: 0.19
-Nodes (9): CallResult, fail(), Job, jobs, jobStatus(), MAX_WAIT_SECONDS, PENDING_SCHEMA, runOrDefer() (+1 more)
+Cohesion: 0.18
+Nodes (12): build(), Guide, guideById, guideList(), GUIDES, OVERVIEW_PARTS, parse(), readGuides() (+4 more)
 
 ### Community 116 - "createSecrets"
 Cohesion: 0.16
-Nodes (5): createSecrets(), projectSecretEnv(), secretEnv(), SECRET_NAME, SecretPorts
+Nodes (11): SourceImport, sourceImports(), visit(), stringLiteral(), featuresRoot, files(), findCycles(), visit() (+3 more)
 
 ### Community 117 - "AuthPorts"
-Cohesion: 0.15
-Nodes (3): EmailInput, AuthPorts, AuthRepository
+Cohesion: 0.13
+Nodes (15): devDependencies, @babel/parser@^7.28.0, concurrently@^10.0.6, tsx@^4.23.15, @types/nodemailer@^8.0.2, @types/ws@^8.18.2, vite@^8.3.5, @vitejs/plugin-react@^6.1.2 (+7 more)
 
 ### Community 118 - "integrations/github.ts"
-Cohesion: 0.14
-Nodes (14): accountStatus, connectAccount, createRepo, disconnectAccount, getLink, handleWebhook, linkRepo, oauthFinish (+6 more)
+Cohesion: 0.19
+Nodes (9): CallResult, fail(), Job, jobs, jobStatus(), MAX_WAIT_SECONDS, PENDING_SCHEMA, runOrDefer() (+1 more)
 
 ### Community 119 - "studio.mjs"
-Cohesion: 0.24
-Nodes (14): ADMIN, assert(), cleanup(), freePort(), get(), main(), resources, ROOT (+6 more)
+Cohesion: 0.20
+Nodes (9): visitorId, createAnalytics(), analyticsSummary(), browserOf(), recordPageView(), visitorId(), analyticsDays(), analyticsPorts (+1 more)
 
 ### Community 120 - "http.test.ts"
-Cohesion: 0.15
-Nodes (13): builderCoreModules, CollaborationModule, ProjectKnowledgeModule, account, app, collaboration, identity, knowledge (+5 more)
+Cohesion: 0.17
+Nodes (11): analyzeHeuristic(), analyzeRequest(), useFastPath(), posteriors, gamma(), gaussian(), Posterior, prior() (+3 more)
+
+### Community 121 - "PostgresProjectFileRepository"
+Cohesion: 0.25
+Nodes (8): createTurnFeedback(), penalizeTurn(), feedbackModel(), TurnModelDecision, postgresTurnFeedback, TurnFeedbackPorts, TurnFeedbackRepository, database
 
 ### Community 122 - "usage/usage.ts"
-Cohesion: 0.20
-Nodes (5): createUsageService(), DAILY_ACTIONS, UsageRepository, actionsToday, countAction
+Cohesion: 0.21
+Nodes (10): appHeaders(), clientIp(), createRateLimiter(), RateLimitError, RateLimitQuery, RateLimitStoreError, startRateLimitCleanup(), stopRateLimitCleanup() (+2 more)
 
 ### Community 123 - "Audit.tsx"
 Cohesion: 0.32
 Nodes (11): AuditReport, AuditStep, contextChange(), ContextMetrics, Audit(), ContextTrend(), count(), money() (+3 more)
 
 ### Community 124 - "Evals.tsx"
-Cohesion: 0.23
-Nodes (11): api, evaluationsController, Agg, EvalCfg, Evals(), Metric(), money(), RunDetail (+3 more)
-
-### Community 125 - "Memory.tsx"
-Cohesion: 0.21
-Nodes (11): api, memoryController, Kind, kindOf(), KINDS, Memory, MemoryList(), MemorySection() (+3 more)
-
-### Community 126 - "models/presentation/Models.tsx"
 Cohesion: 0.25
 Nodes (11): api, modelsController, AccountModels(), ModelChecklist(), ModelRow, MODES, price(), ProjectModels() (+3 more)
 
-### Community 127 - "projectMicroservices.test.ts"
-Cohesion: 0.18
-Nodes (4): assertPublic(), fetchPublicText(), isPrivate(), endpoint()
+### Community 125 - "Memory.tsx"
+Cohesion: 0.23
+Nodes (11): [command, ...flags], main(), monolith, seedDev, seedLocal, createDevelopmentSeed(), createLocalSeed(), readSeedFile() (+3 more)
 
-### Community 128 - "vitest"
-Cohesion: 0.17
-Nodes (6): react-dom, vitest, root, sources(), files(), scopes
-
-### Community 129 - "adminServer.ts"
-Cohesion: 0.18
-Nodes (12): ADMIN_MCP_INSTRUCTIONS, AdminMcpModules, descriptions, fusionCapability, id, modelIds, modelPatch, schemas (+4 more)
-
-### Community 130 - "collaboration/postgresAdapters.test.ts"
+### Community 126 - "models/presentation/Models.tsx"
 Cohesion: 0.18
 Nodes (8): PlatformCollaborationMailerService, SendInvitationParams, collaboration, collaborationAccountRepository, collaborationMailerService, memberRepository, organizationRepository, sendInvitation
 
-### Community 132 - "services"
+### Community 127 - "projectMicroservices.test.ts"
 Cohesion: 0.17
 Nodes (11): environment, ports, environment, environment, ports, ports, services, app-runtime (+3 more)
 
-### Community 133 - "GithubGateway"
-Cohesion: 0.18
-Nodes (4): 2. Ajustes globales, Almacén, Registro, GithubGateway
-
-### Community 134 - "createAdminMcpHandler"
-Cohesion: 0.26
-Nodes (11): createAdminMcpHandler(), accountExists(), execute(), existingModelIds(), nonSecretKeys(), projectExists(), admin, call() (+3 more)
-
-### Community 136 - "app-services/payments.ts"
+### Community 128 - "vitest"
 Cohesion: 0.27
 Nodes (6): CheckoutInput, createPayments(), paymentsFor(), paymentPorts, paymentsFor, PaymentPorts
 
-### Community 137 - "GithubAccountRepository"
+### Community 129 - "adminServer.ts"
+Cohesion: 0.24
+Nodes (7): connectAccount(), GithubError, Link, SyncResult, gh(), tokenFor(), setup()
+
+### Community 130 - "collaboration/postgresAdapters.test.ts"
 Cohesion: 0.20
 Nodes (3): createGithubAccountService(), GithubAccountRepository, setup()
 
-### Community 138 - "createGithubSyncService"
+### Community 131 - "AccountLifecycleRepository"
 Cohesion: 0.30
 Nodes (11): createGithubSyncService(), branchHead(), doSync(), pull(), releaseSync(), reschedulePoll(), startGithubSync(), stopGithubSync() (+3 more)
 
-### Community 139 - "services"
+### Community 132 - "services"
 Cohesion: 0.18
 Nodes (10): environment, image, restart, volumes, services, postgres, volumes, forja-data (+2 more)
 
-### Community 140 - "Review Focus"
-Cohesion: 0.18
-Nodes (9): Global Constraints, Panel de administración + Postgres — plan de implementación, Review Focus, Task 2: Registro y almacén de ajustes, Task 4: API de administración (ajustes, proveedores, modelos, sondas), Task 5: Playground de agentes y enrutador, Task 6: Studio — página de administración, Task 7: `.env`, documentación y verificación final (+1 more)
+### Community 133 - "GithubGateway"
+Cohesion: 0.22
+Nodes (10): 10. Documentación, 2. Ajustes globales, 4. Playground de agentes, 5. Enrutador, 7. Studio, 8. Errores y seguridad, Almacén, Panel de administración del sistema — diseño (+2 more)
 
-### Community 141 - "e2e.mjs"
-Cohesion: 0.20
-Nodes (6): DATA, jar, req(), ROOT, server, signInAs()
-
-### Community 142 - "cli.ts"
-Cohesion: 0.24
-Nodes (9): [command, ...flags], main(), monolith, seedDev, seedLocal, createDevelopmentSeed(), DEV_FIXTURE, Fixture (+1 more)
-
-### Community 143 - "unit/mcp.test.ts"
-Cohesion: 0.24
-Nodes (8): guideList(), readGuides(), buildServer(), hintsOf(), projectContext(), projectInTokenScope(), SERVER_INSTRUCTIONS, TOOL_HINTS
-
-### Community 144 - "spring.ts"
+### Community 134 - "createAdminMcpHandler"
 Cohesion: 0.22
 Nodes (5): clip(), normalize(), parseSpringOutput(), SpringBuildTool, SpringProject
 
-### Community 146 - "accounts.ts"
-Cohesion: 0.27
-Nodes (6): connectAccount(), GithubError, Link, SyncResult, gh(), setup()
+### Community 135 - "deps.test.ts"
+Cohesion: 0.24
+Nodes (4): DEFAULT_LIMITS, RealtimeLimits, RealtimeSocket, publish
 
-### Community 147 - "PostgresCatalogRepository.ts"
+### Community 137 - "GithubAccountRepository"
+Cohesion: 0.25
+Nodes (4): AdmissionState, planRun(), startEvaluation(), fixture()
+
+### Community 138 - "createGithubSyncService"
 Cohesion: 0.29
-Nodes (7): audit(), bindModelAudit(), columns, postgresCatalogRepository, Row, postgresModelAudit(), ModelAudit
+Nodes (8): buildGraphView(), GraphCard, GraphConnection, GraphEdge, GraphNode, GraphQuestion, ProjectGraph, ProjectKnowledge()
 
-### Community 148 - "fusion.test.ts"
-Cohesion: 0.22
-Nodes (9): author, features, gemini, gpt, reply(), req, review(), scope (+1 more)
-
-### Community 149 - "postgres"
+### Community 139 - "services"
 Cohesion: 0.24
 Nodes (10): condition, depends_on, condition, depends_on, app-runtime, builder, postgres, depends_on (+2 more)
 
-### Community 150 - "healthcheck"
+### Community 140 - "Review Focus"
 Cohesion: 0.53
 Nodes (10): healthcheck, healthcheck, healthcheck, interval, retries, start_period, test, timeout (+2 more)
 
-### Community 151 - "settingReactions.ts"
+### Community 141 - "e2e.mjs"
+Cohesion: 0.20
+Nodes (10): 1. Certificado comodín (una vez por servidor), 2. Crear el recurso, 3. Primer acceso, 4. Comprobaciones, Desplegar Forja en Coolify, Local, sin Coolify, Notas de diseño, Operación (+2 more)
+
+### Community 145 - "ProjectDbClient"
 Cohesion: 0.22
-Nodes (3): createSettingReactions(), SettingReactionPorts, SettingsChangePort
+Nodes (6): DATA, jar, req(), ROOT, server, signInAs()
 
-### Community 152 - "BuilderRunRegistry"
-Cohesion: 0.24
-Nodes (3): BuilderRunRegistry, isBuilding(), stopBuilding()
+### Community 146 - "accounts.ts"
+Cohesion: 0.25
+Nodes (4): { apiUrl }, ApiError, createHttp(), HttpTransport
 
-### Community 155 - "ref_node_path"
-Cohesion: 0.33
-Nodes (4): vite, studioPwa(), here, database
+### Community 147 - "PostgresCatalogRepository.ts"
+Cohesion: 0.22
+Nodes (7): createMcpHandler(), CollaborationModule, account, collaboration, handleMcp, identity, projects
 
-### Community 156 - "guides.ts"
-Cohesion: 0.28
-Nodes (8): build(), Guide, guideById, GUIDES, OVERVIEW_PARTS, parse(), SECTION_IDS, slug()
-
-### Community 158 - "Plan.tsx"
-Cohesion: 0.42
-Nodes (6): api, billingController, Meter(), Plan(), Usage, bytes()
-
-### Community 159 - "args"
+### Community 151 - "settingReactions.ts"
 Cohesion: 0.46
 Nodes (8): build, BROWSER, args, context, dockerfile, build, build, build
 
-### Community 160 - "app-runtime"
+### Community 152 - "BuilderRunRegistry"
 Cohesion: 0.25
 Nodes (8): command, environment, expose, labels, restart, stop_grace_period, volumes, app-runtime
 
-### Community 161 - "One project: orders API and durable invoice worker"
+### Community 153 - "Plan"
+Cohesion: 0.25
+Nodes (5): Barra lateral del panel, Inventario de interfaz de Floot → Forja, Panel de proyectos, Services (tres columnas: servicios · lista · detalle; los usados primero, el resto atenuado), Vista de proyecto
+
+### Community 154 - ".execute"
 Cohesion: 0.25
 Nodes (7): Focused validation, Migration and limitations, One project: orders API and durable invoice worker, Run and scale, Studio service control center, Topology contract, What the example does
 
-### Community 162 - "forms.tsx"
+### Community 155 - "ref_node_path"
 Cohesion: 0.46
 Nodes (7): Checkbox, describe(), Field(), FieldProps, Input, Select, Textarea
 
-### Community 163 - "apiTypes.test.ts"
+### Community 156 - "guides.ts"
 Cohesion: 0.54
 Nodes (6): apiTypes(), doc(), key(), methodName(), Schema, schemaToTs()
 
-### Community 164 - "transports/mcp.test.ts"
-Cohesion: 0.25
-Nodes (6): createMcpHandler(), account, collaboration, handleMcp, identity, projects
-
-### Community 168 - "builder"
+### Community 160 - "app-runtime"
 Cohesion: 0.29
 Nodes (7): command, environment, expose, restart, stop_grace_period, volumes, builder
 
-### Community 169 - "job-worker"
+### Community 161 - "One project: orders API and durable invoice worker"
 Cohesion: 0.29
 Nodes (7): command, environment, expose, restart, stop_grace_period, volumes, job-worker
 
-### Community 173 - "forja"
+### Community 162 - "forms.tsx"
+Cohesion: 0.29
+Nodes (7): Arranque, Cómo está hecho, Forja, Límites conocidos, Paridad con Floot, ctx(), usage()
+
+### Community 163 - "apiTypes.test.ts"
+Cohesion: 0.48
+Nodes (6): createJobQueue(), poll(), processJob(), pump(), start(), stop()
+
+### Community 166 - "GithubProjectPorts"
 Cohesion: 0.33
 Nodes (6): environment, expose, restart, stop_grace_period, volumes, forja
 
-### Community 174 - "Cómo está hecho"
+### Community 167 - "ProjectEvent"
 Cohesion: 0.33
-Nodes (6): Arranque, Cómo está hecho, Forja, Límites conocidos, Paridad con Floot, ctx()
+Nodes (6): 1. Capa de datos, Conexión, `.env` resultante, Infraestructura, Migraciones, Seeders
 
-### Community 177 - "motion.tsx"
+### Community 169 - "job-worker"
+Cohesion: 0.67
+Nodes (3): audit(), postgresModelAudit(), ModelAudit
+
+### Community 170 - "ports/storage.ts"
+Cohesion: 0.33
+Nodes (4): calls, model, recordContextEvent, usage
+
+### Community 171 - "FastBuildPorts"
 Cohesion: 0.50
 Nodes (3): motion@^14.9.0, motion, FadeIn()
 
+### Community 174 - "Cómo está hecho"
+Cohesion: 0.67
+Nodes (3): Decisiones tomadas con el usuario, Fuera de alcance, Objetivo
+
 ## Knowledge Gaps
-- **14 isolated node(s):** `{ KIT_BUILTIN }`, `{ api, auth, storage, ai }`, `{ BuildError, buildClient, buildExamples, checkProject, compileServerModule, endpointRoutes, pageRoutes, exampleFiles, jobFiles, readJobSettings, formatProblem }`, `{ BUILTIN_PACKAGES, MANIFEST, readDeps, writeDeps, isValidPackageName, packageName, isNodeBuiltin, depsDir, ensureDeps, resolvePackage, withManifestLock }`, `{ publishProject, unpublishProject }` (+9 more)
+- **14 isolated node(s):** `{ api, auth, storage, ai }`, `{ BuildError, buildClient, buildExamples, checkProject, compileServerModule, endpointRoutes, pageRoutes, exampleFiles, jobFiles, readJobSettings, formatProblem }`, `{ BUILTIN_PACKAGES, MANIFEST, readDeps, writeDeps, isValidPackageName, packageName, isNodeBuiltin, depsDir, ensureDeps, resolvePackage, withManifestLock }`, `{ publishProject, unpublishProject }`, `{ quickScan, findSecret, formatFinding }` (+9 more)
   These have ≤1 connection - possible missing edges or undocumented components. (Counts symbols only; 1359 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
-- **37 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+- **32 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `vitest` connect `vitest` to `Chat.tsx`, `q`, `react`, `bootstrap/server.ts`, `AgentExecution.ts`, `projects/application/usecases.ts`, `ProjectsStore`, `database/index.ts`, `infrastructure/playground.ts`, `app-runtime/index.ts`, `FusionOrchestrator.ts`, `http-client.ts`, `roles.ts`, `ProjectDb`, `admission.ts`, `FileMap`, `sandbox.ts`, `models.ts`, `builderServer.ts`, `modules/collaboration/index.ts`, `modules/builder/index.ts`, `deps.ts`, `modules/identity/index.ts`, `application/problems.ts`, `modules/project-knowledge/index.ts`, `BuilderToolsAdapter.ts`, `projects/postgres.test.ts`, `builderService.ts`, `domain/score.ts`, `composition.ts`, `policies.test.ts`, `builder/contracts.ts`, `app-services/context.ts`, `createIdentityModule`, `model-management/router.ts`, `domain/services.ts`, `domain/messages.ts`, `model-management/index.ts`, `infrastructure/routing.ts`, `IOrganizationRepository`, `application/context.ts`, `SqlAgentTaskRepository.ts`, `skills.test.ts`, `Plan.ts`, `ref_node_fs`, `execution-audit/index.ts`, `projectIndex.ts`, `BootstrapService`, `OrganizationSkillsService.ts`, `package.json`, `ProviderService.ts`, `FinishGatePolicy.ts`, `Panel de administración del sistema — diseño`, `createCollaborationModule`, `PlatformSettingsService`, `adminApi.ts`, `memory/application/service.ts`, `BuilderWorkflow.ts`, `model-management/providers.ts`, `starterTemplate.test.ts`, `PostgresRouterAdministrationRepository.ts`, `SettingDefinition`, `Changes.tsx`, `infrastructure/probe.ts`, `ISettingsStore`, `IntegrationRepository`, `unit/catalog.test.ts`, `architecture.test.ts`, `mcp/jobs.ts`, `http.test.ts`, `usage/usage.ts`, `Audit.tsx`, `projectMicroservices.test.ts`, `collaboration/postgresAdapters.test.ts`, `createAdminMcpHandler`, `deps.test.ts`, `GithubAccountRepository`, `unit/mcp.test.ts`, `accounts.ts`, `fusion.test.ts`, `settingReactions.ts`, `BuilderRunRegistry`, `ref_node_path`, `ProjectPath`, `apiTypes.test.ts`, `transports/mcp.test.ts`, `ApiError`?**
-  _High betweenness centrality (0.304) - this node is a cross-community bridge._
+- **Why does `vitest` connect `client/index.ts` to `Chat.tsx`, `q`, `BuilderTurnAdapter.ts`, `react`, `ProjectView.tsx`, `ProjectsStore`, `database/index.ts`, `infrastructure/playground.ts`, `app-runtime/index.ts`, `FusionOrchestrator.ts`, `http-client.ts`, `roles.ts`, `admission.ts`, `FileMap`, `appServer.ts`, `sandbox.ts`, `builderServer.ts`, `modules/collaboration/index.ts`, `server/index.ts`, `App.tsx`, `modules/builder/index.ts`, `ServicePanels.tsx`, `deps.ts`, `modules/identity/index.ts`, `infrastructure/runner.ts`, `modules/project-knowledge/index.ts`, `BuilderToolsAdapter.ts`, `projects/postgres.test.ts`, `composition.ts`, `policies.test.ts`, `builder/contracts.ts`, `app-services/context.ts`, `createIdentityModule`, `model-management/router.ts`, `modules/projects/index.ts`, `domain/services.ts`, `domain/messages.ts`, `model-management/index.ts`, `PostgresProjectsStore`, `IOrganizationRepository`, `application/context.ts`, `dependencies`, `Plan.ts`, `ref_node_fs`, `projectIndex.ts`, `bundler.ts`, `package.json`, `github.mjs`, `model-management/catalog.ts`, `FinishGatePolicy.ts`, `Account`, `Panel de administración del sistema — diseño`, `index.tsx`, `OrgRole`, `adminApi.ts`, `agents.mjs`, `urls.ts`, `IPasswordHasher`, `model-management/providers.ts`, `starterTemplate.test.ts`, `mcp/server.ts`, `AppEnv`, `SettingDefinition`, `Changes.tsx`, `Desplegar Forja en Coolify`, `infrastructure/probe.ts`, `compilerOptions`, `sandboxWorker.mjs`, `Inventario de funciones de Lovable → Forja`, `Tx`, `mcp/jobs.ts`, `createSecrets`, `AuthPorts`, `integrations/github.ts`, `http.test.ts`, `PostgresProjectFileRepository`, `usage/usage.ts`, `Audit.tsx`, `models/presentation/Models.tsx`, `adminServer.ts`, `collaboration/postgresAdapters.test.ts`, `accounts.ts`, `PostgresCatalogRepository.ts`, `postgres`, `guides.ts`, `transports/mcp.test.ts`, `ports/storage.ts`?**
+  _High betweenness centrality (0.337) - this node is a cross-community bridge._
 - **Are the 2 inferred relationships involving `q()` (e.g. with `infrastructure/repositories.ts` and `shared/security.ts`) actually correct?**
   _`q()` has 2 INFERRED edges - model-reasoned connections that need verification._
-- **What connects `{ KIT_BUILTIN }`, `{ api, auth, storage, ai }`, `{ BuildError, buildClient, buildExamples, checkProject, compileServerModule, endpointRoutes, pageRoutes, exampleFiles, jobFiles, readJobSettings, formatProblem }` to the rest of the system?**
+- **What connects `{ api, auth, storage, ai }`, `{ BuildError, buildClient, buildExamples, checkProject, compileServerModule, endpointRoutes, pageRoutes, exampleFiles, jobFiles, readJobSettings, formatProblem }`, `{ BUILTIN_PACKAGES, MANIFEST, readDeps, writeDeps, isValidPackageName, packageName, isNodeBuiltin, depsDir, ensureDeps, resolvePackage, withManifestLock }` to the rest of the system?**
   _14 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `Chat.tsx` be split into smaller, more focused modules?**
-  _Cohesion score 0.047058823529411764 - nodes in this community are weakly interconnected._
-- **Why does `react` connect `react` to `Chat.tsx`, `vitest`, `projects/application/usecases.ts`, `ProjectView.tsx`, `http-client.ts`, `App.tsx`, `ServicePanels.tsx`, `Plan.tsx`, `forms.tsx`, `motion.tsx`, `dependencies`, `package.json`, `index.tsx`, `client/index.ts`, `Changes.tsx`, `internal/router.ts`, `integrations/index.ts`, `Audit.tsx`, `Evals.tsx`, `Memory.tsx`, `models/presentation/Models.tsx`?**
-  _High betweenness centrality (0.106) - this node is a cross-community bridge._
+  _Cohesion score 0.05852842809364549 - nodes in this community are weakly interconnected._
+- **Why does `react` connect `Chat.tsx` to `application/problems.ts`, `q`, `BuilderToolsAdapter.ts`, `studioApi.ts`, `internal/router.ts`, `ISettingsStore`, `integrations/index.ts`, `createGithubSyncService`, `FastBuildPorts`, `Audit.tsx`, `infrastructure/playground.ts`, `Inventario de funciones de Lovable → Forja`, `model-management/providers.ts`, `FileMap`, `domain/contracts.ts`, `scripts`, `ref_node_path`, `Evals.tsx`?**
+  _High betweenness centrality (0.118) - this node is a cross-community bridge._
 - **Are the 2 inferred relationships involving `createStudioApi()` (e.g. with `readServiceRuntime()` and `restartServiceRuntime()`) actually correct?**
   _`createStudioApi()` has 2 INFERRED edges - model-reasoned connections that need verification._
 - **Should `q` be split into smaller, more focused modules?**
-  _Cohesion score 0.03820158683514546 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.04597701149425287 - nodes in this community are weakly interconnected._

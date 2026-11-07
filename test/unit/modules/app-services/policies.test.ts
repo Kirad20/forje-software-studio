@@ -221,6 +221,7 @@ describe("app service capability boundaries", () => {
     const log = vi.fn();
     const api = createContext({
       secretEnv: async () => ({ KEY: "value" }), projectDb: vi.fn(), log,
+      cacheRepository: () => ({ get: async () => undefined, set: async () => {}, delete: async () => {} }),
       paymentsFor: vi.fn(), putObject: vi.fn(), getObject: vi.fn(), deleteObject: vi.fn(),
       listObjects: vi.fn(), sendEmail: vi.fn(), appAiChat: vi.fn(), publish: vi.fn(),
     });

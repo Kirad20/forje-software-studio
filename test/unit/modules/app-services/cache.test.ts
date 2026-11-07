@@ -1,7 +1,8 @@
 import { PGlite } from "@electric-sql/pglite";
 import { afterEach, describe, expect, it } from "vitest";
 import type { ProjectDb } from "../../../../server/modules/app-services/ports/database.js";
-import { CACHE_LIMITS, createProjectCache, PROJECT_CACHE_SCHEMA } from "../../../../server/modules/app-services/application/cache.js";
+import { CACHE_LIMITS, createProjectCache } from "../../../../server/modules/app-services/application/cache.js";
+import { createProjectCacheRepository, PROJECT_CACHE_SCHEMA } from "../../../../server/modules/app-services/infrastructure/cache.js";
 
 describe("project cache", () => {
   let pg: PGlite | undefined;
@@ -27,9 +28,10 @@ describe("project cache", () => {
 
   it("shares JSON entries between replicas while keeping preview and published environments separate", async () => {
     const db = await database();
-    const previewReplicaA = createProjectCache(db, "preview");
-    const previewReplicaB = createProjectCache(db, "preview");
-    const published = createProjectCache(db, "published");
+    const repository = createProjectCacheRepository(db);
+    const previewReplicaA = createProjectCache(repository, "preview");
+    const previewReplicaB = createProjectCache(repository, "preview");
+    const published = createProjectCache(repository, "published");
 
     await previewReplicaA.set("orders:42", { status: "pending" }, 60);
     expect(await previewReplicaB.get<{ status: string }>("orders:42")).toEqual({ status: "pending" });
@@ -42,7 +44,8 @@ describe("project cache", () => {
 
   it("expires entries and validates keys, TTL, and JSON payload size", async () => {
     const db = await database();
-    const cache = createProjectCache(db, "preview");
+    const repository = createProjectCacheRepository(db);
+    const cache = createProjectCache(repository, "preview");
     await cache.set("expired", "value", 60);
     await db.query("update _forja_cache set expires_at = now() - interval '1 second' where cache_key = $1", ["expired"]);
 
@@ -56,7 +59,7 @@ describe("project cache", () => {
 
   it("caps active keys per environment but permits updating an existing key", async () => {
     const db = await database();
-    const cache = createProjectCache(db, "preview");
+    const cache = createProjectCache(createProjectCacheRepository(db), "preview");
     await db.query(
       `insert into _forja_cache (env, cache_key, value, expires_at)
        select 'preview', 'key-' || n, to_jsonb(n), now() + interval '1 hour'

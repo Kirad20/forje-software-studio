@@ -62,7 +62,7 @@ export interface JobContext extends ServiceContext {
 }
 
 export function createContext(ports: ContextPorts) {
-const { secretEnv, log, projectDb, putObject, getObject, deleteObject, listObjects, sendEmail, appAiChat, publish, paymentsFor } = ports;
+const { secretEnv, log, projectDb, cacheRepository, putObject, getObject, deleteObject, listObjects, sendEmail, appAiChat, publish, paymentsFor } = ports;
 let jobsApi: JobsApi | undefined;
 const bindJobs = (api: JobsApi) => { jobsApi = api; };
 const needJobs = () => {
@@ -82,7 +82,7 @@ async function serviceContext(projectId: string, env: AppEnv, base: string, sour
   const db = projectDb(projectId);
   return {
     db,
-    cache: createProjectCache(db, env),
+    cache: createProjectCache(cacheRepository(db), env),
     storage: {
       put: (data, opts) => putObject(projectId, typeof data === "string" ? new TextEncoder().encode(data) : data, opts),
       get: (key) => getObject(projectId, key),

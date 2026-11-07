@@ -3,7 +3,7 @@ import { PGlite } from "@electric-sql/pglite";
 import { config, paths } from "../../../shared/config.js";
 import type { ProjectDb } from "../ports/database.js";
 import { ProjectDbClient } from "./projectDbClient.js";
-import { PROJECT_CACHE_SCHEMA } from "../application/cache.js";
+import { PROJECT_CACHE_SCHEMA } from "./cache.js";
 export type { ProjectDb } from "../ports/database.js";
 
 const remote = config.appDataServiceUrl
