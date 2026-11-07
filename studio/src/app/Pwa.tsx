@@ -1,4 +1,4 @@
-import { Component, useEffect, useRef, useState, type ErrorInfo, type ReactNode } from "react";
+import { Component, createContext, useContext, useEffect, useRef, useState, type ErrorInfo, type ReactNode } from "react";
 
 export class PwaBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
   state = { failed: false };
@@ -23,7 +23,14 @@ interface InstallEvent extends Event {
   userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
 }
 
-export function Pwa() {
+const InstallContext = createContext<{ available: boolean; request: () => Promise<void> } | null>(null);
+export function usePwaInstall() {
+  const install = useContext(InstallContext);
+  if (!install) throw new Error("La instalación requiere el proveedor PWA.");
+  return install;
+}
+
+export function Pwa({ children }: { children: ReactNode }) {
   const [online, setOnline] = useState(navigator.onLine);
   const [install, setInstall] = useState<InstallEvent | null>(null);
   const [waiting, setWaiting] = useState<ServiceWorker | null>(null);
@@ -111,7 +118,19 @@ export function Pwa() {
       waiting.postMessage({ type: "ACTIVATE_UPDATE" });
     } else window.location.reload();
   };
+  const requestInstall = async () => {
+    if (!install) { setInstallHelp(true); return; }
+    setBusy(true);
+    try {
+      await install.prompt();
+      await install.userChoice;
+      setInstall(null);
+    } catch (e) { setError(`No se pudo instalar Forja: ${(e as Error).message}`); }
+    finally { setBusy(false); }
+  };
   return (
+    <InstallContext.Provider value={{ available: !installed && !!(install || ios) && !busy, request: requestInstall }}>
+      {children}
     <aside className="pwa-notices" aria-label="Estado de la aplicación">
       {!online && <div className="pwa-notice" role="status">Sin conexión. Mantén esta pestaña abierta: tus cambios sin guardar siguen aquí. El constructor y los datos requieren conexión.</div>}
       {online && (waiting || reloadNeeded) && <div className="pwa-notice" role="status">
@@ -121,19 +140,11 @@ export function Pwa() {
       {error && <div className="pwa-notice error-box" role="alert">{error}<button onClick={() => {
         if (confirm("Guarda los cambios de esta pestaña antes de reintentar. ¿Recargar Forja?")) window.location.reload();
       }}>Reintentar</button><button onClick={() => setError("")}>Cerrar</button></div>}
-      {!installed && (install || ios) && !installHelp && <button className="pwa-install" onClick={async () => {
-        if (!install) { setInstallHelp(true); return; }
-        setBusy(true);
-        try {
-          await install.prompt();
-          await install.userChoice;
-          setInstall(null);
-        } catch (e) { setError(`No se pudo instalar Forja: ${(e as Error).message}`); } finally { setBusy(false); }
-      }} disabled={busy}>Instalar Forja</button>}
       {installHelp && <div className="pwa-notice" role="status">
         <span>En Safari, abre Compartir y elige «Añadir a pantalla de inicio», luego «Añadir».</span>
         <button onClick={() => setInstallHelp(false)}>Cerrar ayuda</button>
       </div>}
     </aside>
+    </InstallContext.Provider>
   );
 }

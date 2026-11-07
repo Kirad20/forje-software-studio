@@ -6,4 +6,4 @@ import "./styles.css";
 import "./workspace.css";
 
 applyTheme(savedTheme());
-createRoot(document.getElementById("root")!).render(<><PwaBoundary><App /></PwaBoundary><Pwa /></>);
+createRoot(document.getElementById("root")!).render(<Pwa><PwaBoundary><App /></PwaBoundary></Pwa>);

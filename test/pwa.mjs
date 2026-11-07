@@ -13,6 +13,15 @@ const server = http.createServer((req, res) => {
   const url = new URL(req.url, "http://localhost");
   res.setHeader("cache-control", "no-cache");
   if (url.pathname.startsWith("/api/")) {
+    const fixture = url.pathname === "/api/me"
+      ? { account: { id: "pwa-user", name: "PWA Test", email: "pwa@example.com", credits: 0, sessions: 1, platformRole: "user" } }
+      : url.pathname === "/api/projects" ? { projects: [], shared: [] }
+      : url.pathname === "/api/folders" ? { folders: [] } : null;
+    if (fixture && req.method === "GET") {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify(fixture));
+      return;
+    }
     res.writeHead(401, { "content-type": "application/json" });
     res.end(JSON.stringify({ error: "No has iniciado sesión", private: "not-for-offline-cache" }));
     return;
@@ -70,13 +79,21 @@ try {
     });
     window.dispatchEvent(event);
   });
+  assert.equal(await page.locator(".pwa-install").count(), 0, "la instalación no debe flotar sobre el trabajo");
+  assert.equal(await page.getByRole("button", { name: "Instalar Forja", exact: true }).count(), 0);
+  await page.getByRole("button", { name: "Menú de cuenta", exact: true }).click();
   await page.getByRole("button", { name: "Instalar Forja", exact: true }).click();
   assert(await page.evaluate(() => window.installRequested), "no se pidió la instalación desde el botón");
   await page.evaluate(() => window.dispatchEvent(new Event("appinstalled")));
+  await page.getByRole("button", { name: "Menú de cuenta", exact: true }).click();
   assert(!await page.getByRole("button", { name: "Instalar Forja", exact: true }).count());
+  await page.keyboard.press("Escape");
   const apple = await browser.newContext({ userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Version/18.0 Mobile/15E148 Safari/604.1", viewport: { width: 390, height: 844 } });
   const iosPage = await apple.newPage();
   await iosPage.goto(base);
+  assert.equal(await iosPage.locator(".pwa-install").count(), 0);
+  assert.equal(await iosPage.getByText("Añadir a pantalla de inicio", { exact: false }).count(), 0);
+  await iosPage.getByRole("button", { name: "Menú de cuenta", exact: true }).click();
   await iosPage.getByRole("button", { name: "Instalar Forja", exact: true }).click();
   await iosPage.getByRole("status").filter({ hasText: "Añadir a pantalla de inicio" }).waitFor();
   await iosPage.getByRole("button", { name: "Cerrar ayuda" }).click();

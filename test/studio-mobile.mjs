@@ -25,6 +25,7 @@ const fixtures = {
   "/me/security": { hasPassword: true }, "/tokens": { tokens: [] },
   "/models": { models: [], customized: false, providers: [], openrouter: { configured: false, lastSync: null, total: 0 } },
   "/integrations": { integrations: [], types },
+  "/github": { connected: false, login: null, oauth: false, app: null, installations: [], canCreateRepo: false },
   "/projects/mobile": { project }, "/projects/mobile/services": {},
   "/projects/mobile/problems": { problems: [] }, "/projects/mobile/chat": { messages: [], tasks: [], building: false },
   "/projects/mobile/files": { files: [] }, "/projects/mobile/changes": { changes: [] },
@@ -108,6 +109,7 @@ try {
     await page.getByRole("button", { name: "Menú de cuenta" }).click();
     await fits(page.locator(".menu-content"), "account menu", true);
     await page.keyboard.press("Escape");
+    await page.waitForFunction(() => document.activeElement?.getAttribute("aria-label") === "Menú de cuenta");
     assert(await page.getByRole("button", { name: "Menú de cuenta" }).evaluate((el) => el === document.activeElement), "menu did not restore focus");
     await page.locator(".sidebar").getByRole("link", { name: "Plan y uso" }).click();
     await page.locator(".plan-overview").waitFor();

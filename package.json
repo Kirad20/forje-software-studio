@@ -24,7 +24,8 @@
     "test:agents": "node test/agents.mjs",
     "test:studio": "node test/studio.mjs",
     "test:pwa": "node test/pwa.mjs",
-    "test:github": "node test/github.mjs"
+    "test:github": "node test/github.mjs",
+    "test:github-ui": "node test/studio-github.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.3.0",

@@ -9,6 +9,7 @@ import { go, usePath } from "./router.js";
 import { applyTheme, savedTheme, type Theme } from "../shared/presentation/theme.js";
 import { identityController } from "../features/identity/index.js";
 import type { Me } from "../shared/contracts/index.js";
+import { usePwaInstall } from "./Pwa.js";
 
 export type { Me } from "../shared/contracts/index.js";
 
@@ -71,6 +72,7 @@ const NAV = [
 ] as const;
 
 export function UserMenu({ me, up, asLogo }: { me: Me; up?: boolean; asLogo?: boolean }) {
+  const install = usePwaInstall();
   const [theme, setTheme] = useState<Theme>(savedTheme());
   const pick = (t: Theme) => {
     applyTheme(t);
@@ -107,6 +109,7 @@ export function UserMenu({ me, up, asLogo }: { me: Me; up?: boolean; asLogo?: bo
           <MenuItem onClick={() => (close(), go("/plan"))}>Plan y uso</MenuItem>
           <MenuItem onClick={() => (close(), go("/integrations"))}>Integraciones</MenuItem>
           <MenuItem onClick={() => (close(), go("/account"))}>Cuenta</MenuItem>
+          {install.available && <MenuItem onClick={() => { close(); void install.request(); }}>Instalar Forja</MenuItem>}
           {me.platformRole === "admin" && <MenuItem onClick={() => (close(), go("/admin"))}>Administración</MenuItem>}
           <div className="menu-sep" />
           <div className="row" style={{ padding: "4px 10px" }}>

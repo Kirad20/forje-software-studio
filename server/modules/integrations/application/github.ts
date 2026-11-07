@@ -3,12 +3,13 @@ export class GithubError extends Error {
 }
 export interface Link {
   project_id: string; account_id: string; owner: string; repo: string; branch: string;
+  installation_id?: number | string | null;
   last_sha: string | null; last_tree: string | null; synced: Record<string, string>; status: string; error: string | null; synced_at: string | null;
 }
 export interface SyncResult { pulled: { sha: string; message: string; files: string[] }[]; pushed: { sha: string; files: string[] } | null }
 export interface GithubRepository {
   link(projectId: string): Promise<Link | null | undefined>;
-  token(accountId: string): Promise<{ token: string; login: string }>;
+  token(accountId: string, installationId?: number | null, owner?: string, repo?: string): Promise<{ token: string; login: string }>;
   saveSync(projectId: string, link: Link): Promise<void>;
   failSync(projectId: string, status: string, message: string): Promise<void>;
   linkedProjects(): Promise<string[]>;
@@ -47,7 +48,9 @@ export function createGithubSyncService(repository: GithubRepository, gateway: G
     } catch (e) { if (e instanceof GithubError && [404, 409].includes(e.status)) return null; throw e; }
   }
   async function pull(projectId: string, token: string, base: string, link: Link, headSha: string, headTree: string) {
-    const tree = await gateway.request<{ tree: { path: string; type: string; sha: string; size?: number }[] }>(token, "GET", `${base}/git/trees/${headTree}?recursive=1`);
+    const tree = await gateway.request<{ truncated?: boolean; tree: { path: string; type: string; sha: string; size?: number }[] }>(token, "GET", `${base}/git/trees/${headTree}?recursive=1`);
+    if (tree.truncated) throw new GithubError("GitHub truncó el árbol del repositorio; no se puede sincronizar sin perder archivos.", 422);
+    const present = new Set(tree.tree.map((e) => e.path));
     const remote = new Map(tree.tree.filter((e) => {
       if (e.type !== "blob" || (e.size ?? 0) > 1024 * 1024) return false;
       try { project.assertValidPath(e.path); return true; } catch { return false; }
@@ -64,7 +67,7 @@ export function createGithubSyncService(repository: GithubRepository, gateway: G
         changed.push(path);
       }
       for (const path of Object.keys(link.synced)) {
-        if (remote.has(path)) continue;
+        if (present.has(path)) continue;
         if (local[path] !== undefined && gateway.blobSha(local[path]!) === link.synced[path]) { await project.deleteFile(projectId, path, "github"); changed.push(path); }
         delete link.synced[path];
       }
@@ -82,7 +85,7 @@ export function createGithubSyncService(repository: GithubRepository, gateway: G
     if (!link) throw new GithubError("El proyecto no está conectado a GitHub.", 400);
     const result: SyncResult = { pulled: [], pushed: null };
     try {
-      const { token, login } = await repository.token(link.account_id), base = `/repos/${link.owner}/${link.repo}`;
+      const { token, login } = await repository.token(link.account_id, link.installation_id == null ? null : Number(link.installation_id), link.owner, link.repo), base = `/repos/${link.owner}/${link.repo}`;
       let head = await branchHead(token, base, link.branch);
       if (head && head.sha !== link.last_sha) {
         result.pulled = await pull(projectId, token, base, link, head.sha, head.tree);
@@ -116,7 +119,7 @@ export function createGithubSyncService(repository: GithubRepository, gateway: G
       project.emitProject(projectId, { type: "github", status: "ok" });
       return result;
     } catch (e) {
-      const status = e instanceof GithubError && e.status === 401 ? "lost_access" : "error";
+      const status = e instanceof GithubError && [401, 403, 404].includes(e.status) ? "lost_access" : "error";
       const message = status === "lost_access" ? "Forja perdió el acceso a GitHub. Vuelve a conectar tu cuenta." : (e as Error).message;
       await repository.failSync(projectId, status, message.slice(0, 500));
       project.emitProject(projectId, { type: "github", status, message });

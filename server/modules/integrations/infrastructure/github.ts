@@ -4,6 +4,7 @@ import { decrypt, encrypt } from "../../../shared/crypto.js";
 import { one, q } from "../../../shared/database/index.js";
 import { GithubError, type GithubGateway, type GithubRepository, type Link } from "../application/github.js";
 import type { GithubAccountRepository, GithubAuthorization } from "../application/accounts.js";
+import { githubAppStore } from "./apps.js";
 export async function gh<T = any>(token: string, method: string, path: string, body?: unknown): Promise<T> {
   const res = await fetch(`${config.github.apiUrl}${path}`, {
     method,
@@ -11,7 +12,18 @@ export async function gh<T = any>(token: string, method: string, path: string, b
     body: body === undefined ? undefined : JSON.stringify(body), signal: AbortSignal.timeout(30_000),
   });
   if (res.status === 204) return undefined as T;
-  const data = await res.json().catch(() => ({})) as { message?: string };
+  if (Number(res.headers.get("content-length") ?? 0) > 16 * 1024 * 1024) { await res.body?.cancel(); throw new GithubError("La respuesta de GitHub supera el límite permitido.", 422); }
+  const chunks: Uint8Array[] = [];
+  let bytes = 0;
+  if (res.body) for await (const chunk of res.body) {
+    bytes += chunk.byteLength;
+    if (bytes > 16 * 1024 * 1024) { throw new GithubError("La respuesta de GitHub supera el límite permitido.", 422); }
+    chunks.push(chunk);
+  }
+  const text = Buffer.concat(chunks).toString("utf8");
+  let data: { message?: string };
+  try { data = JSON.parse(text || "{}"); }
+  catch { if (res.ok) throw new GithubError("GitHub no devolvió JSON válido.", 502); data = {}; }
   if (!res.ok) throw new GithubError(data.message ?? `GitHub respondió ${res.status}`, res.status);
   return data as T;
 }
@@ -25,7 +37,23 @@ async function tokenFor(accountId: string) {
   return { token: decrypt(row.token_enc), login: row.login };
 }
 export const githubRepository: GithubRepository = {
-  link: (p) => one<Link>(`select * from project_github where project_id = $1`, [p]), token: tokenFor,
+  link: (p) => one<Link>(`select * from project_github where project_id = $1`, [p]),
+  async token(a, id, owner, repo) {
+    if (id == null) return tokenFor(a);
+    const i = (await githubAppStore.installations(a)).find((i) => i.id === id), app = await githubAppStore.app(a);
+    if (!i || !app) throw new GithubError("Reinstala tu GitHub App y selecciona este repositorio.", 403);
+    const jwt = await githubAppStore.appToken(a);
+    try {
+      const remote = await gh<{ app_id: number; suspended_at?: string; permissions?: { contents?: string } }>(jwt, "GET", `/app/installations/${id}`);
+      if (remote.app_id !== app.id || remote.suspended_at || remote.permissions?.contents !== "write") throw new GithubError("La instalación ya no permite escribir.", 403);
+    } catch (e) {
+      if (e instanceof GithubError && [401, 403, 404].includes(e.status)) await githubAppStore.removeInstallation(a, id);
+      throw e;
+    }
+    const selected = await gh<{ id: number }>(jwt, "GET", `/repos/${owner}/${repo}/installation`);
+    if (selected.id !== id) throw new GithubError("El repositorio ya no está seleccionado en esta instalación.", 403);
+    return { token: await githubAppStore.installationToken(a, id), login: i.login };
+  },
   async saveSync(p, link) { await q(`update project_github set last_sha = $2, last_tree = $3, synced = $4, status = 'ok', error = null, synced_at = now() where project_id = $1`, [p, link.last_sha, link.last_tree, JSON.stringify(link.synced)]); },
   async failSync(p, status, message) { await q(`update project_github set status = $2, error = $3 where project_id = $1`, [p, status, message]); },
   async linkedProjects() { return (await q<{ project_id: string }>(`select project_id from project_github where status = 'ok'`)).map((r) => r.project_id); },
@@ -35,7 +63,7 @@ export const githubGateway: GithubGateway = {
   request: gh, blobSha,
   decodeBlob(path, content, encoding) {
     const bytes = Buffer.from(content, encoding === "base64" ? "base64" : "utf8");
-    const text = /\.(tsx?|jsx?|css|md|json|txt|svg|html|csv|ya?ml|mjs|cjs)$/i.test(path) ? bytes.toString("utf8") : null;
+    const text = /\.(tsx?|jsx?|css|md|json|txt|svg|html|csv|ya?ml|mjs|cjs|sql)$/i.test(path) ? bytes.toString("utf8") : null;
     return text !== null && !text.includes("�") ? text : `base64:${bytes.toString("base64")}`;
   },
   encodeText: (content) => Buffer.from(content).toString("base64"),
@@ -52,10 +80,10 @@ export const githubAccountRepository: GithubAccountRepository = {
     await q(`update project_github set status = 'ok', error = null where account_id = $1 and status = 'lost_access'`, [a]);
   },
   async disconnect(a) { await q(`delete from github_accounts where account_id = $1`, [a]); },
-  async saveLink(p, a, owner, repo, branch) {
-    await q(`insert into project_github (project_id, account_id, owner, repo, branch) values ($1, $2, $3, $4, $5)
+  async saveLink(p, a, owner, repo, branch, installationId = null, baseline) {
+    await q(`insert into project_github (project_id, account_id, owner, repo, branch, installation_id, last_sha, last_tree, synced) values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
      on conflict (project_id) do update set account_id = excluded.account_id, owner = excluded.owner, repo = excluded.repo, branch = excluded.branch,
-       last_sha = null, last_tree = null, synced = '{}', status = 'ok', error = null`, [p, a, owner, repo, branch]);
+       installation_id = excluded.installation_id, last_sha = excluded.last_sha, last_tree = excluded.last_tree, synced = excluded.synced, status = 'ok', error = null`, [p, a, owner, repo, branch, installationId, baseline?.last_sha ?? null, baseline?.last_tree ?? null, JSON.stringify(baseline?.synced ?? {})]);
   },
   async unlink(p) { await q(`delete from project_github where project_id = $1`, [p]); },
   async webhookLinks(owner, repo, branch) { return (await q<{ project_id: string }>(`select project_id from project_github where lower(owner) = lower($1) and lower(repo) = lower($2) and branch = $3`, [owner, repo, branch])).map((r) => r.project_id); },

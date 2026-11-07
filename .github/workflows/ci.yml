@@ -43,6 +43,7 @@ jobs:
       - run: npm run test:e2e
       - run: npm run test:agents
       - run: npm run test:github
+      - run: npm run test:github-ui
       - run: npm run test:studio
 
   # The deployable image still builds and boots.

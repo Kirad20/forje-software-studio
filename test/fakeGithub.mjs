@@ -1,7 +1,7 @@
 // A small in-memory GitHub REST API: users, repos, the Git Data API (blobs, trees,
 // commits, refs) and the contents API, with real git blob ids. Enough for Forja's sync.
 import http from "node:http";
-import { createHash } from "node:crypto";
+import { createHash, generateKeyPairSync } from "node:crypto";
 
 const sha1 = (s) => createHash("sha1").update(s).digest("hex");
 const blobId = (buf) => createHash("sha1").update(`blob ${buf.length}\0`).update(buf).digest("hex");
@@ -12,6 +12,12 @@ export function startFakeGithub({ token = "ghp_testtoken_0123456789abcdef", logi
   const commits = new Map(); // sha -> { tree, parents, message, author }
   const repos = new Map(); // "owner/name" -> { name, owner, default_branch, refs: Map }
   const calls = [];
+  const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
+  const app = { id: 1234, slug: "forja-fake", name: "Forja fake", owner: { login }, client_id: "fake-client", client_secret: "fake-client-secret", pem: privateKey.export({ type: "pkcs1", format: "pem" }), webhook_secret: "fake-app-webhook" };
+  const installations = new Map([[42, { id: 42, app_id: app.id, account: { login: "example-org" }, permissions: { contents: "write", metadata: "read" }, suspended_at: null }]]);
+  const selectedRepos = new Map([[42, new Set()]]);
+  const appTokens = new Map();
+  const repoView = (repo) => ({ id: [...repos.values()].indexOf(repo) + 1, name: repo.name, full_name: `${repo.owner}/${repo.name}`, owner: { login: repo.owner }, default_branch: repo.default_branch, private: repo.private ?? true, description: repo.description ?? null, archived: repo.archived ?? false, permissions: { push: repo.writable !== false } });
 
   const putBlob = (buf) => {
     const id = blobId(buf);
@@ -59,10 +65,35 @@ export function startFakeGithub({ token = "ghp_testtoken_0123456789abcdef", logi
       };
       const url = new URL(req.url, "http://x");
       calls.push(`${req.method} ${url.pathname}`);
-      if (req.headers.authorization !== `Bearer ${token}`) return send(401, { message: "Bad credentials" });
       const body = raw ? JSON.parse(raw) : {};
       const p = url.pathname;
       let m;
+      const credential = (req.headers.authorization ?? "").replace(/^Bearer /, "");
+      let jwt;
+      try { jwt = JSON.parse(Buffer.from(credential.split(".")[1], "base64url").toString("utf8")); } catch {}
+      const isApp = jwt?.iss === String(app.id);
+      const installationId = appTokens.get(credential);
+      if (req.method === "POST" && p === "/app-manifests/fake-manifest-code/conversions") return send(201, app);
+      if (credential !== token && !isApp && installationId == null) return send(401, { message: "Bad credentials" });
+      if (req.method === "GET" && p === "/user/repos") {
+        const page = Number(url.searchParams.get("page") ?? 1);
+        return send(200, [...repos.values()].map(repoView).slice((page - 1) * 100, page * 100));
+      }
+      if (isApp && (m = /^\/app\/installations\/(\d+)(\/access_tokens)?$/.exec(p))) {
+        const id = Number(m[1]), i = installations.get(id);
+        if (!i || i.suspended_at) return send(404, { message: "Not Found" });
+        if (req.method === "GET" && !m[2]) return send(200, i);
+        if (req.method === "POST" && m[2]) {
+          const minted = `installation-${id}-${appTokens.size}`;
+          appTokens.set(minted, id);
+          return send(201, { token: minted, expires_at: new Date(Date.now() + 3600000).toISOString() });
+        }
+      }
+      if (req.method === "GET" && p === "/installation/repositories" && installationId != null) {
+        const rows = [...(selectedRepos.get(installationId) ?? [])].map((full) => repos.get(full)).filter(Boolean).map(repoView);
+        const page = Number(url.searchParams.get("page") ?? 1);
+        return send(200, { total_count: rows.length, repositories: rows.slice((page - 1) * 100, page * 100) });
+      }
       if (req.method === "GET" && p === "/user") return send(200, { login });
       if (req.method === "POST" && p === "/user/repos") {
         const full = `${login}/${body.name}`;
@@ -77,8 +108,21 @@ export function startFakeGithub({ token = "ghp_testtoken_0123456789abcdef", logi
         const repo = repos.get(full);
         if (!repo) return send(404, { message: "Not Found" });
         const rest = m[3] ?? "";
+        if (req.method === "GET" && rest === "/installation" && isApp) {
+          const selected = [...selectedRepos].find(([, selected]) => selected.has(full));
+          return selected ? send(200, installations.get(selected[0])) : send(404, { message: "Not Found" });
+        }
+        if (installationId != null && !selectedRepos.get(installationId)?.has(full)) return send(403, { message: "Repository not selected" });
         let r;
-        if (req.method === "GET" && rest === "") return send(200, { name: repo.name, owner: { login: repo.owner }, default_branch: repo.default_branch, permissions: { push: true } });
+        if (req.method === "GET" && rest === "") return send(200, repoView(repo));
+        if (req.method === "GET" && rest === "/branches") {
+          const page = Number(url.searchParams.get("page") ?? 1);
+          return send(200, [...repo.refs.keys()].slice((page - 1) * 100, page * 100).map((name) => ({ name })));
+        }
+        if (req.method === "GET" && (r = /^\/branches\/(.+)$/.exec(rest))) {
+          const name = decodeURIComponent(r[1]);
+          return repo.refs.has(name) ? send(200, { name }) : send(404, { message: "Branch not found" });
+        }
         if (req.method === "GET" && (r = /^\/git\/ref\/heads\/(.+)$/.exec(rest))) {
           if (!repo.refs.size) return send(409, { message: "Git Repository is empty." });
           const sha = repo.refs.get(decodeURIComponent(r[1]));
@@ -131,6 +175,6 @@ export function startFakeGithub({ token = "ghp_testtoken_0123456789abcdef", logi
     });
   });
   return new Promise((resolve) =>
-    server.listen(0, "127.0.0.1", () => resolve({ server, port: server.address().port, token, login, repos, pushExternal, filesAt, calls, createEmptyRepo: (name) => repos.set(`${login}/${name}`, { name, owner: login, default_branch: "main", refs: new Map() }) })),
+    server.listen(0, "127.0.0.1", () => resolve({ server, port: server.address().port, token, login, repos, pushExternal, filesAt, calls, app, installations, selectedRepos, createEmptyRepo: (name, owner = login) => repos.set(`${owner}/${name}`, { name, owner, default_branch: "main", refs: new Map() }) })),
   );
 }
