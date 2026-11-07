@@ -3,6 +3,7 @@ import { PGlite } from "@electric-sql/pglite";
 import { config, paths } from "../../../shared/config.js";
 import type { ProjectDb } from "../ports/database.js";
 import { ProjectDbClient } from "./projectDbClient.js";
+import { PROJECT_CACHE_SCHEMA } from "./cache.js";
 export type { ProjectDb } from "../ports/database.js";
 
 const remote = config.appDataServiceUrl
@@ -88,6 +89,7 @@ async function openDb(projectId: string): Promise<Open> {
     mkdirSync(dir, { recursive: true });
     const db = await PGlite.create(dir);
     await db.exec(BAAS_SCHEMA);
+    await db.exec(PROJECT_CACHE_SCHEMA);
     metrics.opens++;
     metrics.openMs += Date.now() - started;
     const entry: Open = { db, timer: setTimeout(() => {}, 0), queue: Promise.resolve() };

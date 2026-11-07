@@ -1,4 +1,5 @@
 import type { ProjectDb } from "./database.js";
+import type { CacheRepository } from "./cache.js";
 import type { ObserverPorts } from "./observer.js";
 import type { AppEnv, EmailInput, EmailResult, AppAiInput, AppAiResult, StoredObject, CheckoutInput } from "../domain/contracts.js";
 export interface JobsApi {
@@ -19,6 +20,7 @@ export interface ContextPorts extends ObserverPorts {
   deleteObject(projectId: string, key: string): Promise<void>;
   listObjects(projectId: string): Promise<(StoredObject & { createdAt: string })[]>;
   projectDb(projectId: string): ProjectDb;
+  cacheRepository(db: ProjectDb): CacheRepository;
   secretEnv(projectId: string): Promise<Record<string, string>>;
   publish(projectId: string, channel: string, data: unknown): number;
 }

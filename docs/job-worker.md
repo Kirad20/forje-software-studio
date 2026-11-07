@@ -1,9 +1,11 @@
 # Durable jobs worker
 
 Generated apps can call `await ctx.jobs.enqueue("invoice", payload)`. The returned
-string is a durable queue ID, not an execution result. Existing `ctx.jobs.run` and
-administrative `runJob` behavior is unchanged. The jobs administration response
-includes `queue` with status, service, attempts and last error.
+string is a durable queue ID, not an execution result. `ctx.jobs.run` starts work
+immediately in the background and resolves before completion; errors are logged.
+Use `enqueue` for durable delivery with retries. Administrative `runJob` behavior
+is unchanged. The jobs administration response includes `queue` with status,
+service, attempts and last error.
 
 The platform PostgreSQL stores the queue. Consumers claim with `FOR UPDATE SKIP
 LOCKED`, renew leases while executing, and recover expired leases after a crash.

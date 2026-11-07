@@ -236,6 +236,12 @@ async function dispatch(projectId: string, run: Run, method: string, args: unkno
       return ctx.db.one(a[0], a[1]);
     case "db.exec":
       return ctx.db.exec(a[0]);
+    case "cache.get":
+      return ctx.cache.get(a[0]);
+    case "cache.set":
+      return ctx.cache.set(a[0], a[1], a[2]);
+    case "cache.delete":
+      return ctx.cache.delete(a[0]);
     case "db.begin":
       return beginTransaction(projectId, run);
     case "db.txQuery": {

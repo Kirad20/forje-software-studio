@@ -6,5 +6,5 @@
 export type { AppUser } from "./contracts/identity.js";
 export type { Db } from "./contracts/database.js";
 export type { StoredFile, Storage } from "./contracts/storage.js";
-export type { AiMessage, CheckoutInput, Ai, Email, Jobs, Payments, Realtime } from "./contracts/services.js";
+export type { AiMessage, CheckoutInput, Ai, Cache, Email, Jobs, Payments, Realtime } from "./contracts/services.js";
 export type { ServiceCtx, Ctx, JobCtx } from "./contracts/context.js";

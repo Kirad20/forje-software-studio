@@ -221,16 +221,20 @@ describe("app service capability boundaries", () => {
     const log = vi.fn();
     const api = createContext({
       secretEnv: async () => ({ KEY: "value" }), projectDb: vi.fn(), log,
+      cacheRepository: () => ({ get: async () => undefined, set: async () => {}, delete: async () => {} }),
       paymentsFor: vi.fn(), putObject: vi.fn(), getObject: vi.fn(), deleteObject: vi.fn(),
       listObjects: vi.fn(), sendEmail: vi.fn(), appAiChat: vi.fn(), publish: vi.fn(),
     });
     const ctx = await api.serviceContext("p", "preview", "https://app", "endpoint");
     expect(() => ctx.jobs.run("job")).toThrow(/configurad/);
-    const runNow = vi.fn().mockRejectedValue(new Error("failed"));
+    let failRun!: (error: Error) => void;
+    const runNow = vi.fn(() => new Promise<void>((_resolve, reject) => { failRun = reject; }));
     api.bindJobs({ runNow, addTimer: vi.fn() });
-    await ctx.jobs.run("job");
-    await Promise.resolve();
+    const accepted = ctx.jobs.run("job");
+    await accepted;
     expect(runNow).toHaveBeenCalledWith("p", "preview", "job", null, "background");
+    failRun(new Error("failed"));
+    await Promise.resolve();
     expect(log).toHaveBeenCalledWith("p", expect.objectContaining({ level: "error", message: expect.stringContaining("failed") }));
   });
 

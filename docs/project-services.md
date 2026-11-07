@@ -27,22 +27,31 @@ The public projects module also exports `starterFiles(name, template?)`.
 
 1. The page creates a UUID and sends `POST /_api/orders/create`.
 2. The orders service inserts a fixed-price, non-personal demo order and calls
-   `ctx.jobs.enqueue("invoice", { orderId })`. The API returns the durable queue ID
+   `ctx.jobs.enqueue("invoice", { orderId, amountCents })`. The API returns the durable queue ID
    after acceptance; it does **not** wait for the invoice.
-3. The invoice worker locks the order in a database transaction, inserts an
-   invoice with a unique `order_id` (`ON CONFLICT DO NOTHING`), and updates the
-   order's status in that same transaction. Duplicate deliveries do not duplicate
-   invoices; a failed transaction rolls back both changes.
-4. The page polls `GET /_api/orders/status?orderId=<UUID>` and shows the persisted
-   invoice. If acceptance fails, retry uses the same UUID and does not reset
-   existing status. Reloading the page loses its local selection, not the stored
-   order: the status API remains usable with its UUID.
+3. The invoice worker owns the `invoices` table and inserts an invoice with a
+   unique `order_id` (`ON CONFLICT DO NOTHING`), then enqueues an `order-invoiced`
+   event. The orders service owns the `orders` table and updates its status from
+   that event. If event enqueueing fails, a retry remains safe and does not
+   duplicate the invoice.
+4. The page polls `GET /_api/orders/status?orderId=<UUID>` and reads the orders
+   service's status projection. If acceptance fails, retry uses the same UUID
+   and does not reset existing status. Reloading the page loses its local
+   selection, not the stored order: the status API remains usable with its UUID.
 
 This demo has no payment, email, authentication or personal data. Its endpoints
 are intentionally public. Before using it for real orders, add authentication,
 owner checks, quotas, and private status access. The fixed price is computed on
 the server, never trusted from a browser. Demo tables initialize additively on the
 first API request; do not use that bootstrap on an existing incompatible schema.
+
+The starter applies DDD and hexagonal boundaries within Forja's project layout:
+`helpers/<context>/domain.ts` holds pure domain types and rules,
+`application.ts` contains use cases, `ports.ts` defines repository/event
+interfaces, and `adapters.ts` implements persistence. Endpoints and jobs compose
+adapters with use cases. Server-only adapters are imported only by endpoints and
+jobs, never by pages. Each service owns its tables by convention; all services
+share the project's database.
 
 ## Topology contract
 
@@ -55,7 +64,7 @@ The generated project contains:
     "orders": {
       "kind": "service",
       "endpoints": ["endpoints/orders/create_POST.ts", "endpoints/orders/status_GET.ts"],
-      "jobs": [],
+      "jobs": ["jobs/order-invoiced.ts"],
       "replicas": 2,
       "maxConcurrency": 8
     },
@@ -172,9 +181,19 @@ The authenticated project API uses existing owner/editor project membership:
 - Inspect the existing database first. Apply additive migrations using
   `describe_database` / `execute_sql`; preserve rows and existing constraints.
   Do not overwrite unrelated project tables with the demo schema.
-- `ctx.jobs.run` still waits for completion. `ctx.jobs.runAt` keeps its existing
-  scheduling semantics. Use `enqueue` specifically for durable asynchronous
-  acceptance.
+- `ctx.jobs.run` starts immediately in the background and resolves before the
+  job completes; failures are written to project logs. `ctx.jobs.runAt` schedules
+  work. Use `enqueue` for durable asynchronous acceptance and retries.
+- `ctx.cache` shares JSON values across service replicas through the project's
+  database. Keys are separated between preview and published environments;
+  entries have a maximum seven-day TTL, 64 KiB values and 1,000 active keys per
+  environment. Keys are project-wide within their environment: include user or
+  tenant IDs for private data and never store secrets. It is not Redis and is not
+  intended for high-throughput, low-latency workloads.
+- Native gRPC is not available: service replicas do not expose independent
+  network listeners or deployment artifacts, and the locked-down sandbox cannot
+  start processes. Supporting it would require a separately designed HTTP/2
+  gateway/runtime path; do not emulate gRPC as an HTTP endpoint.
 - Order insertion and queue acceptance are **not** one atomic transaction. A
   rejected enqueue can leave a pending order. The demo supports safe client
   retries; production systems need an outbox/reconciler and handling for

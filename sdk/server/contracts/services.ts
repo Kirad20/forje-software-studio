@@ -21,8 +21,14 @@ export interface Ai {
 export interface Jobs {
   /** Resolves after durable acceptance, not after execution. Delivery is at least once. */
   enqueue(name: string, payload?: unknown): Promise<string>;
+  /** Starts in the background and resolves before execution completes. */
   run(name: string, payload?: unknown): Promise<void>;
   runAt(name: string, payload: unknown, when: Date | number): Promise<string>;
+}
+export interface Cache {
+  get<T>(key: string): Promise<T | undefined>;
+  set(key: string, value: unknown, ttlSeconds: number): Promise<void>;
+  delete(key: string): Promise<void>;
 }
 export interface Realtime {
   publish(channel: string, data: unknown): number;
