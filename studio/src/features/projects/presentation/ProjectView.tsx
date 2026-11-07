@@ -11,6 +11,7 @@ import { External, Refresh } from "../../../shared/Icons.js";
 import { AiPanel, CodePanel, EmailPanel, JobsPanel, LogsPanel, UsersPanel } from "../../files/index.js";
 import { AnalyticsPanel, DataPanel, DocsPanel, IntegrationsPanel, PaymentsPanel, SeoPanel, StoragePanel } from "../../app-services/index.js";
 import { ServiceControlPanel } from "../../service-control/index.js";
+import { RepositoryWorkspace } from "../../repository-runtime/index.js";
 import { ProjectKnowledge } from "../../project-knowledge/index.js";
 import { Avatar, copyText, Menu, MenuItem, useDismiss } from "../../../shared/ui.js";
 import { CheckpointPanel, Collaborators, DEVICES, PagePalette, PreviewCanvas, ProjectSettings, PublishPanel, type Device, type PreviewHandle, type TextEdit } from "./Workspace.js";
@@ -270,8 +271,13 @@ export function ProjectView({
   if (!project) return <div className="empty">Cargando…</div>;
 
   const errors = logLines.filter((l) => l.level === "error").length;
+  const repository = project.runtime === "repository";
+  const guide = (key: ServiceKey) => repository && key === "control"
+    ? { description: "Construye imágenes, revisa logs y gestiona preview, publicación y rollback del repositorio.", prompt: "Revisa el Dockerfile, la configuración de ejecución y los logs de mi repositorio antes de cambiar su despliegue: " }
+    : SERVICE_GUIDES[key];
+  const services = repository ? SERVICES.filter((item) => ["control", "integrations", "docs"].includes(item.key)) : SERVICES;
   const isUsed = (k: ServiceKey) => ALWAYS_USED.has(k) || !!used[k];
-  const ordered = [...SERVICES].sort((a, b) => Number(favorites.includes(b.key)) - Number(favorites.includes(a.key)) || Number(isUsed(b.key)) - Number(isUsed(a.key)));
+  const ordered = [...services].sort((a, b) => Number(favorites.includes(b.key)) - Number(favorites.includes(a.key)) || Number(isUsed(b.key)) - Number(isUsed(a.key)));
   const query = normalizeServiceSearch(serviceSearch.trim());
   const visibleServices = ordered.filter((s) => !query || normalizeServiceSearch(`${s.label} ${s.key} ${s.search}`).includes(query));
   const showCode = !query || normalizeServiceSearch("codigo code archivos fuente editor").includes(query);
@@ -300,13 +306,13 @@ export function ProjectView({
             <button className={view === "knowledge" ? "on" : ""} onClick={() => setView("knowledge")}>
               Cerebro
             </button>
-            <button title="Datos" aria-label="Datos" onClick={() => openService("data")}>
+            {!repository && <button title="Datos" aria-label="Datos" onClick={() => openService("data")}>
               ⛁
-            </button>
-            <button title="Correo" aria-label="Correo" onClick={() => openService("email")}>
+            </button>}
+            {!repository && <button title="Correo" aria-label="Correo" onClick={() => openService("email")}>
               ✉
-            </button>
-            <button title="Registros" aria-label="Registros" onClick={() => openService("logs")} style={errors ? { color: "var(--err)" } : undefined}>
+            </button>}
+            <button title="Registros" aria-label="Registros" onClick={() => openService(repository ? "control" : "logs")} style={errors ? { color: "var(--err)" } : undefined}>
               ≡{errors > 0 && <span className="small"> {errors}</span>}
             </button>
           </div>
@@ -316,10 +322,10 @@ export function ProjectView({
                 <button className="sm icon-btn ghost" title="Pantalla completa (Esc para salir)" aria-label="Pantalla completa" onClick={() => setFullscreen(true)}>
                   ⛶
                 </button>
-                <button className="page-chip" title="Ir a una página (Ctrl+K)" onClick={() => setPalette(true)}>
+                <button className="page-chip" title={repository ? "Abrir código del repositorio" : "Ir a una página (Ctrl+K)"} onClick={() => repository ? openService("code") : setPalette(true)}>
                   ▭ {pageLabel} {project.appUrl && <span className="live-dot" title="Publicada" />} ▾
                 </button>
-                <button className="sm icon-btn ghost" title="Recargar" aria-label="Recargar vista previa" onClick={() => preview.current?.reload()}>
+                <button className="sm icon-btn ghost" title="Recargar" aria-label="Recargar vista previa" onClick={() => repository ? setFilesKey((key) => key + 1) : preview.current?.reload()}>
                   <Refresh />
                 </button>
               </>
@@ -405,7 +411,9 @@ export function ProjectView({
             <button className="primary sm" style={{ height: 32 }} onClick={() => setPanel(panel === "publish" ? null : "publish")}>
               ⇪ {publishLabel}
             </button>
-            {panel === "publish" && <PublishPanel project={project} onDone={load} onClose={closePanel} />}
+            {panel === "publish" && (repository
+              ? <div className="panel-pop right stack" style={{ padding: 16 }}><p>Publica una imagen saludable desde el centro de control del repositorio.</p><button onClick={() => { closePanel(); openService("control"); }}>Abrir publicación del repositorio</button></div>
+              : <PublishPanel project={project} onDone={load} onClose={closePanel} />)}
           </div>
         </header>
         {view === "preview" && (
@@ -416,11 +424,12 @@ export function ProjectView({
               </button>
               {panel === "checkpoints" && <CheckpointPanel projectId={id} reloadKey={filesKey} onClose={closePanel} myEmail={me.email} />}
             </div>
-            <button className={`tool ${selecting ? "on" : ""}`} aria-pressed={selecting} onClick={toggleSelect} title="Elige un elemento de la vista previa para pedir un cambio sobre él">
+            <button disabled={repository} className={`tool ${selecting ? "on" : ""}`} aria-pressed={selecting} onClick={toggleSelect} title={repository ? "Edita los archivos originales desde Código o el chat" : "Elige un elemento de la vista previa para pedir un cambio sobre él"}>
               ⌖ Seleccionar
             </button>
             <button
               className={`tool ${editingText ? "on" : ""}`}
+              disabled={repository}
               aria-pressed={editingText}
               onClick={toggleEditText}
               title="Haz clic en un texto de la vista previa y reescríbelo. Se guarda sin gastar créditos cuando el texto está en el código."
@@ -514,7 +523,7 @@ export function ProjectView({
         <section style={{ minWidth: 0, minHeight: 0, display: "grid", position: "relative" }}>
           {/* The preview stays mounted while other views are open, so it does not reload. */}
           <div style={{ display: view === "preview" ? "grid" : "none", minHeight: 0 }}>
-            <PreviewCanvas
+            {repository ? <RepositoryWorkspace key={project.id} project={project} reloadKey={filesKey} onChange={load} /> : <PreviewCanvas
               ref={preview}
               project={project}
               device={device}
@@ -525,7 +534,7 @@ export function ProjectView({
               onFix={onFix}
               onTextEdit={onTextEdit}
               onEditEnded={onEditEnded}
-            />
+            />}
           </div>
           {notice && (
             <div className={`toast ${notice.tone ?? ""}`} role="status">
@@ -602,9 +611,9 @@ export function ProjectView({
                     <div className="grow">
                       <button className="link-btn" onClick={() => setService("overview")}>← Todas las herramientas</button>
                       <h2>{SERVICES.find((s) => s.key === service)?.label ?? "Código"}</h2>
-                      <p>{SERVICE_GUIDES[service].description}</p>
+                      <p>{guide(service).description}</p>
                     </div>
-                    <button className="sm" aria-label="Pedir ayuda al constructor" onClick={() => draftRequest(SERVICE_GUIDES[service].prompt)}>✦ Pedir ayuda<span className="svc-help-detail"> al constructor</span></button>
+                    <button className="sm" aria-label="Pedir ayuda al constructor" onClick={() => draftRequest(guide(service).prompt)}>✦ Pedir ayuda<span className="svc-help-detail"> al constructor</span></button>
                   </header>
                 )}
               <div className={`svc-detail ${["data", "docs", "storage", "code"].includes(service) ? "" : "pad"}`}>
@@ -617,11 +626,11 @@ export function ProjectView({
                       <div className="tools-quick-actions">
                         <button className="primary" onClick={() => draftRequest("Quiero agregar una nueva función a mi app: ")}>✦ Crear una función</button>
                         <button onClick={() => { setView("preview"); setMobilePane("preview"); }}>Ver mi app</button>
-                        <button onClick={() => openService("logs")}>Revisar errores {errors > 0 && <span className="pill err">{errors}</span>}</button>
+                        <button onClick={() => openService(repository ? "control" : "logs")}>Revisar errores {errors > 0 && <span className="pill err">{errors}</span>}</button>
                       </div>
                     </header>
                     <div className="tools-summary">
-                      <div><strong>{SERVICES.filter((s) => !!used[s.key]).length}</strong><span>Servicios en uso</span></div>
+                      <div><strong>{services.filter((s) => !!used[s.key]).length}</strong><span>Servicios en uso</span></div>
                       <div><strong>{project.slug ? "Publicada" : "En desarrollo"}</strong><span>{project.hasUnpublishedChanges ? "Hay cambios por publicar" : "Estado de tu app"}</span></div>
                       <div><strong>{building ? "Trabajando" : "Listo para ayudarte"}</strong><span>Constructor</span></div>
                     </div>
@@ -635,7 +644,7 @@ export function ProjectView({
                           <button className="tool-card" onClick={() => openService(s.key)}>
                             <span className="tool-card-top"><span className="tool-card-icon" aria-hidden><s.icon size={20} /></span>{!!used[s.key] && <span className="pill tiny">En uso</span>}</span>
                             <strong>{s.label}<span aria-hidden>↗</span></strong>
-                            <span className="tool-card-description">{SERVICE_GUIDES[s.key].description}</span>
+                            <span className="tool-card-description">{guide(s.key).description}</span>
                           </button>
                           <button className={`tool-favorite ${favorites.includes(s.key) ? "on" : ""}`} aria-label={`${favorites.includes(s.key) ? "Quitar" : "Añadir"} ${s.label} ${favorites.includes(s.key) ? "de" : "a"} favoritos`} aria-pressed={favorites.includes(s.key)} onClick={() => toggleFavorite(s.key)} title={favorites.includes(s.key) ? "Quitar de favoritos" : "Añadir a favoritos"}>
                             <Star size={15} fill={favorites.includes(s.key) ? "currentColor" : "none"} aria-hidden />
@@ -648,7 +657,9 @@ export function ProjectView({
                     )}
                   </div>
                 )}
-                {service === "control" && <ServiceControlPanel projectId={id} reloadKey={filesKey} />}
+                {service === "control" && (repository
+                  ? <RepositoryWorkspace key={`control-${project.id}`} project={project} reloadKey={filesKey} onChange={load} showPreview={false} />
+                  : <ServiceControlPanel projectId={id} reloadKey={filesKey} />)}
                 {service === "data" && <DataPanel projectId={id} projectName={project.name} reloadKey={filesKey} />}
                 {service === "users" && <UsersPanel projectId={id} />}
                 {service === "ai" && <AiPanel project={project} onChange={load} />}
@@ -698,7 +709,7 @@ export function ProjectView({
           )}
         </section>
       </div>
-      {palette && (
+      {palette && !repository && (
         <PagePalette
           projectId={id}
           onClose={() => setPalette(false)}

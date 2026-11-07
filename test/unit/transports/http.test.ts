@@ -8,6 +8,7 @@ import type { SettingsModule } from "../../../server/modules/settings/index.js";
 import type { ProjectKnowledgeModule } from "../../../server/modules/project-knowledge/index.js";
 import { createStudioApi } from "../../../server/bootstrap/http/studioApi.js";
 import type { BuilderServiceClient } from "../../../server/modules/builder/infrastructure/builderServiceClient.js";
+import { checkShareToken } from "../../../server/modules/app-runtime/index.js";
 
 const mocks = vi.hoisted(() => ({ watchProblems: vi.fn(), getSandboxServices: vi.fn(() => []), restartSandboxService: vi.fn() }));
 
@@ -55,6 +56,9 @@ const projects = {
     "forja.services.json": '{"version":1,"services":{"invoices":{"kind":"worker","jobs":["jobs/invoices.ts"],"replicas":1}}}',
   })),
   writeFile: vi.fn(async () => undefined),
+  updateProject: vi.fn(async () => undefined),
+  markOpened: vi.fn(async () => undefined),
+  hasUnpublishedChanges: vi.fn(async () => false),
 } as unknown as ProjectsModule;
 const collaboration = { accessOf: vi.fn(async () => "owner") } as unknown as CollaborationModule;
 const settings = {} as SettingsModule;
@@ -109,10 +113,69 @@ describe("HTTP transport contract", () => {
     }
     expect(createProject).toHaveBeenCalledTimes(2);
   });
+  it("creates original-layout repository projects without native starter injection and rejects invalid modes", async () => {
+    const createProject = vi.mocked(projects.createProject);
+    createProject.mockClear();
+    const headers = { cookie: "forja_session=valid", "content-type": "application/json" };
+    const response = await app.request("/api/projects", {
+      method: "POST", headers, body: JSON.stringify({ name: "Existing repository", runtime: "repository" }),
+    });
+    expect(response.status).toBe(200);
+    expect(createProject).toHaveBeenLastCalledWith("account-1", "Existing repository", "", undefined, undefined, undefined, "repository");
+    for (const body of [{ runtime: "unknown" }, { runtime: null }, { runtime: "repository", template: "orders-invoices" }]) {
+      expect((await app.request("/api/projects", { method: "POST", headers, body: JSON.stringify(body) })).status).toBe(400);
+    }
+    expect(createProject).toHaveBeenCalledTimes(1);
+  });
+  it("does not present native BaaS databases or workers as services of an isolated repository", async () => {
+    const project = await projects.getProject("project-1");
+    if (!project) throw new Error("Missing project fixture");
+    const headers = { cookie: "forja_session=valid", "content-type": "application/json" };
+    for (const [path, method, body] of [["db/sql", "POST", '{"sql":"select 1"}'], ["emails", "GET", undefined], ["service-control", "GET", undefined]]) {
+      vi.mocked(projects.getProject).mockResolvedValueOnce({ ...project, runtime: "repository" });
+      expect((await app.request(`/api/projects/project-1/${path}`, { method, headers, body })).status).toBe(409);
+    }
+    vi.mocked(projects.getProject).mockResolvedValueOnce({ ...project, runtime: "repository" });
+    expect((await app.request("/api/projects/project-1/file?path=server/bootstrap/server.ts", { headers })).status).toBe(200);
+    vi.mocked(projects.getProject).mockResolvedValueOnce({ ...project, runtime: "repository" });
+    vi.mocked(collaboration.accessOf).mockResolvedValueOnce("editor");
+    expect((await app.request("/api/projects/project-1/publish", { method: "POST", headers, body: '{"slug":"self-forja"}' })).status).toBe(403);
+  });
   it("requires a signed-in account for studio endpoints", async () => {
     const response = await app.request("/api/me");
     expect(response.status).toBe(401);
     expect(await response.json()).toEqual({ error: "No has iniciado sesión" });
+  });
+
+  it("prevents repository editors from exposing an isolated deployment", async () => {
+    const project = await projects.getProject("project-1");
+    if (!project) throw new Error("Missing project fixture");
+    const repository = { ...project, runtime: "repository" as const, visibility: "private" as const };
+    vi.mocked(projects.getProject).mockResolvedValueOnce(repository).mockResolvedValueOnce(repository);
+    vi.mocked(collaboration.accessOf).mockResolvedValueOnce("editor").mockResolvedValueOnce("editor");
+    vi.mocked(projects.updateProject).mockClear();
+    const response = await app.request("/api/projects/project-1", {
+      method: "PATCH",
+      headers: { cookie: "forja_session=valid", "content-type": "application/json" },
+      body: '{"visibility":"public"}',
+    });
+    expect(projects.updateProject).not.toHaveBeenCalled();
+    expect(response.status).toBe(403);
+  });
+
+  it("binds private repository links to their deployment environment", async () => {
+    const project = await projects.getProject("project-1");
+    if (!project) throw new Error("Missing project fixture");
+    const repository = { ...project, name: "Forja copy", runtime: "repository" as const, visibility: "private" as const, slug: "forja-copy", shareEpoch: 0 };
+    vi.mocked(projects.getProject).mockResolvedValueOnce(repository).mockResolvedValueOnce(repository);
+    const response = await app.request("/api/projects/project-1", { headers: { cookie: "forja_session=valid" } });
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    const published = new URL(body.project.appUrl).searchParams.get("share");
+    const preview = new URL(body.project.previewUrl).searchParams.get("share");
+    expect(checkShareToken(repository, published, "published")).toBe(true);
+    expect(checkShareToken(repository, published, "preview")).toBe(false);
+    expect(checkShareToken(repository, preview, "preview")).toBe(true);
   });
 
   it("rejects cross-origin writes and non-JSON request bodies before authentication", async () => {

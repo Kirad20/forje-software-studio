@@ -70,7 +70,7 @@ describe("skills", () => {
     for (const f of ["impeccable/scripts/impeccable", "impeccable/reference/critique.md", "hallmark/scripts/sloplint.mjs", "taste-skill/scripts/inspect.mjs", "ui-ux-pro-max/scripts/search.py", "ui-ux-pro-max/data/styles.csv", "web-design-guidelines/command.md"]) {
       expect(existsSync(path.join(root, f)), f).toBe(true);
     }
-    expect(readFileSync(path.join(root, "frontend-design/SKILL.md"), "utf8")).toMatch(/^---\nname: frontend-design\n/);
+    expect(readFileSync(path.join(root, "frontend-design/SKILL.md"), "utf8")).toMatch(/^---\r?\nname: frontend-design\r?\n/);
     expect(Object.keys(findSkill({}, "impeccable")!.parts!)).toEqual(expect.arrayContaining(["reference/craft-floor", "reference/critique", "reference/audit", "reference/polish"]));
     expect(Object.keys(findSkill({}, "hallmark")!.parts!)).toContain("references/gates");
     expect(Object.keys(findSkill({}, "taste-skill")!.parts!)).toEqual(expect.arrayContaining(["references/copy", "references/tells", "references/critique"]));

@@ -9,6 +9,7 @@ import type { ProjectsStore, ProjectServices } from "./ports/projects.js";
 import type { StarterTemplate } from "./domain/StarterTemplate.js";
 import { starterFiles as monolithStarterFiles, parseStarterTemplate } from "./domain/StarterTemplate.js";
 import { ordersInvoicesFiles } from "./infrastructure/OrdersInvoicesStarter.js";
+import type { ProjectRuntime } from "./domain/ProjectSnapshot.js";
 
 export * from "./domain/ProjectPath.js";
 export * from "./domain/Checkpoint.js";
@@ -21,7 +22,7 @@ export function starterFiles(name: string, template?: StarterTemplate): Record<s
 }
 export * from "./ports/repositories.js";
 export { normalizeProjectProfile } from "./domain/ProjectSnapshot.js";
-export type { ProjectSnapshot, ProjectPatch, FileMap, SeoSettings, ProjectProfile, ChangeEntry, TurnFileChange } from "./domain/ProjectSnapshot.js";
+export type { ProjectSnapshot, ProjectPatch, FileMap, SeoSettings, ProjectProfile, ChangeEntry, TurnFileChange, ProjectRuntime } from "./domain/ProjectSnapshot.js";
 export type { ProjectsStore, ProjectServices, ProjectEventPort } from "./ports/projects.js";
 export type { ProjectOrganizations } from "./ports/collaboration.js";
 export type { ProjectSnapshot as Project } from "./domain/ProjectSnapshot.js";
@@ -36,16 +37,19 @@ export interface ProjectsModuleDependencies {
 
 export function createProjectsModule(dependencies: ProjectsModuleDependencies) {
   const application = new ProjectsApplication(dependencies.store, dependencies.services);
-  const writeFileUseCase = new WriteFileUseCase(dependencies.files);
-  const deleteFileUseCase = new DeleteFileUseCase(dependencies.files);
-  const renameFileUseCase = new RenameFileUseCase(dependencies.files);
+  const runtime = (id: string) => application.projectRuntime(id);
+  const writeFileUseCase = new WriteFileUseCase(dependencies.files, runtime);
+  const deleteFileUseCase = new DeleteFileUseCase(dependencies.files, runtime);
+  const renameFileUseCase = new RenameFileUseCase(dependencies.files, runtime);
 
   return {
     application,
     isDevFile,
     assertValidPath: ProjectPath.assertValid,
-    createProject: (ownerId: string, name: string, description = "", files?: Parameters<typeof application.createProject>[3], orgId?: string, template?: StarterTemplate) =>
-      application.createProject(ownerId, name, description, files, orgId, template),
+    assertValidPathForProject: (id: string, path: string) => application.assertValidPathForProject(id, path),
+    projectRuntime: runtime,
+    createProject: (ownerId: string, name: string, description = "", files?: Parameters<typeof application.createProject>[3], orgId?: string, template?: StarterTemplate, runtime?: ProjectRuntime) =>
+      application.createProject(ownerId, name, description, files, orgId, template, runtime),
     duplicateProject: (ownerId: string, sourceId: string) => application.duplicateProject(ownerId, sourceId),
     createFolder: (accountId: string, name: string) => application.createFolder(accountId, name),
     createCheckpoint: (projectId: string, label: string, author?: Author, description?: string, actor?: string) =>

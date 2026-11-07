@@ -7,6 +7,8 @@ import { githubAppStore } from "./infrastructure/apps.js";
 import { config } from "../../shared/config.js";
 export { GithubError, type SyncResult, type GithubProjectPorts } from "./application/github.js";
 export { blobSha } from "./infrastructure/github.js";
+export { createGithubImportService } from "./application/imports.js";
+export type { PreparedImport } from "./application/imports.js";
 let bound: GithubProjectPorts | undefined;
 let binding: symbol | undefined;
 export function bindGithubProjectPorts(ports: GithubProjectPorts): () => Promise<void> {
@@ -31,6 +33,11 @@ const sync = createGithubSyncService(githubRepository, githubGateway, {
   writeFile: (p, path, content, actor, author) => ports().writeFile(p, path, content, actor, author),
   deleteFile: (p, path, actor) => ports().deleteFile(p, path, actor),
   assertValidPath: (path) => ports().assertValidPath(path),
+  assertValidPathForProject: async (p, path) => {
+    const bound = ports();
+    return bound.assertValidPathForProject ? bound.assertValidPathForProject(p, path) : bound.assertValidPath(path);
+  },
+  projectRuntime: async (p) => ports().projectRuntime?.(p) ?? "native",
   recheckBuild: (p) => ports().recheckBuild(p),
   emitProject: (p, event) => ports().emitProject(p, event),
   subscribe: (p, listener) => ports().subscribe(p, listener),

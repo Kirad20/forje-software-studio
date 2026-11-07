@@ -1,0 +1,18 @@
+.repository-workspace {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+}
+.repository-controls { min-width: 0; }
+.repository-controls h2 { margin: 0; font-size: 18px; }
+.repository-controls details { min-width: 0; }
+.repository-controls summary { cursor: pointer; margin-bottom: 10px; }
+.repository-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr)); gap: 12px; }
+.repository-controls input, .repository-controls select { max-width: 100%; }
+.repository-logs { max-height: 280px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; }
+.repository-preview { flex: 1 0 420px; width: 100%; min-height: 420px; border: 1px solid var(--border); border-radius: 8px; background: white; }
+@media (max-width: 640px) { .repository-workspace { padding: 10px; } }

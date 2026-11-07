@@ -6,6 +6,7 @@ export interface Problem {
 }
 export interface BuildProblem { file: string; text: string; line?: number; column?: number }
 export interface ProblemPorts {
+  projectRuntime?(projectId: string): Promise<"native" | "repository">;
   readAllFiles(projectId: string): Promise<Record<string, string>>;
   checkProject(files: Record<string, string>): Promise<BuildProblem[]>;
   formatProblem(problem: BuildProblem): string;
@@ -72,6 +73,11 @@ export function createProblemService(repository: ProblemRepository, ports: Probl
   function recheckBuild(projectId: string): Promise<Problem[]> {
     const epoch = generation;
     const work = (async () => {
+      if (await ports.projectRuntime?.(projectId) === "repository") {
+        if (epoch !== generation) return [];
+        clearProblems(projectId, ["build"]);
+        return [];
+      }
       const problems = await ports.checkProject(await ports.readAllFiles(projectId)).catch((e: Error) => [{ file: "", text: e.message }] as BuildProblem[]);
       if (epoch !== generation) return [];
       const map = repository.get(projectId);

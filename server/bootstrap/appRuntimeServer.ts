@@ -23,6 +23,7 @@ const runtimePorts = {
   checkShareToken,
   cookie,
   serveApp,
+  repositoryRuntime: monolith.repositoryRuntime,
   internalToken: config.appDataServiceToken,
   emitProject,
   reloadSettings: async () => {
@@ -56,7 +57,12 @@ async function startHttp() {
     try {
       const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
       const resolved = await resolveApp(req.headers.host, url, req.headers.cookie ?? null, runtimePorts);
-      if (!resolved?.project || !resolved.allowed || url.pathname !== "/_baas/realtime") throw new Error("rejected");
+      if (!resolved?.project || !resolved.allowed) throw new Error("rejected");
+      if (resolved.project.runtime === "repository") {
+        await monolith.repositoryRuntime.upgrade(req, socket, head, resolved.project.id, resolved.env);
+        return;
+      }
+      if (url.pathname !== "/_baas/realtime") throw new Error("rejected");
       wss.handleUpgrade(req, socket, head, (ws) => attachSocket(resolved.project!.id, ws));
     } catch {
       socket.destroy();
@@ -65,6 +71,7 @@ async function startHttp() {
 }
 
 async function stopHttp() {
+  monolith.repositoryRuntime.closeConnections();
   for (const socket of wss.clients) socket.terminate();
   await Promise.all([
     new Promise<void>((resolve, reject) => wss.close((error) => error ? reject(error) : resolve())),

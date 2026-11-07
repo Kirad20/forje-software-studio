@@ -86,7 +86,7 @@ describe("production runtime composition", () => {
     const target: AppTarget = {
       env: "preview", base: "",
       project: {
-        id: "p", ownerId: "owner", orgId: null, name: "My app", description: "", slug: null,
+        id: "p", ownerId: "owner", orgId: null, name: "My app", runtime: "native", description: "", slug: null,
         visibility: "private", aiEnabled: false, emailDomain: null, emailDomainVerified: false,
         publishedVersionId: null, publishedAt: null, favorite: false, archived: false, folderId: null,
         lastOpenedAt: "", systemPrompt: "", designPrompt: "", seo: {}, profile: null, shareEpoch: 1, createdAt: "", updatedAt: "",

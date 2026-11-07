@@ -1,3 +1,7 @@
+import type { ProjectRuntime } from "./ProjectSnapshot.js";
+import { assertEditableRepositoryPath } from "../../../../contracts/repository.js";
+export { assertSafeRepositoryPath, assertSafeRepositoryContent, repositoryPathExclusion } from "../../../../contracts/repository.js";
+
 const ALLOWED_PATTERN = /^(pages|components|helpers|endpoints|jobs|static)\/[A-Za-z0-9_.$\-/[\]]+$|^migrations\/\d+_[A-Za-z0-9_.$-]+\.sql$|^base\.css$|^package\.json$|^forja\.services\.json$/;
 
 export class ProjectPath {
@@ -10,15 +14,20 @@ export class ProjectPath {
     this.value = path;
   }
 
-  static isValid(path: string): boolean {
+  static isValid(path: string, runtime: ProjectRuntime = "native"): boolean {
+    if (runtime === "repository") {
+      try { assertEditableRepositoryPath(path); }
+      catch { return false; }
+      return true;
+    }
     if (!ALLOWED_PATTERN.test(path) || path.includes("..") || path.includes("//")) {
       return false;
     }
     return true;
   }
 
-  static assertValid(path: string): void {
-    if (!ProjectPath.isValid(path)) {
+  static assertValid(path: string, runtime: ProjectRuntime = "native"): void {
+    if (!ProjectPath.isValid(path, runtime)) {
       throw new Error(`Ruta no válida: "${path}". Usa pages/, components/, helpers/, endpoints/, jobs/, migrations/, static/, base.css, package.json o forja.services.json.`);
     }
   }

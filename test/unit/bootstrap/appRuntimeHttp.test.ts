@@ -8,6 +8,7 @@ const project: Project = {
   ownerId: "owner",
   orgId: null,
   name: "App",
+  runtime: "native",
   description: "",
   slug: null,
   visibility: "private",

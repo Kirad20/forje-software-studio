@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { createGithubSyncService, GithubError, type Link } from "../../../../server/modules/integrations/application/github.js";
+import { ProjectPath } from "../../../../server/modules/projects/index.js";
+import { assertSafeRepositoryPath, assertSafeRepositoryContent, repositoryPathExclusion } from "../../../../contracts/repository.js";
 const deferred = <T>() => { let resolve!: (value: T) => void; const promise = new Promise<T>((r) => { resolve = r; }); return { resolve, promise }; };
 function setup() {
   const link: Link = { project_id: "p", account_id: "a", owner: "owner", repo: "repo", branch: "main", last_sha: "head", last_tree: "tree", synced: {}, status: "ok", error: null, synced_at: null };
@@ -8,7 +10,7 @@ function setup() {
   let listener: (event: { type: string }) => void = () => {};
   const unsubscribe = vi.fn();
   const project = { readAllFiles: vi.fn(async () => ({} as Record<string, string>)), writeFile: vi.fn(), deleteFile: vi.fn(), assertValidPath: vi.fn((path: string) => { if (!path.startsWith("pages/")) throw Error("invalid"); }), recheckBuild: vi.fn(async () => []), emitProject: vi.fn(), subscribe: vi.fn((_p: string, l: typeof listener) => { listener = l; return unsubscribe; }) };
-  const gateway = { request: vi.fn(async (_t: string, method: string, path: string, _body?: unknown): Promise<any> => {
+  const gateway = { repositoryPolicy: { assertPath: assertSafeRepositoryPath, assertContent: assertSafeRepositoryContent, exclusion: repositoryPathExclusion }, request: vi.fn(async (_t: string, method: string, path: string, _body?: unknown): Promise<any> => {
     if (path.includes("/git/ref/")) return { object: { sha: "head" } };
     if (path.endsWith("/git/commits/head")) return { tree: { sha: "tree" } };
     if (method === "POST" && path.endsWith("/git/trees")) return { sha: "newtree" };
@@ -17,6 +19,60 @@ function setup() {
   return { link, repository, project, gateway, scheduled, unsubscribe, emit: () => listener({ type: "files" }), service: createGithubSyncService(repository, gateway, project) };
 }
 describe("GitHub synchronization usecases", () => {
+  it("preserves executable mode when pushing changed repository scripts", async () => {
+    const s = setup();
+    s.link.synced = { "scripts/start.sh": "sha:old" };
+    s.project.readAllFiles.mockResolvedValue({ "scripts/start.sh": "#!/bin/sh\nnode server.js" });
+    const original = s.gateway.request.getMockImplementation()!;
+    s.gateway.request.mockImplementation(async (token, method, path, body) => {
+      if (path.includes("?recursive=1")) return { tree: [{ path: "scripts/start.sh", type: "blob", mode: "100755", sha: "sha:old" }] };
+      return original(token, method, path, body);
+    });
+    const service = createGithubSyncService(s.repository, s.gateway, { ...s.project, projectRuntime: async () => "repository", assertValidPathForProject: async () => {} });
+    await service.syncProject("p");
+    expect(s.gateway.request).toHaveBeenCalledWith("token", "POST", "/repos/owner/repo/git/trees", { base_tree: "tree", tree: [{ path: "scripts/start.sh", mode: "100755", type: "blob", content: "#!/bin/sh\nnode server.js" }] });
+  });
+  it("syncs original repository paths and lockfiles, retaining excluded remote files and binary baseline", async () => {
+    const s = setup();
+    const local: Record<string, string> = { "src/index.ts": "old", "package-lock.json": "x".repeat(1024 * 1024 + 10), "assets/logo.png": "base64:aGVsbG8=" };
+    s.link.last_sha = "previous";
+    s.link.synced = Object.fromEntries(Object.entries(local).map(([path, content]) => [path, s.gateway.blobSha(content)]));
+    s.project.readAllFiles.mockImplementation(async () => ({ ...local }));
+    s.project.writeFile.mockImplementation(async (_p, path, content) => { local[path] = content; });
+    const original = s.gateway.request.getMockImplementation()!;
+    s.gateway.request.mockImplementation(async (token, method, path, body) => {
+      if (path.endsWith("/git/commits/head")) return { tree: { sha: "tree" }, message: "Repository edit" };
+      if (path.includes("?recursive=1")) return { tree: [
+        { path: "src/index.ts", type: "blob", mode: "100644", sha: "sha:new" },
+        { path: "package-lock.json", type: "blob", mode: "100644", sha: s.link.synced["package-lock.json"], size: local["package-lock.json"]!.length },
+        { path: "assets/logo.png", type: "blob", mode: "100644", sha: s.link.synced["assets/logo.png"] },
+        { path: ".env.example", type: "blob", sha: "environment" },
+        { path: "graphify-out/graph.json", type: "blob", sha: "generated" },
+      ] };
+      if (path.endsWith("/git/blobs/sha:new")) return { content: "new", encoding: "utf8" };
+      return original(token, method, path, body);
+    });
+    const project = { ...s.project, projectRuntime: vi.fn(async () => "repository" as const), assertValidPathForProject: vi.fn(async (_id: string, path: string) => ProjectPath.assertValid(path, "repository")) };
+    const service = createGithubSyncService(s.repository, s.gateway, project);
+    const result = await service.syncProject("p");
+    expect(local["src/index.ts"]).toBe("new");
+    expect(result.pushed).toBeNull();
+    expect(project.recheckBuild).not.toHaveBeenCalled();
+    expect(s.repository.addPullCard).toHaveBeenCalledWith("p", expect.objectContaining({ build: "pending" }));
+    expect(s.gateway.request.mock.calls.some(([, method]) => method === "POST")).toBe(false);
+  });
+  it("rejects repository symlink updates rather than advancing an inaccurate baseline", async () => {
+    const s = setup();
+    s.link.last_sha = "old";
+    const original = s.gateway.request.getMockImplementation()!;
+    s.gateway.request.mockImplementation(async (token, method, path, body) => {
+      if (path.includes("?recursive=1")) return { tree: [{ path: "src/link", type: "blob", mode: "120000", sha: "link" }] };
+      return original(token, method, path, body);
+    });
+    const service = createGithubSyncService(s.repository, s.gateway, { ...s.project, projectRuntime: async () => "repository", assertValidPathForProject: async () => {} });
+    await expect(service.syncProject("p")).rejects.toMatchObject({ status: 422 });
+    expect(s.repository.saveSync).not.toHaveBeenCalled();
+  });
   it("pulls only permitted remote files, remote conflicts win, and preserves locally changed remote deletions", async () => {
     const s = setup();
     s.link.synced = { "pages/conflict.tsx": "old", "pages/deleted.tsx": "sha:old", "pages/kept.tsx": "sha:old" };

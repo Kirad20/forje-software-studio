@@ -1,3 +1,4 @@
+import type { ProjectRuntime } from "./ProjectSnapshot.js";
 export type Visibility = "public" | "private";
 
 export interface ProjectProps {
@@ -5,6 +6,7 @@ export interface ProjectProps {
   ownerId: string;
   orgId: string | null;
   name: string;
+  runtime?: ProjectRuntime;
   description: string;
   visibility?: Visibility;
   slug?: string | null;
@@ -19,6 +21,7 @@ export class Project {
   readonly ownerId: string;
   readonly orgId: string | null;
   name: string;
+  readonly runtime: ProjectRuntime;
   description: string;
   visibility: Visibility;
   slug: string | null;
@@ -32,8 +35,10 @@ export class Project {
     this.ownerId = props.ownerId;
     this.orgId = props.orgId;
     this.name = props.name;
+    this.runtime = props.runtime ?? "native";
+    if (!["native", "repository"].includes(this.runtime)) throw new Error("Runtime no válido");
     this.description = props.description;
-    this.visibility = props.visibility ?? "public";
+    this.visibility = props.visibility ?? (this.runtime === "repository" ? "private" : "public");
     this.slug = props.slug ?? null;
     this.publishedVersionId = props.publishedVersionId ?? null;
     this.files = props.files ? { ...props.files } : {};

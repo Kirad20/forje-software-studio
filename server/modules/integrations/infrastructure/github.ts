@@ -5,6 +5,7 @@ import { one, q } from "../../../shared/database/index.js";
 import { GithubError, type GithubGateway, type GithubRepository, type Link } from "../application/github.js";
 import type { GithubAccountRepository, GithubAuthorization } from "../application/accounts.js";
 import { githubAppStore } from "./apps.js";
+import { assertSafeRepositoryPath, assertSafeRepositoryContent, repositoryPathExclusion } from "../../../../contracts/repository.js";
 export async function gh<T = any>(token: string, method: string, path: string, body?: unknown): Promise<T> {
   const res = await fetch(`${config.github.apiUrl}${path}`, {
     method,
@@ -60,6 +61,7 @@ export const githubRepository: GithubRepository = {
   async addPullCard(p, card) { await q(`insert into chat_messages (project_id, role, content) values ($1, 'assistant', $2)`, [p, JSON.stringify([card])]); },
 };
 export const githubGateway: GithubGateway = {
+  repositoryPolicy: { assertPath: assertSafeRepositoryPath, assertContent: assertSafeRepositoryContent, exclusion: repositoryPathExclusion },
   request: gh, blobSha,
   decodeBlob(path, content, encoding) {
     const bytes = Buffer.from(content, encoding === "base64" ? "base64" : "utf8");

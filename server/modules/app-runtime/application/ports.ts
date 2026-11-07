@@ -14,7 +14,7 @@ export interface PublicationPorts {
 }
 
 export interface RuntimeProjectsPort {
-  getProject(id: string): Promise<{ id: string; name: string; slug?: string | null } | null | undefined>;
+  getProject(id: string): Promise<{ id: string; name: string; slug?: string | null; runtime?: "native" | "repository" } | null | undefined>;
   isSlugTaken: PublicationPorts["isSlugTaken"];
   readAllFiles: PublicationPorts["readAllFiles"];
   recordPublish: PublicationPorts["recordPublish"];

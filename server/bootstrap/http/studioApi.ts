@@ -35,6 +35,8 @@ import { startSecurityReview, metricsReport } from "../../modules/builder/index.
 import { addMemory, deleteMemory, listMemories, setMemoryEnabled, updateMemory } from "../../modules/memory/memory.js";
 import * as github from "../../modules/integrations/github.js";
 import { createAdminApi } from "./adminApi.js";
+import { registerRepositoryApi } from "./repositoryApi.js";
+import { RepositoryRuntimeError, type RepositoryRuntime } from "../../modules/repository-runtime/index.js";
 import { evalsApi } from "../../modules/evaluations/api.js";
 import {
   removeProjectData,
@@ -79,12 +81,13 @@ type StudioApiModules = {
   collaboration: CollaborationModule;
   settings: SettingsModule;
   models: ReturnType<typeof createPlatformModelManagement>;
+  repositoryRuntime?: RepositoryRuntime;
 };
 
 export const SESSION_COOKIE = "forja_session";
 
 export function createStudioApi(
-  { identity: accounts, projects, knowledge, collaboration: orgs, settings, models }: StudioApiModules,
+  { identity: accounts, projects, knowledge, collaboration: orgs, settings, models, repositoryRuntime }: StudioApiModules,
   builderClient = config.builderServiceUrl ? new BuilderServiceClient(config.builderServiceUrl, config.builderServiceToken) : undefined,
 ) {
 const building = async (projectId: string) => builderClient ? (await builderClient.status(projectId)).building : isBuilding(projectId);
@@ -95,6 +98,7 @@ const publicRoutes = new Hono<Env>();
 studioApi.onError((err, c) => {
   if (err instanceof RateLimitError) return c.json({ error: err.message }, 429, { "retry-after": String(err.retryAfterSec) });
   if (err instanceof RateLimitStoreError) return c.json({ error: err.message }, 503);
+  if (err instanceof RepositoryRuntimeError) return c.json({ error: err.message }, err.status);
   if (err instanceof github.GithubError) return c.json({ error: err.message }, ([400, 401, 403, 404, 409, 413, 422].includes(err.status) ? err.status : 502) as 400);
   return c.json({ error: err.message }, 400);
 });
@@ -266,7 +270,12 @@ accountRoutes.delete("/me", async (c) => {
   const account = c.get("account");
   const { confirmEmail } = await c.req.json<{ confirmEmail: string }>();
   if (confirmEmail?.trim().toLowerCase() !== account.email) return c.json({ error: "Escribe tu correo para confirmar." }, 400);
-  for (const p of await projects.listProjects(account.id)) await unpublishProject(p.id);
+  for (const p of await projects.listProjects(account.id)) {
+    if (p.runtime === "repository") {
+      if (!repositoryRuntime) throw new RepositoryRuntimeError("Repository runner unavailable; cleanup cannot proceed.", 503);
+      await repositoryRuntime.remove(p.id);
+    } else await unpublishProject(p.id);
+  }
   const ids = await accounts.deleteAccount(account.id);
   for (const id of ids) await removeProjectData(id);
   deleteCookie(c, SESSION_COOKIE, { path: "/" });
@@ -460,25 +469,28 @@ const projectView = async (p: Project) => ({
   previewUrl: previewUrl(p),
   previewOrigin: previewOrigin(p.id),
   // A private app's link carries the share token, like the preview's.
-  appUrl: p.slug ? (p.visibility === "private" ? `${appUrl(p.slug)}/?share=${shareToken(p, 365)}` : appUrl(p.slug)) : null,
+  appUrl: p.slug ? (p.visibility === "private" ? `${appUrl(p.slug)}/?share=${shareToken(p, 365, "published")}` : appUrl(p.slug)) : null,
   suggestedSlug: p.slug ?? suggestSlug(p.name),
   building: await building(p.id),
   hasUnpublishedChanges: p.slug ? await projects.hasUnpublishedChanges(p.id) : false,
 });
 
 accountRoutes.post("/github/import", async (c) => {
-  const input = await c.req.json<{ repo: string; branch?: string; installationId?: number | null; name?: string; orgId?: string }>();
+  const input = await c.req.json<{ repo: string; branch?: string; installationId?: number | null; name?: string; orgId?: string; runtime?: unknown }>();
+  if (input.runtime !== undefined && input.runtime !== "native" && input.runtime !== "repository") return c.json({ error: "runtime debe ser native o repository." }, 400);
   const accountId = c.get("account").id;
   if (input.orgId && !(await orgs.orgRoleOf(input.orgId, accountId))) return c.json({ error: "Organización no encontrada" }, 404);
   await rateLimit(`github-import:${accountId}`, 10, 60 * 60_000);
-  // Fetch and validate the entire native snapshot before allocating a project.
-  const prepared = await github.prepareImport(accountId, input);
+  // Validate the snapshot before allocating a project or changing GitHub.
+  const prepared = await github.prepareImport(accountId, { ...input, runtime: input.runtime === "repository" ? "repository" : undefined });
   let created: Project | undefined;
   try {
-    created = await projects.createProject(accountId, (input.name?.trim() || prepared.repo).slice(0, 60), `Importado de ${prepared.owner}/${prepared.repo}`, prepared.files, input.orgId);
+    created = await projects.createProject(accountId, (input.name?.trim() || prepared.repo).slice(0, 60), `Importado de ${prepared.owner}/${prepared.repo}`, prepared.files, input.orgId, undefined, prepared.runtime);
     const result = await github.attachImport(created.id, accountId, prepared);
     const warnings = [...prepared.warnings];
-    try {
+    if (prepared.runtime === "repository") {
+      warnings.push("Construye la vista previa con el runner Docker antes de ejecutar o publicar. Las bases de datos y los secretos son independientes por entorno.");
+    } else try {
       const problems = await recheckBuild(created.id);
       warnings.push(...problems.map((p) => `Compilación: ${p.title}`));
     } catch (e) { warnings.push(`No se pudo verificar la compilación: ${(e as Error).message}`); }
@@ -512,11 +524,14 @@ accountRoutes.get("/agent-metrics", async (c) => {
 
 /** The dashboard's prompt box: the project is named from the idea, and the studio then sends the idea to the builder. */
 accountRoutes.post("/projects", async (c) => {
-  const { name, prompt, orgId, template: rawTemplate } = await c.req.json<{ name?: string; prompt?: string; orgId?: string; template?: unknown }>();
+  const { name, prompt, orgId, template: rawTemplate, runtime } = await c.req.json<{ name?: string; prompt?: string; orgId?: string; template?: unknown; runtime?: unknown }>();
+  if (runtime !== undefined && runtime !== "native" && runtime !== "repository") return c.json({ error: "runtime debe ser native o repository." }, 400);
   const template = parseStarterTemplate(rawTemplate);
+  if (runtime === "repository" && template) return c.json({ error: "Un repositorio no usa una plantilla nativa." }, 400);
   if (orgId && !(await orgs.orgRoleOf(orgId, c.get("account").id))) return c.json({ error: "Organización no encontrada" }, 404);
   const title = (name ?? prompt ?? "").trim().split(/\s+/).slice(0, 5).join(" ").replace(/[.,;:]+$/, "") || "Proyecto nuevo";
-  const p = await projects.createProject(c.get("account").id, title.slice(0, 60), (prompt ?? "").slice(0, 2000), undefined, orgId, template);
+  const args = [c.get("account").id, title.slice(0, 60), (prompt ?? "").slice(0, 2000), undefined, orgId, template] as const;
+  const p = runtime === "repository" ? await projects.createProject(...args, runtime) : await projects.createProject(...args);
   return c.json({ project: await projectView(p) });
 });
 
@@ -544,6 +559,22 @@ projectRoutes.use("/projects/:id", async (c, next) => {
 const ownerOnly = (c: Context<Env>) => (c.get("access") === "owner" ? null : c.json({ error: "Solo la persona dueña del proyecto puede hacer esto." }, 403));
 
 const pid = (c: Context<Env>) => c.get("project").id;
+
+if (repositoryRuntime) registerRepositoryApi(projectRoutes, repositoryRuntime);
+else {
+  const unavailable = (c: Context<Env>) => c.json({ error: "Repository runner unavailable." }, 503);
+  projectRoutes.all("/projects/:id/repository", unavailable);
+  projectRoutes.all("/projects/:id/repository/*", unavailable);
+}
+
+const nativeServices = new Set(["db", "users", "app-users", "app-auth", "ai", "analytics", "seo", "email", "emails", "email-domain", "jobs", "timers", "storage", "payments", "service-control"]);
+projectRoutes.use("/projects/:id/*", async (c, next) => {
+  const service = c.req.path.match(/\/projects\/[^/]+\/([^/]+)/)?.[1];
+  if (c.get("project").runtime === "repository" && service && nativeServices.has(service)) {
+    return c.json({ error: "Este proyecto usa servicios propios del repositorio, no el BaaS nativo. Consulta su código y el centro de control Docker." }, 409);
+  }
+  await next();
+});
 
 projectRoutes.get("/projects/:id/knowledge", async (c) => c.json(await knowledge.graph(pid(c))));
 projectRoutes.post("/projects/:id/knowledge/rebuild", async (c) => c.json(await knowledge.graph(pid(c), true)));
@@ -586,6 +617,10 @@ projectRoutes.get("/projects/:id", async (c) => {
 });
 projectRoutes.patch("/projects/:id", async (c) => {
   const patch = await c.req.json<import("../../modules/projects/index.js").ProjectPatch>();
+  if (c.get("project").runtime === "repository" && patch.visibility !== undefined) {
+    const denied = ownerOnly(c);
+    if (denied) return denied;
+  }
   // Folders, favorites and archive are the owner's own organisation.
   if (c.get("access") !== "owner") for (const k of ["folderId", "favorite", "archived"] as const) delete patch[k];
   if (patch.folderId) {
@@ -598,7 +633,10 @@ projectRoutes.patch("/projects/:id", async (c) => {
 projectRoutes.delete("/projects/:id", async (c) => {
   const denied = ownerOnly(c);
   if (denied) return denied;
-  await unpublishProject(pid(c));
+  if (c.get("project").runtime === "repository") {
+    if (!repositoryRuntime) throw new RepositoryRuntimeError("Repository runner unavailable; cleanup cannot proceed.", 503);
+    await repositoryRuntime.remove(pid(c));
+  } else await unpublishProject(pid(c));
   await projects.deleteProject(pid(c));
   await removeProjectData(pid(c));
   return c.json({ ok: true });
@@ -633,6 +671,7 @@ projectRoutes.get("/projects/:id/stats", async (c) => {
 projectRoutes.get("/projects/:id/services", async (c) => {
   const id = pid(c);
   const files = Object.keys(await projects.readAllFiles(id));
+  if (c.get("project").runtime === "repository") return c.json({ control: true, integrations: true, docs: files.some((file) => file.startsWith("docs/")), code: true });
   const tables = Object.keys(await describeSchema(id));
   const counts = await projectServiceCounts(id);
   const secrets = await listSecrets(id);
@@ -1114,6 +1153,10 @@ projectRoutes.post("/projects/:id/changes/:cid/restore", async (c) => {
 
 // Publishing
 projectRoutes.post("/projects/:id/publish", async (c) => {
+  if (c.get("project").runtime === "repository") {
+    const denied = ownerOnly(c);
+    if (denied) return denied;
+  }
   const { slug } = await c.req.json<{ slug?: string }>().catch(() => ({ slug: undefined }));
   try {
     return c.json(await publishProject(pid(c), slug));
@@ -1122,8 +1165,12 @@ projectRoutes.post("/projects/:id/publish", async (c) => {
   }
 });
 projectRoutes.post("/projects/:id/unpublish", async (c) => {
+  if (c.get("project").runtime === "repository") {
+    const denied = ownerOnly(c);
+    if (denied) return denied;
+  }
   await unpublishProject(pid(c));
-  await scheduleProject(pid(c));
+  if (c.get("project").runtime !== "repository") await scheduleProject(pid(c));
   return c.json({ ok: true });
 });
 

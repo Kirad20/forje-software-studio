@@ -6,7 +6,7 @@ import type { ProjectEventPort, ProjectsStore } from "../ports/projects.js";
 import type { ProjectOrganizations } from "../ports/collaboration.js";
 import { PostgresProjectFileRepository } from "./PostgresProjectFileRepository.js";
 
-const PROJECT_COLS = `id, owner_id as "ownerId", org_id as "orgId", name, description, slug, visibility, ai_enabled as "aiEnabled",
+const PROJECT_COLS = `id, owner_id as "ownerId", org_id as "orgId", name, runtime, description, slug, visibility, ai_enabled as "aiEnabled",
   email_domain as "emailDomain", email_domain_verified as "emailDomainVerified",
   published_version_id as "publishedVersionId", published_at as "publishedAt",
   favorite, archived, folder_id as "folderId", last_opened_at as "lastOpenedAt",
@@ -28,8 +28,8 @@ export class PostgresProjectsStore extends PostgresProjectFileRepository impleme
     const db = await this.database();
     await db.transaction(async (tx) => {
       if (!orgId) await this.organizations.ensurePersonalOrg(tx, project.ownerId);
-      await tx.query(`insert into projects (id, owner_id, org_id, name, description) values ($1, $2, $3, $4, $5)`, [
-        project.id, project.ownerId, orgId ?? this.organizations.personalOrgId(project.ownerId), project.name, project.description,
+      await tx.query(`insert into projects (id, owner_id, org_id, name, description, runtime, visibility) values ($1, $2, $3, $4, $5, $6, $7)`, [
+        project.id, project.ownerId, orgId ?? this.organizations.personalOrgId(project.ownerId), project.name, project.description, project.runtime, project.visibility,
       ]);
       for (const [path, content] of Object.entries(files)) {
         await tx.query(`insert into project_files (project_id, path, content) values ($1, $2, $3)`, [project.id, path, content]);

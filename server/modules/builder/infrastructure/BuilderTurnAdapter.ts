@@ -4,7 +4,8 @@ import { analyzeRequest, callModel, recordOutcome, penalizeTurn as penalizeModel
 import { emptyUsage, addUsage, textOf, type Block, type LlmMessage, type Usage } from "../../model-management/types.js";
 import { describeSchema } from "../../app-services/projectDb.js";
 import type { Account } from "../../identity/contracts.js";
-import { getAccount, createCheckpoint, getProject, readAllFiles, writeFile, enabledOrgSkills } from "./CoreModulesAdapter.js";
+import { getAccount, createCheckpoint, getProject, readAllFiles, writeFile, enabledOrgSkills, builderCoreModules } from "./CoreModulesAdapter.js";
+import { systemPromptForRuntime } from "./prompt.js";
 import { one, q } from "../../../shared/database/index.js";
 import { addMemory, memorySection, memorySettings, MEMORY_KINDS } from "../../memory/memory.js";
 import type { Project } from "../../projects/index.js";
@@ -275,6 +276,7 @@ async function runLane(
       createGate: async (_lane: typeof task, input: typeof spec) => createFinishGate(s.project.id, input.ctx),
       run: (lane: typeof task, input: typeof spec, hooks) => runAgent({
         ...input,
+        system: systemPromptForRuntime(input.system, s.project.runtime),
         ...hooks,
         scope: s.scope,
         billing: s.billing,
@@ -298,13 +300,16 @@ async function runLane(
 const preloadSection = (files: Record<string, string>, paths: string[]) =>
   paths.length ? `# Archivos relevantes (ya leídos; no hace falta volver a pedirlos)\n${paths.map((p) => `### ${p}\n\`\`\`\n${files[p]}\n\`\`\``).join("\n\n")}` : "";
 
-const isNewApp = (s: TurnState) => s.features.intent === "new_app";
+const isNewApp = (s: TurnState) => s.project.runtime !== "repository" && s.features.intent === "new_app";
 
 async function runFast(s: TurnState): Promise<void> {
-  const ctx: ToolContext = { account: s.account, projectId: s.project.id, author: "builder", owned: BUILDER_FILES, ownerMessage: s.request };
+  const repository = s.project.runtime === "repository";
+  const ctx: ToolContext = { account: s.account, projectId: s.project.id, author: "builder", owned: repository ? undefined : BUILDER_FILES, ownerMessage: s.request };
   // Like the specialists: the map and the files the request most likely touches, already read.
   const files = await readAllFiles(s.project.id);
-  const map = projectMap(files, await describeSchema(s.project.id, true));
+  const knowledge = repository ? builderCoreModules().knowledge : undefined;
+  if (repository && !knowledge) throw new Error("El cerebro del proyecto repository no está configurado.");
+  const map = repository && knowledge ? JSON.stringify(await knowledge.question(s.project.id, s.request.slice(0, 1000))) : projectMap(files, await describeSchema(s.project.id, true));
   // Words in the request pick most files; the request's kind adds the obvious ones.
   const focus = isNewApp(s) ? ["pages/", "components/", "base.css"] : s.features.intent === "style" || s.features.domains.includes("ui") ? ["base.css"] : [];
   const preload = selectContext(files, s.request, focus, 20_000);
@@ -340,7 +345,15 @@ async function runFast(s: TurnState): Promise<void> {
       s.wrote ||= !!ctx.wrote;
       return s.wrote;
     },
-    check: () => recheckBuild(s.project.id),
+    check: async () => {
+      if (!repository) return recheckBuild(s.project.id);
+      const runtime = builderCoreModules().repositoryRuntime;
+      if (!runtime) throw new Error("Repository runtime no configurado.");
+      const snapshot = await runtime.get(s.project.id);
+      if (snapshot.status === "ready" && snapshot.preview?.status === "ready") return [];
+      const at = new Date().toISOString();
+      return [{ id: "repository-build", kind: "build" as const, title: snapshot.error ?? "Repository build pendiente; ejecuta check_build.", detail: snapshot.error ?? "", count: 1, firstAt: at, lastAt: at }];
+    },
     learn: async (r, broken) => {
       if (r.model) await learn(s, taskClassOf("fast", s.features), r.model, rewardOf({ ...r, buildOk: broken.length ? false : r.buildOk }, null), r.usd);
     },
@@ -361,7 +374,7 @@ async function runFast(s: TurnState): Promise<void> {
           },
         ],
         tools: FAST_TOOLS,
-        ctx: { account: s.account, projectId: s.project.id, author: "builder", owned: BUILDER_FILES, ownerMessage: s.request },
+        ctx: { account: s.account, projectId: s.project.id, author: "builder", owned: repository ? undefined : BUILDER_FILES, ownerMessage: s.request },
         routing: { complexity: 2, domains: s.features.domains, needsVision: false },
       },
     ),
@@ -793,10 +806,12 @@ async function executeBuilderTurn(
     s.context = await turnContext(projectId, turnId);
     s.memory = await memorySection(projectId, account.id);
     // Like a developer glancing at the console first: what is broken in the preview right now.
-    watchProblems(projectId);
-    await recheckBuild(projectId).catch(() => {});
-    const open = listProblems(projectId);
-    if (open.length) s.context += `\n\n## Problemas abiertos en la vista previa\n${formatProblems(open, 8)}`;
+    if (project.runtime !== "repository") {
+      watchProblems(projectId);
+      await recheckBuild(projectId).catch(() => {});
+      const open = listProblems(projectId);
+      if (open.length) s.context += `\n\n## Problemas abiertos en la vista previa\n${formatProblems(open, 8)}`;
+    }
     },
     analyze: async () => {
       const fileCount = Object.keys(await readAllFiles(projectId)).length;
@@ -809,7 +824,13 @@ async function executeBuilderTurn(
       emit({ type: "route", fastPath: fast, features, mode });
     },
     chat: () => runChat(s),
-    team: options => runTeam(s, options),
+    team: options => {
+      if (project.runtime === "repository") {
+        if (options.planOnly || options.given) throw new Error("La planificación nativa por páginas no es compatible con repository runtime; usa edición directa.");
+        return Promise.resolve(false);
+      }
+      return runTeam(s, options);
+    },
     consumePlan: async () => {
       await q(`delete from project_plans where project_id = $1`, [projectId]);
     },

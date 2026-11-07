@@ -19,7 +19,7 @@ describe("Core module bootstrap composition", () => {
       findSecret: () => null,
     });
 
-    expect(Object.keys(modules).sort()).toEqual(["collaboration", "identity", "knowledge", "projects", "settings"]);
+    expect(Object.keys(modules).sort()).toEqual(["collaboration", "identity", "knowledge", "projects", "repositoryRuntime", "settings"]);
     for (const module of [modules.collaboration, modules.identity, modules.projects, modules.settings]) {
       expect(module.start).toEqual(expect.any(Function));
       expect(module.stop).toEqual(expect.any(Function));

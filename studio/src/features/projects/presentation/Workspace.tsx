@@ -704,7 +704,9 @@ export function ProjectSettings({ project, onChange }: { project: Project; onCha
           <div className="row-setting">
             <div>
               <strong>Copiar</strong>
-              <div className="small muted">Duplica el proyecto (código, ajustes y base de datos) o descarga su código.</div>
+              <div className="small muted">{project.runtime === "repository"
+                ? "Duplica el código y los ajustes o descarga el repositorio. Sus datos, secretos y despliegues no se copian."
+                : "Duplica el proyecto (código, ajustes y base de datos) o descarga su código."}</div>
             </div>
             <div className="row">
               <button
@@ -724,7 +726,7 @@ export function ProjectSettings({ project, onChange }: { project: Project; onCha
           </div>
         </section>
 
-        <AppearanceSection project={project} onChange={onChange} />
+        {project.runtime !== "repository" && <AppearanceSection project={project} onChange={onChange} />}
 
         <ProjectModels projectId={project.id} canEdit={project.access !== "editor"} />
 

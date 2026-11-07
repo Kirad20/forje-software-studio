@@ -2,12 +2,14 @@ import type { IdentityModule } from "../../identity/index.js";
 import type { CollaborationModule } from "../../collaboration/index.js";
 import type { ProjectsModule } from "../../projects/index.js";
 import type { ProjectKnowledgeModule } from "../../project-knowledge/index.js";
+import type { RepositoryRuntime } from "../../repository-runtime/index.js";
 
 export interface BuilderCoreModules {
   identity: Pick<IdentityModule, "getAccount">;
-  collaboration: Pick<CollaborationModule, "enabledOrgSkills">;
+  collaboration: Pick<CollaborationModule, "enabledOrgSkills"> & Partial<Pick<CollaborationModule, "accessOf">>;
   projects: ProjectsModule;
   knowledge?: ProjectKnowledgeModule;
+  repositoryRuntime?: Pick<RepositoryRuntime, "build" | "get">;
 }
 
 let binding: { modules: BuilderCoreModules } | undefined;
