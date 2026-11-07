@@ -37,6 +37,10 @@ describe("opt-in orders/invoices starter", () => {
     const files = store.create.mock.calls[1]![1];
     expect(readProjectServices(files)?.services.invoices.kind).toBe("worker");
     expect(files["endpoints/orders/create_POST.ts"]).toBeDefined();
+    expect(readProjectServices(files)?.services.orders.jobs).toEqual(["jobs/order-invoiced.ts"]);
+    expect(files["helpers/orders/domain.ts"]).toContain("pendingOrder");
+    expect(files["helpers/orders/ports.ts"]).toContain("OrderRepository");
+    expect(files["helpers/orders/adapters.ts"]).toContain("postgresOrders");
   });
 
   it("rejects invalid selectors before persistence, even when files are supplied", async () => {
@@ -51,14 +55,12 @@ describe("opt-in orders/invoices starter", () => {
     const create = load(files, "endpoints/orders/create_POST.ts").default;
     const status = load(files, "endpoints/orders/status_GET.ts").default;
     const invoice = load(files, "jobs/invoice.ts").default;
+    const orderInvoiced = load(files, "jobs/order-invoiced.ts").default;
     const pg = await PGlite.create();
     const db = {
       exec: (sql: string) => pg.exec(sql),
       one: async (sql: string, params: unknown[] = []) => (await pg.query(sql, params)).rows[0],
-      transaction: (fn: (tx: any) => Promise<unknown>) => pg.transaction((tx) => fn({
-        query: async (sql: string, params: unknown[] = []) => (await tx.query(sql, params)).rows,
-        one: async (sql: string, params: unknown[] = []) => (await tx.query(sql, params)).rows[0],
-      })),
+      query: async (sql: string, params: unknown[] = []) => (await pg.query(sql, params)).rows,
     };
     const enqueue = vi.fn().mockResolvedValue("queue-1");
     const orderId = "550e8400-e29b-41d4-a716-446655440000";
@@ -66,22 +68,21 @@ describe("opt-in orders/invoices starter", () => {
     try {
       const accepted = await create({ db, jobs: { enqueue }, body: { orderId }, fail });
       expect(accepted).toMatchObject({ orderId, queueId: "queue-1" });
-      expect(enqueue).toHaveBeenCalledWith("invoice", { orderId });
+      expect(enqueue).toHaveBeenCalledWith("invoice", { orderId, amountCents: 2500 });
       expect(await status({ db, query: { orderId }, fail })).toMatchObject({ order: { status: "pending" }, invoice: null });
-      const failingDb = {
-        ...db,
-        transaction: (fn: (tx: any) => Promise<unknown>) => db.transaction((tx) => fn({
-          ...tx,
-          query: (sql: string, params: unknown[]) => {
-            if (sql.startsWith("update orders")) throw new Error("interrupted");
-            return tx.query(sql, params);
-          },
-        })),
-      };
-      await expect(invoice({ db: failingDb, payload: { orderId }, fail })).rejects.toThrow("interrupted");
+
+      enqueue.mockRejectedValueOnce(new Error("queue unavailable"));
+      await expect(invoice({ db, jobs: { enqueue }, payload: { orderId, amountCents: 2500 }, fail })).rejects.toThrow("queue unavailable");
+      expect((await pg.query("select * from invoices")).rows).toHaveLength(1);
       expect(await status({ db, query: { orderId }, fail })).toMatchObject({ order: { status: "pending" }, invoice: null });
-      await invoice({ db, payload: { orderId }, fail });
-      await invoice({ db, payload: { orderId }, fail });
+      await invoice({ db, jobs: { enqueue }, payload: { orderId, amountCents: 2500 }, fail });
+      await invoice({ db, jobs: { enqueue }, payload: { orderId, amountCents: 2500 }, fail });
+      expect(enqueue).toHaveBeenCalledWith("order-invoiced", { orderId, amountCents: 2500 });
+      await orderInvoiced({ db, payload: { orderId, amountCents: 2500 }, fail });
+      await orderInvoiced({ db, payload: { orderId, amountCents: 2500 }, fail });
+      await expect(orderInvoiced({
+        db, payload: { orderId: "550e8400-e29b-41d4-a716-446655440002", amountCents: 2500 }, fail,
+      })).rejects.toThrow("Pedido no encontrado");
       expect(await status({ db, query: { orderId }, fail })).toMatchObject({ order: { status: "invoiced" }, invoice: { order_id: orderId, amount_cents: 2500 } });
       expect((await pg.query("select * from invoices")).rows).toHaveLength(1);
       await create({ db, jobs: { enqueue }, body: { orderId }, fail });

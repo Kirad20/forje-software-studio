@@ -1,7 +1,7 @@
 // Runs one project's endpoints and jobs inside a locked-down Node process (see sandbox.ts).
 // It can read only node_modules (where compiled bundles live), cannot write files or spawn
 // processes, and has no platform environment variables. Every service call — database,
-// storage, email, AI, jobs, realtime, payments — is a message to the platform process,
+// storage, cache, email, AI, jobs, realtime, payments — is a message to the platform process,
 // which scopes it to this project.
 import { pathToFileURL } from "node:url";
 
@@ -62,6 +62,11 @@ function services(run, input) {
   };
   return {
     db,
+    cache: {
+      get: (key) => rpc(run, "cache.get", key),
+      set: (key, value, ttlSeconds) => rpc(run, "cache.set", key, value, ttlSeconds),
+      delete: (key) => rpc(run, "cache.delete", key),
+    },
     storage: {
       put: (data, opts) => rpc(run, "storage.put", typeof data === "string" ? new TextEncoder().encode(data) : data, opts),
       get: (key) => rpc(run, "storage.get", key),

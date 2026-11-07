@@ -298,7 +298,7 @@ Style the table in a CSS Module with tokens; wrap it in an overflow-x: auto cont
   {
     name: "jobs",
     description: "Background and scheduled work (jobs/<name>.ts): cron schedule, time zone, limits, safe re-runs",
-    body: `A job is a file jobs/<name>.ts (letters, digits, - and _). ctx.jobs.enqueue(name, payload?) returns a durable queue ID after acceptance, not execution. Delivery is at-least-once with bounded retries; a crash can replay an attempt. ctx.jobs.run(name, payload?) waits for completion; ctx.jobs.runAt(name, payload, dateOrDelayMs) keeps its existing scheduling semantics between 1 minute and 7 days ahead. Cron schedules remain supported.
+    body: `A job is a file jobs/<name>.ts (letters, digits, - and _). ctx.jobs.enqueue(name, payload?) returns a durable queue ID after acceptance, not execution. Delivery is at-least-once with bounded retries; a crash can replay an attempt. ctx.jobs.run(name, payload?) starts immediately in the background and resolves before completion; failures go to project logs. Use enqueue when durable acceptance and retries matter. ctx.jobs.runAt(name, payload, dateOrDelayMs) schedules it between 1 minute and 7 days ahead. Cron schedules remain supported.
 - export const schedule is optional, only runs in the published app, at most every 5 minutes, at most 10 scheduled jobs per project. export const timezone is optional (default UTC): set the business's zone, for example "America/Mexico_City".
 - ctx.payload carries the arguments; the job has the same services as an endpoint (db, email, storage, ai, jobs, realtime, env, log).
 - A run may last 15 minutes. Make durable jobs idempotent: a unique business key (for example invoice.order_id), INSERT ... ON CONFLICT and a transaction updating output + status. External effects need provider idempotency keys; a database transaction cannot atomically commit email or payments.
@@ -321,6 +321,24 @@ Style the table in a CSS Module with tokens; wrap it in an overflow-x: auto cont
     }
     ctx.log("recordatorios enviados", due.length);
   }`,
+  },
+  {
+    name: "microservices-ddd",
+    description: "Microservices with DDD and hexagonal architecture, using Forja's service topology and durable jobs",
+    body: `Load this skill whenever a request involves multiple services or bounded contexts.
+- Decide first whether separate services are justified by independent ownership, deployment or scaling; keep the default monolith when they are not.
+- Model domain-driven design around bounded contexts, domain invariants and explicit contracts. Give each service a clear data owner; table ownership is a code convention because all services share one project database and its credentials.
+- Keep the domain pure: no ctx, SQL, SDK or runtime imports. Put use cases behind ports; define repository and queue interfaces next to the context. Implement adapters separately and inject them at the endpoint/job entrypoint.
+- Forja projects allow pages/, components/, helpers/, endpoints/, jobs/, static/ and root config files. A practical layout is helpers/<context>/domain.ts, application.ts, ports.ts and adapters/*.ts; endpoints/<context>_* and jobs/<name>.ts are inbound adapters and composition roots. Database adapters under helpers must be imported only by server entrypoints, never by pages or browser components.
+- Create entrypoint files before assigning them in forja.services.json. Assign exact endpoint/job paths once; workers cannot expose endpoints. Unassigned entrypoints remain in the monolith.
+- The native cross-service async mechanism is ctx.jobs.enqueue. It confirms durable acceptance, not completion; delivery is at least once, so handlers must be idempotent. Include only the data the receiver needs, validate payloads, and handle enqueue failure. A database write and enqueue are not atomic; use an outbox/reconciler when losing an event is unacceptable.
+- ctx.cache is shared across service replicas for the same project and environment. Include user/tenant IDs in keys for private data, never cache secrets, and invalidate after writes that change the cached result.
+- Keep HTTP contracts explicit. Forja preserves /_api/<route> but has no native gRPC listener, per-service credentials or separate databases. Its ctx.cache is JSON storage shared by replicas through the project database, namespaced by environment and bounded by TTL, entry count and value size; it is not Redis or a low-latency cache. Process-local caches are per replica and not durable. Do not invent unsupported infrastructure.
+- Verify domain and use cases through ports with run_tests, then check_build, exercise endpoints and jobs, inspect logs/problems, and run security_scan after backend changes. Test retries and duplicate delivery, not only the happy path.
+
+  // Endpoint/job entrypoints compose adapters with application use cases:
+  const orders = createPostgresOrders(ctx.db);
+  return createOrder({ orders, jobs: ctx.jobs }, input);`,
   },
   {
     name: "auth",

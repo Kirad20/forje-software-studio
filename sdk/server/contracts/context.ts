@@ -1,10 +1,11 @@
 import type { Db } from "./database.js";
 import type { AppUser } from "./identity.js";
-import type { Ai, Email, Jobs, Payments, Realtime } from "./services.js";
+import type { Ai, Cache, Email, Jobs, Payments, Realtime } from "./services.js";
 import type { Storage } from "./storage.js";
 
 export interface ServiceCtx {
   db: Db;
+  cache: Cache;
   storage: Storage;
   email: Email;
   ai: Ai;

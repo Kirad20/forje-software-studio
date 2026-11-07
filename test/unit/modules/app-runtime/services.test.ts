@@ -5,10 +5,16 @@ import { runInSandbox, stopAllSandboxes, getSandboxServices, restartSandboxServi
 import { bindRuntimeObservation } from "../../../../server/modules/app-runtime/infrastructure/observation.js";
 
 const enqueue = vi.hoisted(() => vi.fn(async (name: string, payload: unknown) => `${name}:${JSON.stringify(payload)}`));
+const cache = vi.hoisted(() => ({
+  get: vi.fn(async (_key: string) => ({ status: "pending" })),
+  set: vi.fn(async (_key: string, _value: unknown, _ttlSeconds: number) => undefined),
+  delete: vi.fn(async (_key: string) => undefined),
+}));
 vi.mock("../../../../server/modules/app-services/context.js", () => ({
   serviceContext: async () => ({
     env: {},
     jobs: { enqueue },
+    cache,
   }),
 }));
 
@@ -98,6 +104,22 @@ describe("real independent service processes", () => {
     expect(third).toEqual(first);
     expect(await execute(probe, "billing")).not.toEqual(first);
     expect(await execute(probe, "orders", 2, "published")).not.toEqual(first);
+  }, 30_000);
+
+  it("transports cache get, set, and delete calls through the sandbox RPC", async () => {
+    cache.get.mockClear();
+    cache.set.mockClear();
+    cache.delete.mockClear();
+    const result = await execute(`export default async (ctx) => {
+      await ctx.cache.set("orders:42", { status: "pending" }, 60);
+      const value = await ctx.cache.get("orders:42");
+      await ctx.cache.delete("orders:42");
+      return value;
+    };`);
+    expect(result).toMatchObject({ data: { status: "pending" } });
+    expect(cache.set).toHaveBeenCalledWith("orders:42", { status: "pending" }, 60);
+    expect(cache.get).toHaveBeenCalledWith("orders:42");
+    expect(cache.delete).toHaveBeenCalledWith("orders:42");
   }, 30_000);
 
   it("rejects overload with 503, recovers a crashed replica and preserves a different service", async () => {

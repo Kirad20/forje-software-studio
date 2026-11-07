@@ -3,6 +3,7 @@ import type { AppUser } from "./auth.js";
 import type { EmailInput } from "./email.js";
 import type { ProjectDb } from "../ports/database.js";
 import type { ContextPorts, JobsApi } from "../ports/context.js";
+import { createProjectCache } from "./cache.js";
 
 import type { AppEnv } from "../domain/contracts.js";
 export type { AppEnv } from "../domain/contracts.js";
@@ -19,6 +20,11 @@ export class HttpError extends Error {
 /** What every endpoint and job receives. Documented for the builder in builder/prompt.ts. */
 export interface ServiceContext {
   db: ProjectDb;
+  cache: {
+    get<T>(key: string): Promise<T | undefined>;
+    set(key: string, value: unknown, ttlSeconds: number): Promise<void>;
+    delete(key: string): Promise<void>;
+  };
   storage: {
     put(data: Uint8Array | string, opts: { filename: string; contentType?: string; key?: string }): ReturnType<ContextPorts["putObject"]>;
     get(key: string): ReturnType<ContextPorts["getObject"]>;
@@ -73,8 +79,10 @@ async function serviceContext(projectId: string, env: AppEnv, base: string, sour
       source,
       message: args.map((a) => (typeof a === "string" ? a : JSON.stringify(a))).join(" "),
     });
+  const db = projectDb(projectId);
   return {
-    db: projectDb(projectId),
+    db,
+    cache: createProjectCache(db, env),
     storage: {
       put: (data, opts) => putObject(projectId, typeof data === "string" ? new TextEncoder().encode(data) : data, opts),
       get: (key) => getObject(projectId, key),

@@ -226,11 +226,14 @@ describe("app service capability boundaries", () => {
     });
     const ctx = await api.serviceContext("p", "preview", "https://app", "endpoint");
     expect(() => ctx.jobs.run("job")).toThrow(/configurad/);
-    const runNow = vi.fn().mockRejectedValue(new Error("failed"));
+    let failRun!: (error: Error) => void;
+    const runNow = vi.fn(() => new Promise<void>((_resolve, reject) => { failRun = reject; }));
     api.bindJobs({ runNow, addTimer: vi.fn() });
-    await ctx.jobs.run("job");
-    await Promise.resolve();
+    const accepted = ctx.jobs.run("job");
+    await accepted;
     expect(runNow).toHaveBeenCalledWith("p", "preview", "job", null, "background");
+    failRun(new Error("failed"));
+    await Promise.resolve();
     expect(log).toHaveBeenCalledWith("p", expect.objectContaining({ level: "error", message: expect.stringContaining("failed") }));
   });
 
