@@ -81,7 +81,7 @@ export function createGithubAppService(store: AppStore, gateway: GithubGateway, 
       if (selected.id !== id) throw new GithubError("Este repositorio no está seleccionado en esa instalación. Configura los repositorios de tu GitHub App.", 403);
     }
     const remote = await gateway.request<RemoteRepo>(auth.token, "GET", `/repos/${full}`);
-    if (remote.archived || remote.disabled || remote.permissions?.push === false || (id === null && remote.permissions?.push !== true)) throw new GithubError("El repositorio está archivado o no permite escribir.", 403);
+    if (remote.archived || remote.disabled || (id === null && remote.permissions?.push !== true)) throw new GithubError("El repositorio está archivado o no permite escribir.", 403);
     const branch = branchName(input.branch ?? remote.default_branch ?? "main");
     try { await gateway.request(auth.token, "GET", `/repos/${full}/branches/${encodeURIComponent(branch)}`); }
     catch (e) {
@@ -149,7 +149,7 @@ export function createGithubAppService(store: AppStore, gateway: GithubGateway, 
           const auth = await installation(a, i.id);
           const r = await gateway.request<{ repositories: RemoteRepo[]; total_count: number }>(auth.token, "GET", `/installation/repositories?per_page=100&page=${page}`);
           next ||= r.total_count > page * 100;
-          repositories.push(...r.repositories.filter((r) => !r.archived && !r.disabled && r.permissions?.push !== false).map((r) => view(r, i.id)));
+          repositories.push(...r.repositories.filter((r) => !r.archived && !r.disabled).map((r) => view(r, i.id)));
         }
       } else {
         const { token } = await legacyToken(a);

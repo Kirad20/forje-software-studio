@@ -19,7 +19,7 @@ function setup() {
       states.delete(state); return true;
     },
   };
-  const repo = { id: 1, name: "repo", full_name: "organization/repo", owner: { login: "organization" }, private: true, description: null, default_branch: "main", permissions: { push: true } };
+  const repo = { id: 1, name: "repo", full_name: "organization/repo", owner: { login: "organization" }, private: true, description: null, default_branch: "main", permissions: { push: false } };
   const gateway = {
     request: vi.fn(async (_t: string, _method: string, path: string): Promise<any> => {
       if (path.includes("conversions")) return { id: 123, slug: "my-forja", name: "Forja", owner: { login: "owner" }, client_id: "client", client_secret: "secret", pem: "private-key", webhook_secret: "hook-secret" };
@@ -27,7 +27,7 @@ function setup() {
       if (path.endsWith("/installation")) return { id: 42 };
       if (path.includes("/branches/")) return { name: "feature/ui" };
       if (path.includes("/branches?")) return [{ name: "main" }, { name: "feature/ui" }];
-      if (path.includes("/installation/repositories")) return { total_count: 201, repositories: [repo, { ...repo, id: 2, archived: true }, { ...repo, id: 3, permissions: { push: false } }] };
+      if (path.includes("/installation/repositories")) return { total_count: 201, repositories: [repo, { ...repo, id: 2, archived: true }, { ...repo, id: 3, disabled: true }] };
       if (path.startsWith("/repos/")) return repo;
       return [];
     }),
@@ -78,7 +78,7 @@ describe("GitHub App onboarding and scoped selection", () => {
     expect(s.store.saveInstallation).toHaveBeenCalledWith("a", { id: 42, login: "organization" });
     await expect(s.service.installFinish("a", "session", 42, retry)).rejects.toThrow("ya utilizada");
   });
-  it("uses only selected installation repositories, validates branches, and retains pagination after filtering", async () => {
+  it("uses installation contents permission instead of user push permission and retains pagination after filtering", async () => {
     const s = setup(); s.configure();
     const page = await s.service.repositories("a", 1);
     expect(page.repositories).toHaveLength(1);
@@ -92,6 +92,32 @@ describe("GitHub App onboarding and scoped selection", () => {
     s.gateway.request.mockImplementationOnce(async () => { throw new GithubError("Not Found", 404); });
     await expect(s.service.selectRepository("a", { repo: "organization/repo", installationId: 42 })).rejects.toThrow("Reinstala");
     expect(s.store.removeInstallation).toHaveBeenCalledWith("a", 42);
+  });
+  it("still requires user push permission for legacy tokens", async () => {
+    const s = setup();
+    const repository = { id: 1, name: "repo", full_name: "organization/repo", owner: { login: "organization" }, private: true, description: null, default_branch: "main" };
+    const original = s.gateway.request.getMockImplementation()!;
+    s.gateway.request.mockImplementation(async (token, method, path) => path.startsWith("/user/repos?")
+      ? [
+        { ...repository, permissions: { push: true } },
+        { ...repository, id: 2, permissions: { push: false } },
+        { ...repository, id: 3 },
+        { ...repository, id: 4, archived: true, permissions: { push: true } },
+        { ...repository, id: 5, disabled: true, permissions: { push: true } },
+      ]
+      : original(token, method, path));
+    expect((await s.service.repositories("a")).repositories).toHaveLength(1);
+    await expect(s.service.selectRepository("a", { repo: "organization/repo" })).rejects.toMatchObject({ status: 403 });
+    expect(s.store.installationToken).not.toHaveBeenCalled();
+  });
+  it.each([
+    { contents: "read", suspended_at: null },
+    { contents: "write", suspended_at: "2026-11-08T00:00:00Z" },
+  ])("rejects installation access without active contents write permission: %j", async ({ contents, suspended_at }) => {
+    const s = setup(); s.configure();
+    s.gateway.request.mockResolvedValueOnce({ id: 42, app_id: 123, account: { login: "organization" }, permissions: { contents }, suspended_at });
+    await expect(s.service.repositories("a")).rejects.toMatchObject({ status: 403 });
+    expect(s.store.installationToken).not.toHaveBeenCalled();
   });
   it("rejects an unselected public repo, invalid branch and malformed pagination before any write", async () => {
     const s = setup(); s.configure();
