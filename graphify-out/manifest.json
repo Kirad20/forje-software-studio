@@ -482,10 +482,10 @@
     "semantic_hash": "dc5adcccf1e83ebba6888f871205de53"
   },
   "server/modules/identity/index.ts": {
-    "mtime": 1794170880.7659137,
-    "seen": 1794171001.49021,
-    "ast_hash": "77576604017a25879a4aa77b9c7c4aba",
-    "semantic_hash": "77576604017a25879a4aa77b9c7c4aba"
+    "mtime": 1794172591.0816019,
+    "seen": 1794172660.5703735,
+    "ast_hash": "adb33f4f2903cee89c15a5ca2878c90f",
+    "semantic_hash": ""
   },
   "server/modules/identity/infrastructure/BcryptArgonPasswordHasher.ts": {
     "mtime": 1794170880.7669232,
@@ -4234,21 +4234,27 @@
     "semantic_hash": ""
   },
   "server/bootstrap/mcp/oauth.ts": {
-    "mtime": 1794170881.6436224,
-    "seen": 1794171001.4896832,
-    "ast_hash": "c0248f1f14a0508295764676b95ce37e",
+    "mtime": 1794172591.0795882,
+    "seen": 1794172660.4523468,
+    "ast_hash": "7618ec9fd87f6348a5183e464b7d6491",
     "semantic_hash": ""
   },
   "test/unit/transports/mcpOAuth.test.ts": {
-    "mtime": 1794170881.6467845,
-    "seen": 1794171001.490742,
-    "ast_hash": "ad888f38cb1fa550ed2a43029c97f48b",
+    "mtime": 1794172591.0825827,
+    "seen": 1794172660.800554,
+    "ast_hash": "a3ac2f5e27a53e8ac1107f1329ee7073",
     "semantic_hash": ""
   },
   "docs/mcp-oauth.md": {
     "mtime": 1794170881.6420786,
     "seen": 1794171001.490742,
     "ast_hash": "b025328e7e0c964df5b268d519f32c29",
+    "semantic_hash": ""
+  },
+  "server/modules/identity/infrastructure/PostgresMcpOAuthRepository.ts": {
+    "mtime": 1794172591.0816019,
+    "seen": 1794172660.57262,
+    "ast_hash": "e39ce6955cd92df9ea33f8fdbabda84f",
     "semantic_hash": ""
   },
   "package-lock.json": {
