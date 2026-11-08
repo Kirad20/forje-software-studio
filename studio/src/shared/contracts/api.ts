@@ -1,5 +1,6 @@
 export interface Project {
   id: string;
+  runtime?: "native" | "repository";
   name: string;
   description: string;
   slug: string | null;

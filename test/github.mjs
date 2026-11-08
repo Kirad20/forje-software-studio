@@ -276,6 +276,9 @@ try {
   app.kill();
   await Promise.race([new Promise((resolve) => app.once("exit", resolve)), sleep(3000)]);
   await new Promise((resolve) => gh.server.close(resolve));
-  rmSync(DATA, { recursive: true, force: true });
-  await pgdb.drop();
+  try {
+    rmSync(DATA, { recursive: true, force: true, maxRetries:10, retryDelay:200 });
+  } finally {
+    await pgdb.drop();
+  }
 }

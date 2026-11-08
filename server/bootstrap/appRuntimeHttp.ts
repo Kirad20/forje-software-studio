@@ -5,15 +5,17 @@ import { isInternalServiceRequest } from "../shared/internalServiceAuth.js";
 import { cookie, parseCookies, serveApp, SHARE_COOKIE, checkShareToken, parseAppHost, getSandboxServices, restartSandboxService } from "../modules/app-runtime/index.js";
 import type { Project } from "../modules/projects/index.js";
 import type { ProjectEvent } from "../modules/project-observability/events.js";
+import { checkRepositoryShareToken, type RepositoryRuntime } from "../modules/repository-runtime/index.js";
 
 type AppHost = ReturnType<typeof parseAppHost>;
 type AppEnv = "preview" | "published";
+export const REPOSITORY_SHARE_COOKIE = "forja_repository_share";
 
 export interface AppRuntimeHttpPorts {
   getProject(id: string): Promise<Project | undefined>;
   getProjectBySlug(slug: string): Promise<Project | undefined>;
   parseAppHost: typeof parseAppHost;
-  checkShareToken: typeof checkShareToken;
+  checkShareToken(project: Project, token: string | null | undefined): boolean;
   cookie: typeof cookie;
   serveApp: typeof serveApp;
   internalToken: string;
@@ -21,6 +23,8 @@ export interface AppRuntimeHttpPorts {
   reloadSettings(): Promise<void>;
   getSandboxServices?: typeof getSandboxServices;
   restartSandboxService?: typeof restartSandboxService;
+  repositoryRuntime?: Pick<RepositoryRuntime, "serve">;
+  checkRepositoryShareToken?: typeof checkRepositoryShareToken;
 }
 
 export interface ResolvedApp {
@@ -28,6 +32,7 @@ export interface ResolvedApp {
   env: AppEnv;
   allowed: boolean;
   fromQuery: boolean;
+  repositoryHost?: string;
 }
 
 type RequestPorts = AppRuntimeHttpPorts;
@@ -36,9 +41,20 @@ export async function resolveApp(
   host: string | undefined,
   url: URL,
   cookieHeader: string | null,
-  ports: Pick<AppRuntimeHttpPorts, "getProject" | "getProjectBySlug" | "parseAppHost" | "checkShareToken">,
+  ports: Pick<AppRuntimeHttpPorts, "getProject" | "getProjectBySlug" | "parseAppHost" | "checkShareToken" | "checkRepositoryShareToken">,
 ): Promise<ResolvedApp | null> {
-  const target: AppHost = ports.parseAppHost(host);
+  let target: AppHost = ports.parseAppHost(host);
+  let repositoryHost: string | undefined;
+  if (!target && host) {
+    const parts = host.toLowerCase().split(".");
+    for (let index = 1; index < parts.length - 1; index++) {
+      const suffix = parts.slice(index).join(".");
+      const outer = ports.parseAppHost(suffix);
+      if (!outer) continue;
+      const repository = outer.kind === "preview" ? await ports.getProject(outer.projectId) : await ports.getProjectBySlug(outer.slug);
+      if (repository?.runtime === "repository") { target = outer; repositoryHost = suffix.split(":")[0]; break; }
+    }
+  }
   if (!target) return null;
   const env = target.kind === "preview" ? "preview" : "published";
   const project = target.kind === "preview"
@@ -48,9 +64,14 @@ export async function resolveApp(
     return { project: undefined, env, allowed: false, fromQuery: false };
   }
   const needsToken = env === "preview" || project.visibility === "private";
-  const fromQuery = ports.checkShareToken(project, url.searchParams.get("share"));
-  const allowed = !needsToken || fromQuery || ports.checkShareToken(project, parseCookies(cookieHeader)[SHARE_COOKIE]);
-  return { project, env, allowed, fromQuery };
+  if (project.runtime === "repository") repositoryHost ??= host?.split(":")[0];
+  const validToken = (token: string | null | undefined) => project.runtime === "repository"
+    ? (ports.checkRepositoryShareToken ?? checkRepositoryShareToken)(project, token, env)
+    : ports.checkShareToken(project, token);
+  const fromQuery = validToken(url.searchParams.get("share"));
+  const cookies = parseCookies(cookieHeader);
+  const allowed = !needsToken || fromQuery || validToken(cookies[project.runtime === "repository" ? REPOSITORY_SHARE_COOKIE : SHARE_COOKIE]);
+  return { project, env, allowed, fromQuery, ...(repositoryHost ? { repositoryHost } : {}) };
 }
 
 export async function handleAppRuntimeRequest(
@@ -70,11 +91,14 @@ export async function handleAppRuntimeRequest(
       status: 302,
       headers: {
         location: url.pathname + (url.search || ""),
-        "set-cookie": ports.cookie(SHARE_COOKIE, share, "/", 3600 * 24 * 30, resolved.env),
+        "set-cookie": resolved.repositoryHost
+          ? `${ports.cookie(REPOSITORY_SHARE_COOKIE, share, "/", 3600 * 24 * 30, resolved.env)}; Domain=${resolved.repositoryHost}`
+          : ports.cookie(SHARE_COOKIE, share, "/", 3600 * 24 * 30, resolved.env),
       },
     });
   }
   const ip = ipOfClient(socketIp, request.headers.get("x-forwarded-for"));
+  if (resolved.project.runtime === "repository" && ports.repositoryRuntime) return ports.repositoryRuntime.serve(request, resolved.project.id, resolved.env);
   return ports.serveApp(
     request,
     { project: resolved.project, env: resolved.env, base: "", clientIp: ip === "unknown" ? undefined : ip },
@@ -123,14 +147,17 @@ export function createAppRuntimeHttpApp(ports: AppRuntimeHttpPorts) {
     const rest = `/_api/${input.route}`;
     const url = new URL(rest, "http://app-runtime");
     for (const [key, value] of Object.entries(input.query ?? {})) url.searchParams.set(key, value);
-    const response = await ports.serveApp(new Request(url, {
+    const endpointRequest = new Request(url, {
       method: input.method,
       headers: {
         "content-type": "application/json",
         ...(input.cookie ? { cookie: input.cookie } : {}),
       },
       body: input.method === "POST" ? input.body ?? "{}" : undefined,
-    }), { project, env: "preview", base: "" }, rest);
+    });
+    const response = project.runtime === "repository" && ports.repositoryRuntime
+      ? await ports.repositoryRuntime.serve(endpointRequest, project.id, "preview")
+      : await ports.serveApp(endpointRequest, { project, env: "preview", base: "" }, rest);
     return c.json({
       status: response.status,
       body: await response.text(),

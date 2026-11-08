@@ -905,7 +905,7 @@ async function main() {
       const { runId } = await admission.json();
       assert((await page.request.post(`/api/admin/agents/runs/${runId}/cancel`)).ok(), "no se pudo cancelar la prueba del modelo");
       for (let i = 0; i < 50; i++) {
-        const run = await (await page.request.get(`/api/admin/agents/runs/${runId}`)).json();
+        const run = await (await page.request.get(`/api/admin/agents/runs/${runId}`, { maxRetries: 1 })).json();
         if (run.status !== "running") break;
         await sleep(100);
       }

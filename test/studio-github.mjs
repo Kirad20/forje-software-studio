@@ -28,6 +28,10 @@ const server = http.createServer(async (req, res) => {
     res.writeHead(200, { "content-type": "text/html" }).end('<h1>Seleccionar repositorios</h1><a href="/integrations?github=connected">Autorizar seleccionados</a>');
     return;
   }
+  if (url.pathname === "/fixture-preview") {
+    res.writeHead(200, { "content-type": "text/html" }).end("<h1>Independent repository preview</h1>");
+    return;
+  }
   const selected = path.extname(url.pathname) ? url.pathname : "/index.html";
   const file = path.resolve(root, `.${selected}`);
   if (!file.startsWith(root + path.sep)) { res.writeHead(403).end(); return; }
@@ -57,6 +61,12 @@ try {
     previewUrl: base + "/fixture-preview", previewOrigin: base, seo: {}, systemPrompt: "", designPrompt: "",
     visibility: "public", building: false, aiEnabled: false, access: "owner",
   };
+  let repository = {
+    available: true, status: "idle", error: null, preview: null, published: null, revisions: [], logs: "",
+    config: { rootDirectory: ".", dockerfile: "Dockerfile", port: 4100, healthPath: "/healthz", postgres: true, storagePath: "/app/data" },
+  };
+  let buildFailure = false;
+  let delayRepositoryRead = false;
   await page.route("**/api/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
@@ -85,13 +95,38 @@ try {
     } else if (key === "/github/import") {
       if (!importCompatible) { code = 422; body = { error: "Este repositorio no tiene páginas compatibles con Forja. No se modificó GitHub." }; }
       else body = { project: imported, warnings: ["Revisa las variables de entorno antes de ejecutar la app."] };
-    } else if (key === "/projects/imported") body = { project: imported };
+    } else if (key === "/projects/imported") {
+      if (request.method() === "PATCH" && "visibility" in request.postDataJSON()) imported.visibility = request.postDataJSON().visibility;
+      body = { project: imported };
+    }
+    else if (key === "/projects/imported/stats") body = { files: 42, linesOfCode: 300, creditsUsed: 0 };
+    else if (key === "/projects/imported/models") body = { mode: "standard", concurrency: 1, restricted: false, models: [] };
+    else if (key === "/projects/imported/router") body = { decisions: [], learnt: [], spend: [] };
+    else if (key === "/projects/imported/members") body = { owner: me, access: "owner", members: [], invites: [] };
+    else if (key === "/projects/imported/repository") {
+      if (request.method() === "PATCH") repository = { ...repository, config: request.postDataJSON() };
+      body = repository;
+    } else if (key === "/projects/imported/repository/build") {
+      if (buildFailure) { code = 422; body = { error: "Dockerfile: build failed; last preview retained." }; }
+      else {
+        const revision = { id: `revision-${repository.revisions.length + 1}`, image: "fixture-image", createdAt: new Date().toISOString(), status: "ready", error: null };
+        repository = { ...repository, status: "ready", preview: revision, revisions: [...repository.revisions, revision], logs: "Build and health check succeeded." };
+        body = repository;
+      }
+    } else if (key === "/projects/imported/repository/publish") {
+      repository = { ...repository, published: repository.revisions.find((revision) => revision.id === request.postDataJSON().revisionId) };
+      body = repository;
+    } else if (key === "/projects/imported/repository/rollback") {
+      repository = { ...repository, published: repository.revisions.find((revision) => revision.id === request.postDataJSON().revisionId) };
+      body = repository;
+    } else if (key === "/projects/imported/repository/logs") body = { logs: "Runtime log fixture." };
     else if (key.endsWith("/events")) { await route.fulfill({ contentType: "text/event-stream", body: ": fixture\n\n" }); return; }
     else if (key.endsWith("/chat")) body = { messages: [], tasks: [], building: false };
     else if (key.endsWith("/files")) body = { files: [] };
     else if (key.endsWith("/problems")) body = { problems: [] };
     else if (key.endsWith("/changes")) body = { changes: [] };
     else { code = 404; body = { error: `Missing fixture: ${key}` }; }
+    if (key === "/projects/imported/repository" && request.method() === "GET" && delayRepositoryRead) await new Promise((resolve) => setTimeout(resolve, 400));
     await route.fulfill({ status: code, contentType: "application/json", body: JSON.stringify(body) });
   });
   const fits = async () => {
@@ -110,6 +145,11 @@ try {
   await page.getByRole("link", { name: "Seleccionar repositorios en GitHub" }).click();
   await page.getByRole("link", { name: "Autorizar seleccionados" }).click();
   await page.getByLabel("Repositorio autorizado").waitFor();
+  await page.getByLabel("Tipo de proyecto", { exact: true }).waitFor();
+  assert.equal(await page.getByLabel("Tipo de proyecto", { exact: true }).inputValue(), "native");
+  await page.getByLabel("Tipo de proyecto", { exact: true }).selectOption("repository");
+  await page.getByText("Dockerfile o Node", { exact: false }).waitFor();
+  await page.getByLabel("Tipo de proyecto", { exact: true }).selectOption("native");
   await page.getByRole("button", { name: "Cargar más repositorios" }).click();
   await page.getByLabel("Repositorio autorizado").selectOption("23:team/native-b");
   await page.getByRole("button", { name: "Cargar más ramas" }).click();
@@ -152,6 +192,58 @@ try {
   await page.setViewportSize({ width: 320, height: 568 });
   await fits();
   await page.setViewportSize({ width: 1440, height: 900 });
+  await fits();
+  await page.goto("/integrations");
+  await page.getByLabel("Tipo de proyecto", { exact: true }).selectOption("repository");
+  await page.getByLabel("Repositorio autorizado").selectOption("22:octo/native-a");
+  imported.runtime = "repository";
+  imported.visibility = "private";
+  await page.getByRole("button", { name: "Importar y abrir proyecto" }).click();
+  await page.getByRole("button", { name: "Abrir proyecto importado" }).click();
+  assert.equal(calls.findLast((call) => call.key === "/github/import").body.runtime, "repository");
+  await page.getByRole("heading", { name: "Repositorio Docker / Node", exact: true }).waitFor();
+  const privacy = page.getByRole("switch", { name: "Publicación privada", exact: true });
+  await privacy.waitFor();
+  assert.equal(await privacy.getAttribute("aria-checked"), "true");
+  await privacy.click();
+  await page.waitForFunction(() => document.querySelector('[role="switch"][aria-checked="false"]'));
+  assert.equal(imported.visibility, "public");
+  await privacy.click();
+  await page.waitForFunction(() => document.querySelector('[role="switch"][aria-checked="true"]'));
+  assert.equal(imported.visibility, "private");
+  await page.getByRole("button", { name: "Construir vista previa", exact: true }).waitFor();
+  delayRepositoryRead = true;
+  const refreshed = page.waitForRequest((request) => new URL(request.url()).pathname.endsWith("/repository") && request.method() === "GET");
+  await page.getByRole("button", { name: "Actualizar estado", exact: true }).click();
+  await refreshed;
+  await page.getByRole("button", { name: "Construir vista previa", exact: true }).click();
+  await page.getByText("Build and health check succeeded.", { exact: false }).waitFor();
+  await page.frameLocator('iframe[title="Vista previa del repositorio"]').getByRole("heading", { name: "Independent repository preview" }).waitFor();
+  await page.waitForTimeout(500);
+  assert.equal(await page.locator('iframe[title="Vista previa del repositorio"]').count(), 1, "stale refresh erased a newly built preview");
+  delayRepositoryRead = false;
+  buildFailure = true;
+  await page.getByRole("button", { name: "Construir vista previa", exact: true }).click();
+  await page.getByRole("alert").filter({ hasText: "last preview retained" }).waitFor();
+  buildFailure = false;
+  await page.getByLabel("Nombre público", { exact: true }).fill("repository-app");
+  await page.getByRole("button", { name: "Publicar imagen probada", exact: true }).click();
+  assert.equal(calls.findLast((call) => call.key.endsWith("/repository/publish")).body.revisionId, "revision-1");
+  await page.getByText("No revierte migraciones ni datos.", { exact: false }).waitFor();
+  await page.getByRole("button", { name: "Construir vista previa", exact: true }).click();
+  await page.getByLabel("Imagen probada", { exact: true }).selectOption("revision-2");
+  await page.getByRole("button", { name: "Publicar imagen probada", exact: true }).click();
+  await page.getByLabel("Versión para rollback", { exact: true }).selectOption("revision-1");
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.getByRole("button", { name: "Restaurar imagen", exact: true }).click();
+  await page.waitForFunction(() => [...document.querySelectorAll('[role="status"]')].some((element) => element.textContent === "Imagen publicada: revision-1"));
+  assert.equal(calls.findLast((call) => call.key.endsWith("/repository/rollback")).body.revisionId, "revision-1");
+  await page.getByRole("button", { name: "Cargar logs de ejecución" }).click();
+  await page.getByText("Runtime log fixture.", { exact: true }).waitFor();
+  await page.getByTitle("Ajustes del proyecto", { exact: true }).click();
+  await page.getByRole("heading", { name: "▤ Proyecto", exact: true }).waitFor();
+  assert.equal(await page.getByRole("heading", { name: /Icono y apariencia/ }).count(), 0, "repository settings still write unused native appearance files");
+  await page.setViewportSize({ width: 320, height: 568 });
   await fits();
   assert.deepEqual(errors, []);
   console.log("ok revoked access retry, stale branch response, narrow mobile and desktop");

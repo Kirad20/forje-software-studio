@@ -51,8 +51,10 @@ export function createMonolith() {
     try {
       const bindings = [
         () => runtime.configureRuntimeProjects(modules.projects),
+        () => runtime.configureRepositoryRuntime(modules.repositoryRuntime),
         () => bindProblemPorts({
           readAllFiles: modules.projects.readAllFiles,
+          projectRuntime: modules.projects.projectRuntime,
           checkProject: runtime.checkProject,
           formatProblem: runtime.formatProblem,
         }),
@@ -64,6 +66,8 @@ export function createMonolith() {
           writeFile: modules.projects.writeFile,
           deleteFile: modules.projects.deleteFile,
           assertValidPath: modules.projects.assertValidPath,
+          assertValidPathForProject: modules.projects.assertValidPathForProject,
+          projectRuntime: modules.projects.projectRuntime,
           recheckBuild,
           emitProject,
           subscribe(projectId, listener) {
@@ -93,6 +97,7 @@ export function createMonolith() {
         }),
       ];
       for (const bind of bindings) releases.push(bind());
+      await modules.repositoryRuntime.reconcile();
       initializeAppServices();
     } catch (startupError) {
       try { await stopBindings(); } catch (cleanupError) {

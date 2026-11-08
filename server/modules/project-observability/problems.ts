@@ -23,6 +23,7 @@ export function bindProblemPorts(ports: ProblemPorts): () => Promise<void> {
 function ports(): ProblemPorts { if (!bound) throw new Error("Problem ports not bound"); return bound; }
 const adapters = createProblemAdapters();
 export const { listProblems, clearProblems, recheckBuild, watchProblems, stopProblems } = createProblemService(adapters.repository, {
+  projectRuntime: async (p) => ports().projectRuntime?.(p) ?? "native",
   readAllFiles: (p) => ports().readAllFiles(p), checkProject: (files) => ports().checkProject(files), formatProblem: (problem) => ports().formatProblem(problem),
 }, {
   ...adapters, emit: emitProject,

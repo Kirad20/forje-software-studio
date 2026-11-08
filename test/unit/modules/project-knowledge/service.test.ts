@@ -3,6 +3,12 @@ import { createKnowledgeService, prepareCorpus, type KnowledgeEngine } from "../
 import type { KnowledgeGraph } from "../../../../server/modules/project-knowledge/domain/graph.js";
 
 describe("project knowledge", () => {
+  it("indexes repository source without ingesting dependency locks or binary sentinels", () => {
+    const result = prepareCorpus({ "package-lock.json": "x".repeat(1_000_001), "assets/logo": "base64:aGVsbG8=", "src/main.ts": "export const main = true;" }, () => null, "repository");
+    expect(result.files).toEqual({ "src/main.ts": "export const main = true;" });
+    expect(result.limitations.join(" ")).toContain("package-lock.json");
+    expect(result.limitations.join(" ")).toContain("assets/logo");
+  });
   it("excludes secrets, generated files and binary files from the corpus", () => {
     const result = prepareCorpus({
       ".env": "DB_PASSWORD=hidden",

@@ -123,6 +123,8 @@ export function GithubWorkspace({ allowImport = true, onChange }: { allowImport?
   const [busy, setBusy] = useState(false);
   const [registration, setRegistration] = useState<{ url: string; manifest: string } | null>(null);
   const [imported, setImported] = useState<{ project: Project; warnings: string[] } | null>(null);
+  const [runtime, setRuntime] = useState<"native" | "repository">("native");
+  const [importing, setImporting] = useState(false);
   const form = useRef<HTMLFormElement>(null);
   const result = new URLSearchParams(location.search).get("github");
   const load = async () => {
@@ -172,11 +174,22 @@ export function GithubWorkspace({ allowImport = true, onChange }: { allowImport?
           </div>}
           {account.connected && allowImport && <div className="stack" style={{ borderTop: "1px solid var(--border)", paddingTop: 12 }}>
             <h4>Trabajar con un repositorio existente</h4>
-            <div className="small muted">Importa una app compatible con Forja (pages, components, endpoints y helpers). La importación inicial no modifica GitHub; los cambios posteriores se sincronizan. Otros frameworks se validan y se rechazan con una explicación, sin sobrescribir el repositorio.</div>
+            {!imported && <label>Tipo de proyecto
+              <select aria-label="Tipo de proyecto" value={runtime} disabled={busy || importing} onChange={(event) => setRuntime(event.target.value === "repository" ? "repository" : "native")}>
+                <option value="native">App nativa de Forja</option>
+                <option value="repository">Repositorio Docker / Node</option>
+              </select>
+            </label>}
+            <div className="small muted">{runtime === "repository"
+              ? "Se conserva la estructura original y se ejecuta con Dockerfile o Node."
+              : "Importa una app compatible con Forja (pages, components, endpoints y helpers). Otros frameworks requieren el modo repositorio."} La importación inicial no modifica GitHub; los cambios posteriores se sincronizan.</div>
             {!imported && <GithubRepositoryForm key={`${account.login}:${account.installations?.map((item) => item.id).join(",")}`} label="Importar y abrir proyecto" onSubmit={async (selection) => {
-              const data = await api<{ project: Project; warnings: string[] }>("/github/import", { body: selection });
-              if (data.warnings.length) setImported(data);
-              else go(`/p/${data.project.id}`);
+              setImporting(true);
+              try {
+                const data = await api<{ project: Project; warnings: string[] }>("/github/import", { body: { ...selection, ...(runtime === "repository" ? { runtime } : {}) } });
+                if (data.warnings.length) setImported(data);
+                else go(`/p/${data.project.id}`);
+              } finally { setImporting(false); }
             }} />}
             {imported && <div className="stack" role="status">
               <strong>Proyecto importado con observaciones</strong>

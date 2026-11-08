@@ -14,6 +14,7 @@ RUN npm run build
 
 FROM node:24-bookworm-slim AS runtime
 ARG BROWSER=1
+ARG REPOSITORY_RUNNER=0
 ENV NODE_ENV=production \
     PORT=4100 \
     DATA_DIR=/app/data \
@@ -24,6 +25,7 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY package.json package-lock.json tsconfig.json ./
 COPY server ./server
 COPY sdk ./sdk
+COPY contracts ./contracts
 COPY --from=build /app/dist ./dist
 RUN if [ "$BROWSER" = "1" ]; then npx playwright-core install --with-deps chromium-headless-shell && rm -rf /var/lib/apt/lists/*; fi \
  && mkdir -p /app/data /app/node_modules/.forja-deps /app/node_modules/.cache \
@@ -31,6 +33,7 @@ RUN if [ "$BROWSER" = "1" ]; then npx playwright-core install --with-deps chromi
 ENV FORJA_BROWSER=${BROWSER}
 # Graphify powers the project brain (question tool): local AST extraction, no LLM.
 RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-venv \
+ && if [ "$REPOSITORY_RUNNER" = "1" ]; then apt-get install -y --no-install-recommends docker.io; fi \
  && python3 -m venv /opt/graphify && /opt/graphify/bin/pip install --no-cache-dir graphifyy==0.9.103 \
  && rm -rf /var/lib/apt/lists/*
 ENV GRAPHIFY_BIN=/opt/graphify/bin/graphify

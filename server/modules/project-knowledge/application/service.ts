@@ -1,4 +1,5 @@
 import type { KnowledgeAnswer, KnowledgeGraph } from "../domain/graph.js";
+import type { ProjectRuntime } from "../../../../contracts/repository.js";
 
 export interface KnowledgeEngine {
   fingerprint(files: Record<string, string>): string;
@@ -8,9 +9,10 @@ export interface KnowledgeEngine {
 }
 export interface KnowledgeFiles {
   readAllFiles(projectId: string): Promise<Record<string, string>>;
+  projectRuntime?(projectId: string): Promise<ProjectRuntime>;
 }
 
-export function prepareCorpus(files: Record<string, string>, findSecret: (text: string) => string | null = () => null) {
+export function prepareCorpus(files: Record<string, string>, findSecret: (text: string) => string | null = () => null, runtime: ProjectRuntime = "native") {
   const corpus: Record<string, string> = Object.create(null);
   const limitations: string[] = [];
   let bytes = 0;
@@ -19,6 +21,10 @@ export function prepareCorpus(files: Record<string, string>, findSecret: (text: 
     const segments = path.split("/");
     if (segments.some((part) => !part || part === "." || part === ".." || part.includes(":")) || /[\0\r\n]/.test(path)) {
       throw new Error(`Ruta no válida para indexación: ${original}`);
+    }
+    if (runtime === "repository" && (/(^|\/)(package-lock\.json|npm-shrinkwrap\.json|pnpm-lock\.yaml|yarn\.lock)$/.test(path) || content.startsWith("base64:"))) {
+      limitations.push(`Excluido: ${path} (lockfile de dependencias o formato binario; conservado en el repositorio).`);
+      continue;
     }
     if (segments.some((part) => /^(node_modules|\.git|graphify-out)$/i.test(part)) ||
         segments.some((part) => /^\.env($|\.)/i.test(part)) ||
@@ -43,6 +49,7 @@ export function prepareCorpus(files: Record<string, string>, findSecret: (text: 
 }
 
 export function createKnowledgeService(repository: KnowledgeFiles, engine: KnowledgeEngine, findSecret: (text: string) => string | null = () => null) {
+  const corpusFor = async (projectId: string) => prepareCorpus(await repository.readAllFiles(projectId), findSecret, await repository.projectRuntime?.(projectId) ?? "native");
   const pending = new Map<string, Promise<void>>();
   async function exclusive<T>(projectId: string, work: () => Promise<T>): Promise<T> {
     const previous = pending.get(projectId) ?? Promise.resolve();
@@ -59,12 +66,12 @@ export function createKnowledgeService(repository: KnowledgeFiles, engine: Knowl
     return engine.build(projectId, corpus.files, revision, corpus.limitations);
   }
   return {
-    graph: (projectId: string, force = false) => exclusive(projectId, async () => index(projectId, prepareCorpus(await repository.readAllFiles(projectId), findSecret), force)),
+    graph: (projectId: string, force = false) => exclusive(projectId, async () => index(projectId, await corpusFor(projectId), force)),
     async question(projectId: string, query: string): Promise<KnowledgeAnswer> {
       const text = query.trim();
       if (!text || text.length > 1000) throw new Error("La pregunta debe tener entre 1 y 1000 caracteres.");
       return exclusive(projectId, async () => {
-        const corpus = prepareCorpus(await repository.readAllFiles(projectId), findSecret);
+        const corpus = await corpusFor(projectId);
         const current = await index(projectId, corpus);
         const evidence = await engine.query(projectId, text);
         const words = text.toLocaleLowerCase().split(/[^\p{L}\p{N}_]+/u).filter((word) => word.length > 2);
@@ -81,7 +88,7 @@ export function createKnowledgeService(repository: KnowledgeFiles, engine: Knowl
       });
     },
     async source(projectId: string, path: string) {
-      const corpus = prepareCorpus(await repository.readAllFiles(projectId), findSecret);
+      const corpus = await corpusFor(projectId);
       if (!Object.hasOwn(corpus.files, path)) throw new Error("Archivo no disponible en el índice de conocimiento.");
       return { path, text: corpus.files[path] };
     },

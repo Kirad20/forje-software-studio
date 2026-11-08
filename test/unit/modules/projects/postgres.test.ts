@@ -64,6 +64,32 @@ afterAll(async () => {
 });
 
 describe("Projects Postgres adapter regression", () => {
+  it("persists private repository defaults and keeps a public repository's duplicate private", async () => {
+    const files = { Dockerfile: "FROM node:22", "src/index.ts": "export {}" };
+    const project = await app.createProject("owner", "Private repository", "", files, undefined, undefined, "repository");
+    expect(project.visibility).toBe("private");
+    expect((await store.getProject(project.id))?.visibility).toBe("private");
+    await app.updateProject(project.id, { visibility: "public" });
+    expect((await store.getProject(project.id))?.visibility).toBe("public");
+    const copy = await app.duplicateProject("owner", project.id);
+    expect(copy).toMatchObject({ runtime: "repository", visibility: "private" });
+    expect((await store.getProject(copy.id))?.visibility).toBe("private");
+    expect((await app.createProject("owner", "Public native")).visibility).toBe("public");
+  });
+  it("persists repository runtime through reads and duplicates and publishes the unchanged original layout", async () => {
+    const files = { Dockerfile: "FROM node:22", "package-lock.json": '{"lockfileVersion":3}', "src/index.ts": "export {}", "static/__dev/protocol.md": "repository document" };
+    const project = await app.createProject("owner", "Repository", "", files, undefined, undefined, "repository");
+    expect(await store.getProject(project.id)).toMatchObject({ runtime: "repository" });
+    expect((await store.listProjects("owner")).find((entry) => entry.id === project.id)?.runtime).toBe("repository");
+    const beforeClone = services.clone.mock.calls.length;
+    const copy = await app.duplicateProject("owner", project.id);
+    expect(copy.runtime).toBe("repository");
+    expect(await store.readAllFiles(copy.id)).toEqual(files);
+    expect(services.clone.mock.calls.length).toBe(beforeClone);
+    await app.recordPublish(project.id, "repository-persisted", files);
+    expect(await store.publishedFiles(project.id)).toEqual(files);
+    expect((await app.createProject("owner", "Native default")).runtime).toBe("native");
+  });
   it("persists the complete read model and patch allowlist, ownership IDs, folders, open time and share revocation", async () => {
     const project = await app.createProject("owner", "App", "Description");
     expect(project).toMatchObject({ ownerId: "owner", name: "App", description: "Description", orgId: projectOrganizations.personalOrgId("owner"), favorite: false, archived: false, shareEpoch: 0, seo: {}, profile: null });

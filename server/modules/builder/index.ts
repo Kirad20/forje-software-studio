@@ -30,7 +30,7 @@ export { metricsIdle, metricsReport, recordToolCall, recordStep, newRunId, estTo
 export { langfuse, reloadLangfuse, createLangfuse } from "./infrastructure/tracing.js";
 export { startSecurityReview } from "./infrastructure/securityReview.js";
 export { projectMap } from "./infrastructure/projectIndex.js";
-export { BUILDER_SYSTEM_PROMPT } from "./infrastructure/prompt.js";
+export { BUILDER_SYSTEM_PROMPT, REPOSITORY_BUILDER_PROMPT, systemPromptForRuntime } from "./infrastructure/prompt.js";
 export { BUILTIN_SKILLS } from "./infrastructure/skillLibrary.js";
 export { renderSkill } from "./infrastructure/skills.js";
 export { MAX_STEPS, ROLE_PROMPTS, ROLE_TOOLS } from "./infrastructure/roles.js";

@@ -30,6 +30,10 @@ import {
   createPlatformSettings,
   createSettingsModule,
 } from "../modules/settings/index.js";
+import path from "node:path";
+import { createRepositoryRuntime, DockerRepositoryRunner, PostgresRepositoryStore } from "../modules/repository-runtime/index.js";
+import { appUrl, previewOrigin } from "../modules/app-runtime/index.js";
+import { studioOrigins } from "../shared/security.js";
 
 export interface CoreModulesDependencies {
   projectServices: ProjectServices;
@@ -75,6 +79,25 @@ export function createCoreModules(dependencies: CoreModulesDependencies) {
     files: projectsStore,
     services: dependencies.projectServices,
   });
+  const repositoryStore = new PostgresRepositoryStore();
+  const repositoryRuntime = createRepositoryRuntime({
+    store: repositoryStore,
+    runner: new DockerRepositoryRunner({
+      enabled: process.env.FORJA_REPOSITORY_RUNNER === "docker",
+      unavailableReason: process.env.FORJA_REPOSITORY_RUNNER === "docker" && !process.env.SECRETS_KEY
+        ? "Repository runner requires a stable SECRETS_KEY; encrypted deployment credentials must survive restarts"
+        : undefined,
+      contextRoot: path.join(config.dataDir, "repository-contexts"),
+      host: process.env.FORJA_REPOSITORY_RUNNER_HOST,
+      environmentSecret: (id, env) => repositoryStore.environmentSecret(id, env),
+    }),
+    readAllFiles: projects.readAllFiles,
+    recordPublish: (id, slug, files, author = "owner") => projects.recordPublish(id, slug, files, author),
+    isSlugTaken: projects.isSlugTaken,
+    appUrl,
+    previewUrl: previewOrigin,
+    previewFrameOrigins: studioOrigins(),
+  });
 
   const accountRepository = new PostgresAccountRepository();
   const sessionRepository = new PostgresSessionRepository();
@@ -119,5 +142,5 @@ export function createCoreModules(dependencies: CoreModulesDependencies) {
   });
 
   const knowledge = createProjectKnowledgeModule(projects, dependencies.findSecret);
-  return { identity, collaboration, projects, settings, knowledge };
+  return { identity, collaboration, projects, settings, knowledge, repositoryRuntime };
 }

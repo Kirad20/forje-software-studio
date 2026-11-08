@@ -67,8 +67,12 @@ function assertOwned(ctx: ToolContext, p: string) {
   }
 }
 
-function assertNotMigrationFile(p: string) {
-  if (isMigrationPath(p)) {
+async function repositoryMode(ctx: ToolContext): Promise<boolean> {
+  return (await builderCoreModules().projects.getProject?.(ctx.projectId))?.runtime === "repository";
+}
+
+async function assertNotMigrationFile(p: string, ctx: ToolContext) {
+  if (isMigrationPath(p) && !await repositoryMode(ctx)) {
     throw new Error("Los archivos de migrations/ se crean únicamente con execute_sql; no los escribas, edites, renombres ni borres directamente.");
   }
 }
@@ -215,11 +219,12 @@ export const builderTools: BuilderTool[] = [
     }),
     async data(_i: Record<string, never>, ctx) {
       const files = await builderCoreModules().projects.readAllFiles(ctx.projectId);
+      const repository = await repositoryMode(ctx);
       return {
         files: (await builderCoreModules().projects.listFiles(ctx.projectId)).map((f) => ({ path: f.path, size: f.size })),
-        pages: pageRoutes(files).map((p) => ({ pattern: p.pattern, file: p.file })),
-        endpoints: endpointRoutes(files).map((e) => ({ method: e.method, route: e.route })),
-        jobs: jobFiles(files).map((j) => j.name),
+        pages: repository ? [] : pageRoutes(files).map((p) => ({ pattern: p.pattern, file: p.file })),
+        endpoints: repository ? [] : endpointRoutes(files).map((e) => ({ method: e.method, route: e.route })),
+        jobs: repository ? [] : jobFiles(files).map((j) => j.name),
       };
     },
     format: (d) =>
@@ -313,7 +318,7 @@ export const builderTools: BuilderTool[] = [
     description: "Crea o reemplaza un archivo completo, excepto migrations/*.sql, que se generan únicamente con execute_sql. Para cambios en un archivo existente usa edit_file (gasta muchos menos tokens).",
     input_schema: obj({ path: str("Ruta, p. ej. pages/_index.tsx"), content: str("Contenido completo") }, ["path", "content"]),
     async run(i: { path: string; content: string }, ctx) {
-      assertNotMigrationFile(i.path);
+      await assertNotMigrationFile(i.path, ctx);
       assertOwned(ctx, i.path);
       await builderCoreModules().projects.writeFile(ctx.projectId, i.path, i.content, ctx.author, ctx.actor);
       noteWrite(ctx, i.path);
@@ -339,7 +344,7 @@ export const builderTools: BuilderTool[] = [
       ["path"],
     ),
     async run(i: { path: string; old_text?: string; new_text?: string; replace_all?: boolean; edits?: { old_text: string; new_text: string; replace_all?: boolean }[] }, ctx) {
-      assertNotMigrationFile(i.path);
+      await assertNotMigrationFile(i.path, ctx);
       assertOwned(ctx, i.path);
       const edits = i.edits?.length ? i.edits : i.old_text !== undefined && i.new_text !== undefined ? [{ old_text: i.old_text, new_text: i.new_text, replace_all: i.replace_all }] : [];
       if (!edits.length) throw new Error("Hace falta old_text y new_text, o una lista edits.");
@@ -365,7 +370,7 @@ export const builderTools: BuilderTool[] = [
       "Borra un archivo. Antes revisa con related_files o find_symbol quién lo importa y quita esos imports, o la compilación fallará. Queda en el registro de cambios y se puede restaurar.",
     input_schema: obj({ path: str("Ruta") }, ["path"]),
     async run(i: { path: string }, ctx) {
-      assertNotMigrationFile(i.path);
+      await assertNotMigrationFile(i.path, ctx);
       assertOwned(ctx, i.path);
       await builderCoreModules().projects.deleteFile(ctx.projectId, i.path, ctx.author);
       noteWrite(ctx, i.path);
@@ -378,8 +383,8 @@ export const builderTools: BuilderTool[] = [
       "Mueve o renombra un archivo y reescribe los imports que apuntan a él (y los imports relativos del propio archivo si cambia de carpeta). No mueve archivos hermanos como <Nombre>.module.css o <Nombre>.example.tsx: renómbralos con otra llamada si hace falta. Falla si la ruta nueva ya existe. Después corre check_build.",
     input_schema: obj({ from: str("Ruta actual"), to: str("Ruta nueva") }, ["from", "to"]),
     async run(i: { from: string; to: string }, ctx) {
-      assertNotMigrationFile(i.from);
-      assertNotMigrationFile(i.to);
+      await assertNotMigrationFile(i.from, ctx);
+      await assertNotMigrationFile(i.to, ctx);
       assertOwned(ctx, i.from);
       assertOwned(ctx, i.to);
       if (i.from === i.to) return "La ruta nueva es igual a la actual; no se cambió nada.";
@@ -733,6 +738,13 @@ export const builderTools: BuilderTool[] = [
     input_schema: obj({}),
     output_schema: out({ ok: B, problems: arr(out({ file: S, line: I, column: I, text: S }, ["line", "column"])) }),
     async data(_i: Record<string, never>, ctx) {
+      if (await repositoryMode(ctx)) {
+        const runtime = builderCoreModules().repositoryRuntime;
+        if (!runtime) throw new Error("Repository runtime no configurado; no se puede verificar con el compilador nativo.");
+        const snapshot = await runtime.build(ctx.projectId);
+        const ok = snapshot.status === "ready" && snapshot.preview?.status === "ready";
+        return { ok, problems: ok ? [] : [{ file: "Dockerfile", text: snapshot.error ?? "Repository build no produjo una vista previa saludable." }] };
+      }
       return verifyBuild(await builderCoreModules().projects.readAllFiles(ctx.projectId));
     },
     format: (d) => (d.problems.length ? `${d.problems.length} problema(s):\n${d.problems.map(formatProblem).join("\n")}` : "Compila sin errores."),
@@ -896,6 +908,14 @@ export const builderTools: BuilderTool[] = [
       "Publica la app en <slug>.localhost. Compila todo antes; si hay errores no publica. Solo publica cuando el dueño lo pida.",
     input_schema: obj({ slug: str("Dirección deseada (opcional)") }),
     async run(i: { slug?: string }, ctx) {
+      const modules = builderCoreModules();
+      const project = await modules.projects.getProject(ctx.projectId);
+      if (project?.runtime === "repository") {
+        const access = modules.collaboration?.accessOf
+          ? await modules.collaboration.accessOf(ctx.account.id, project)
+          : ctx.account.id === project.ownerId ? "owner" : null;
+        if (access !== "owner") throw new Error("Solo el dueño (owner) puede publicar un repositorio.");
+      }
       if (ctx.author !== "mcp") assertOwnerRequestedPublish(ctx.ownerMessage);
       const r = await publishProject(ctx.projectId, i.slug, ctx.author);
       return `Publicada en ${r.url}`;
@@ -913,5 +933,17 @@ export const builderTools: BuilderTool[] = [
     format: (d) => d.url,
   }),
 ];
+
+const NATIVE_ONLY_TOOLS = new Set(["add_dependency", "remove_dependency", "execute_sql", "query_database", "describe_database", "setup_auth", "set_user_password", "run_job", "run_tests", "check_standards", "security_scan", "call_endpoint", "get_problems", "get_logs"]);
+for (const tool of builderTools) {
+  if (!NATIVE_ONLY_TOOLS.has(tool.name)) continue;
+  const assertNative = async (ctx: ToolContext) => {
+    if (await repositoryMode(ctx)) throw new Error(`${tool.name} no es compatible con repository runtime. Usa las convenciones y comandos originales del repositorio; no se ejecutó ninguna operación nativa.`);
+  };
+  const run = tool.run;
+  tool.run = async (input, ctx) => { await assertNative(ctx); return run(input, ctx); };
+  const call = tool.call;
+  if (call) tool.call = async (input, ctx) => { await assertNative(ctx); return call(input, ctx); };
+}
 
 export const toolByName = new Map(builderTools.map((t) => [t.name, t]));

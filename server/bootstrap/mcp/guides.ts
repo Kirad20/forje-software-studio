@@ -1,4 +1,5 @@
-import { BUILDER_SYSTEM_PROMPT, BUILTIN_SKILLS, renderSkill } from "../../modules/builder/index.js";
+import { BUILDER_SYSTEM_PROMPT, REPOSITORY_BUILDER_PROMPT, BUILTIN_SKILLS, renderSkill } from "../../modules/builder/index.js";
+import type { ProjectRuntime } from "../../modules/projects/index.js";
 
 /**
  * Topic guides for external MCP agents, cut from the builder's manual so there is one
@@ -81,7 +82,8 @@ export function guideList() {
 }
 
 /** The requested guides, or the list plus a clear error for unknown ids. */
-export function readGuides(ids: string[]): { text: string; unknown: string[] } {
+export function readGuides(ids: string[], runtime: ProjectRuntime = "native"): { text: string; unknown: string[] } {
+  if (runtime === "repository") return { text: REPOSITORY_BUILDER_PROMPT, unknown: [] };
   const unknown = ids.filter((id) => !guideById.has(id));
   const found = ids.filter((id) => guideById.has(id)).map((id) => guideById.get(id)!.body);
   const text = [

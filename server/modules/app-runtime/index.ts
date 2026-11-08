@@ -22,6 +22,18 @@ import { bindRuntimeObservation as bindObservation, scan } from "./infrastructur
 import { suggestSlug as slugSuggestion } from "./domain/publication.js";
 import * as security from "./infrastructure/securityScan.js";
 import type { RuntimeObservationPorts, RuntimeProjectsPort } from "./application/ports.js";
+import type { RepositoryRuntime } from "../repository-runtime/index.js";
+import { RepositoryRuntimeError, repositoryShareToken, checkRepositoryShareToken } from "../repository-runtime/index.js";
+
+let repositoryRuntime: RepositoryRuntime | undefined;
+export function configureRepositoryRuntime(runtime: RepositoryRuntime) {
+  repositoryRuntime = runtime;
+  return () => { if (repositoryRuntime === runtime) repositoryRuntime = undefined; };
+}
+function repositories() {
+  if (!repositoryRuntime) throw new RepositoryRuntimeError("Repository runtime is not configured", 503);
+  return repositoryRuntime;
+}
 
 const publication = createPublication({
   async getProject(id) {
@@ -34,15 +46,46 @@ const publication = createPublication({
   checkProject: bundler.checkProject, scan, appUrl: urls.appUrl,
 });
 
-export const { publishProject, unpublishProject } = publication;
+export async function publishProject(projectId: string, requestedSlug?: string, author: Parameters<typeof publication.publishProject>[2] = "owner") {
+  const project = await getProject(projectId);
+  if (project && (project as { runtime?: string }).runtime === "repository") {
+    const slug = slugSuggestion(requestedSlug ?? project.slug ?? project.name);
+    await repositories().publish(projectId, { slug }, author);
+    return { slug, url: urls.appUrl(slug) };
+  }
+  return publication.publishProject(projectId, requestedSlug, author);
+}
+export async function unpublishProject(projectId: string) {
+  const project = await getProject(projectId);
+  if (project && (project as { runtime?: string }).runtime === "repository") {
+    await repositories().stop(projectId, "published");
+    await unpublish(projectId);
+    return;
+  }
+  return publication.unpublishProject(projectId);
+}
 export const suggestSlug = slugSuggestion;
 export const { BuildError, buildClient, buildExamples, checkProject, compileServerModule, endpointRoutes, pageRoutes, exampleFiles, jobFiles, readJobSettings, formatProblem } = bundler;
 export const { runBrowserTest, inspectPreview, allowedRequest, closeBrowser } = browser;
 export const { BUILTIN_PACKAGES, MANIFEST, readDeps, writeDeps, isValidPackageName, packageName, isNodeBuiltin, depsDir, ensureDeps, resolvePackage, withManifestLock } = deps;
 export const { KIT_BUILTIN } = catalog;
-export const { SHARE_COOKIE, RESERVED_SLUG, shareToken, checkShareToken, previewOrigin, previewUrl, appUrl, parseAppHost } = urls;
+export const { SHARE_COOKIE, RESERVED_SLUG, previewOrigin, appUrl, parseAppHost } = urls;
+type RuntimeShareScope = Parameters<typeof urls.shareToken>[0] & { runtime?: "native" | "repository" };
+export function shareToken(scope: RuntimeShareScope, days = 30, env: "preview" | "published" = "preview") {
+  return scope.runtime === "repository" ? repositoryShareToken(scope, env, days) : urls.shareToken(scope, days);
+}
+export function checkShareToken(scope: RuntimeShareScope, token: string | undefined | null, env: "preview" | "published" = "preview") {
+  return scope.runtime === "repository" ? checkRepositoryShareToken(scope, token, env) : urls.checkShareToken(scope, token);
+}
+export function previewUrl(scope: RuntimeShareScope, days = 30, route = "/") {
+  return scope.runtime === "repository" ? `${urls.previewOrigin(scope.id)}${route}?share=${shareToken(scope, days, "preview")}` : urls.previewUrl(scope, days, route);
+}
 export const { SandboxRunError, runInSandbox, stopSandbox, stopAllSandboxes, getSandboxServices, restartSandboxService } = sandbox;
-export const { serveApp, parseCookies, cookie } = server;
+export const { parseCookies, cookie } = server;
+export const serveApp: typeof server.serveApp = (request, target, rest) =>
+  target.project.runtime === "repository"
+    ? repositories().serve(request, target.project.id, target.env)
+    : server.serveApp(request, target, rest);
 export const { typecheckProject, parseDiagnostics, verifyBuild } = types;
 export const { quickScan, findSecret, formatFinding } = security;
 export const removeProjectData = removeData;

@@ -1,11 +1,14 @@
 import { ProjectPath } from "../domain/ProjectPath.js";
+import type { ProjectRuntime } from "../domain/ProjectSnapshot.js";
 import type { Author, IProjectFileRepository } from "../ports/repositories.js";
 
 export class RenameFileUseCase {
-  constructor(private readonly fileRepo: IProjectFileRepository) {}
+  constructor(private readonly fileRepo: IProjectFileRepository, private readonly runtime: (id: string) => Promise<ProjectRuntime> = async () => "native") {}
 
   async execute(projectId: string, from: string, to: string, author: Author = "owner"): Promise<void> {
-    ProjectPath.assertValid(to);
+    const runtime = await this.runtime(projectId);
+    ProjectPath.assertValid(from, runtime);
+    ProjectPath.assertValid(to, runtime);
     const content = await this.fileRepo.readFile(projectId, from);
     if (content === undefined) {
       throw new Error(`No existe ${from}`);

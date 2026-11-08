@@ -1,6 +1,7 @@
 import type { Author } from "./Author.js";
 
 export type FileMap = Record<string, string>;
+export type ProjectRuntime = "native" | "repository";
 
 export interface SeoSettings {
   siteName?: string;
@@ -24,6 +25,7 @@ export interface ProjectSnapshot {
   ownerId: string;
   orgId: string | null;
   name: string;
+  runtime: ProjectRuntime;
   description: string;
   slug: string | null;
   visibility: "public" | "private";

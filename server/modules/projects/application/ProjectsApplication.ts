@@ -2,8 +2,8 @@ import { Checkpoint } from "../domain/Checkpoint.js";
 import { CreateProjectUseCase } from "./CreateProjectUseCase.js";
 import { CreateCheckpointUseCase } from "./CreateCheckpointUseCase.js";
 import { beforeImages, restoredFiles, turnFileChange } from "../domain/ChangeTimeline.js";
-import { ProjectPath } from "../domain/ProjectPath.js";
-import type { FileMap, ProjectSnapshot, ProjectPatch, TurnChanges } from "../domain/ProjectSnapshot.js";
+import { ProjectPath, assertSafeRepositoryPath } from "../domain/ProjectPath.js";
+import type { FileMap, ProjectSnapshot, ProjectPatch, TurnChanges, ProjectRuntime } from "../domain/ProjectSnapshot.js";
 import type { Author } from "../ports/repositories.js";
 import type { ProjectsStore, ProjectServices } from "../ports/projects.js";
 import type { StarterTemplate } from "../domain/StarterTemplate.js";
@@ -25,22 +25,38 @@ export class ProjectsApplication {
   deleteFolder(accountId: string, id: string) { return this.store.deleteFolder(accountId, id); }
   readAllFiles(projectId: string) { return this.store.readAllFiles(projectId); }
   listFiles(projectId: string) { return this.store.listFiles(projectId); }
-  readFile(projectId: string, path: string) { return this.store.readFile(projectId, path); }
+  async readFile(projectId: string, path: string) {
+    const runtime = await this.projectRuntime(projectId);
+    if (runtime === "native" && !ProjectPath.isValid(path)) {
+      assertSafeRepositoryPath(path);
+      return undefined;
+    }
+    ProjectPath.assertValid(path, runtime);
+    return this.store.readFile(projectId, path);
+  }
+  async projectRuntime(projectId: string): Promise<ProjectRuntime> {
+    const project = await this.store.getProject(projectId);
+    if (!project) throw new Error("Proyecto no encontrado");
+    return project.runtime ?? "native";
+  }
+  async assertValidPathForProject(projectId: string, path: string): Promise<void> {
+    ProjectPath.assertValid(path, await this.projectRuntime(projectId));
+  }
   projectVersion(projectId: string) { return this.store.projectVersion(projectId); }
   listChanges(projectId: string, limit = 300) { return this.store.listChanges(projectId, limit); }
   publishedFiles(projectId: string) { return this.store.publishedFiles(projectId); }
   isSlugTaken(slug: string, projectId: string) { return this.store.isSlugTaken(slug, projectId); }
   unpublish(projectId: string) { return this.store.unpublish(projectId); }
 
-  async createProject(ownerId: string, name: string, description = "", files?: FileMap, orgId?: string, template?: StarterTemplate): Promise<ProjectSnapshot> {
-    return new CreateProjectUseCase(this.store, this.services).execute({ ownerId, name, description, files, orgId, template });
+  async createProject(ownerId: string, name: string, description = "", files?: FileMap, orgId?: string, template?: StarterTemplate, runtime?: ProjectRuntime): Promise<ProjectSnapshot> {
+    return new CreateProjectUseCase(this.store, this.services).execute({ ownerId, name, description, files, orgId, template, runtime });
   }
 
   async duplicateProject(ownerId: string, sourceId: string): Promise<ProjectSnapshot> {
     const src = (await this.store.getProject(sourceId))!;
-    const copy = await this.createProject(ownerId, `${src.name} (copia)`, src.description, await this.store.readAllFiles(sourceId));
+    const copy = await this.createProject(ownerId, `${src.name} (copia)`, src.description, await this.store.readAllFiles(sourceId), undefined, undefined, src.runtime);
     await this.store.updateProject(copy.id, { systemPrompt: src.systemPrompt, designPrompt: src.designPrompt, seo: src.seo, profile: src.profile, folderId: src.folderId });
-    await this.services.clone(sourceId, copy.id);
+    if (src.runtime !== "repository") await this.services.clone(sourceId, copy.id);
     return (await this.store.getProject(copy.id))!;
   }
 
@@ -98,7 +114,8 @@ export class ProjectsApplication {
   }
 
   async recordPublish(projectId: string, slug: string, files: FileMap, author: Author = "owner"): Promise<void> {
-    const shipped = Object.fromEntries(Object.entries(files).filter(([path]) => !isDevFile(path)));
+    const runtime = await this.projectRuntime(projectId);
+    const shipped = runtime === "repository" ? files : Object.fromEntries(Object.entries(files).filter(([path]) => !isDevFile(path)));
     await this.store.recordPublish(projectId, slug, this.services.id(), shipped);
     await this.store.logChange(projectId, { kind: "publish", paths: [], author, label: "App publicada" });
     this.services.emit(projectId, { type: "published", slug });
@@ -108,7 +125,8 @@ export class ProjectsApplication {
     const live = await this.store.publishedFiles(projectId);
     if (!live) return false;
     const current = await this.store.readAllFiles(projectId);
-    const keys = new Set([...Object.keys(live), ...Object.keys(current)].filter((path) => !isDevFile(path)));
+    const runtime = await this.projectRuntime(projectId);
+    const keys = new Set([...Object.keys(live), ...Object.keys(current)].filter((path) => runtime === "repository" || !isDevFile(path)));
     for (const path of keys) if (live[path] !== current[path]) return true;
     return false;
   }

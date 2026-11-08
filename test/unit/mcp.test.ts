@@ -2,9 +2,17 @@ import { describe, expect, it } from "vitest";
 import { BUILDER_SYSTEM_PROMPT } from "../../server/modules/builder/prompt.js";
 import { builderTools } from "../../server/modules/builder/index.js";
 import { GUIDES, SECTION_IDS, guideList, readGuides } from "../../server/bootstrap/mcp/guides.js";
-import { projectInTokenScope, SERVER_INSTRUCTIONS, TOOL_HINTS } from "../../server/bootstrap/mcp/server.js";
+import { projectInTokenScope, assertRepositoryOwnerAction, SERVER_INSTRUCTIONS, TOOL_HINTS } from "../../server/bootstrap/mcp/server.js";
 
 describe("MCP guides", () => {
+  it("returns repository commands rather than native page/SDK instructions when a project uses repository runtime", () => {
+    const guide = readGuides(["forja-overview", "backend"], "repository");
+    expect(guide.text).toContain("question");
+    expect(guide.text).toContain("Dockerfile");
+    expect(guide.text).toContain("package-lock.json");
+    expect(guide.text).not.toContain("the ONLY allowed paths");
+    expect(guide.text).not.toContain('import { ... } from "@forja/client"');
+  });
   it("gives every heading of the builder manual a stable id", () => {
     const headings = [...BUILDER_SYSTEM_PROMPT.matchAll(/^# (.+)$/gm)].map((m) => m[1]!.trim());
     expect(headings.length).toBeGreaterThan(5);
@@ -35,6 +43,13 @@ describe("MCP guides", () => {
 });
 
 describe("MCP tool hints", () => {
+  it("requires repository publication ownership while allowing editors to build isolated previews", () => {
+    expect(() => assertRepositoryOwnerAction("repository", "editor", "publish_app")).toThrow(/dueño|owner/);
+    expect(() => assertRepositoryOwnerAction("repository", "owner", "publish_app")).not.toThrow();
+    expect(() => assertRepositoryOwnerAction("repository", "editor", "check_build")).not.toThrow();
+    expect(() => assertRepositoryOwnerAction("native", "editor", "publish_app")).not.toThrow();
+    expect(TOOL_HINTS.check_build!.readOnlyHint).toBe(false);
+  });
   it("enforces project and organization token scopes", () => {
     const project = { id: "p1", orgId: "org1" };
     expect(projectInTokenScope({ tokenProjectId: "p1", tokenOrgId: null }, project)).toBe(true);

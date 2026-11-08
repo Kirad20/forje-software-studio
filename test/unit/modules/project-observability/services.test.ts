@@ -5,6 +5,20 @@ import { createSecurityService, type Finding } from "../../../../server/modules/
 import { createEventAdapters } from "../../../../server/modules/project-observability/infrastructure/events.js";
 import { createProblemAdapters } from "../../../../server/modules/project-observability/infrastructure/problems.js";
 describe("project observation", () => {
+  it("does not run the native compiler for repository projects after file events", async () => {
+    const adapters = createProblemAdapters(), { projectEvents } = createEventAdapters();
+    const checkProject = vi.fn(async () => [{ file: "server/index.ts", text: "native false positive" }]);
+    const service = createProblemService(adapters.repository, { readAllFiles: async () => ({ "server/index.ts": "export {}" }), projectRuntime: async () => "repository", checkProject, formatProblem: (p) => p.text }, {
+      ...adapters, emit: (p, e) => projectEvents.emit(p, e),
+      subscribe: (p, l) => { projectEvents.on(p, l); return () => { projectEvents.off(p, l); }; },
+    });
+    service.watchProblems("p");
+    projectEvents.emit("p", { type: "files", paths: ["server/index.ts"] });
+    await service.recheckBuild("p");
+    expect(checkProject).not.toHaveBeenCalled();
+    expect(service.listProblems("p")).toEqual([]);
+    await service.stopProblems();
+  });
   it("real event and memory adapters retain the last 500 scoped logs and fan out full timestamps", () => {
     const { projectEvents, logRepository } = createEventAdapters(), listener = vi.fn();
     projectEvents.on("p", listener);
