@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Hono } from "hono";
+import { serve } from "@hono/node-server";
+import { chromium } from "playwright-core";
 import type { PublicAccount } from "../../../server/modules/identity/index.js";
 
 const state = vi.hoisted(() => ({
@@ -101,6 +103,52 @@ describe("MCP OAuth connector", () => {
     state.codes.clear();
     state.tokens.clear();
   });
+
+  it("preserves the login continuation and submits consent to a registered cross-origin callback", async () => {
+    const { createMcpOAuthRouter } = await import("../../../server/bootstrap/mcp/oauth.js");
+    const app = new Hono();
+    app.route("/", createMcpOAuthRouter(identity as never));
+    app.get("/api/mcp/auth_callback", (c) => c.html("Claude callback reached"));
+    const server = serve({ fetch: app.fetch, hostname: "127.0.0.1", port: 0 });
+    let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined;
+    try {
+      await new Promise<void>((resolve) => server.listening ? resolve() : server.once("listening", resolve));
+      const address = server.address();
+      if (!address || typeof address === "string") throw new Error("OAuth test server has no port");
+      const base = `http://127.0.0.1:${address.port}`;
+      const redirectUri = `http://localhost:${address.port}/api/mcp/auth_callback`;
+      state.clients.set("browser-client", { client_id: "browser-client", client_name: "Claude", redirect_uris: [redirectUri] });
+      const params = new URLSearchParams({
+        response_type: "code", client_id: "browser-client", redirect_uri: redirectUri,
+        code_challenge: createHash("sha256").update("browser-verifier").digest("base64url"),
+        code_challenge_method: "S256", state: "browser-roundtrip", scope: "mcp",
+      });
+      browser = await chromium.launch({ executablePath: process.env.FORJA_CHROMIUM || undefined });
+      const context = await browser.newContext();
+      const page = await context.newPage();
+      const violations: string[] = [];
+      await page.addInitScript(() => {
+        document.addEventListener("securitypolicyviolation", (event) =>
+          console.error(`CSP violation: ${event.violatedDirective}`));
+      });
+      page.on("console", (message) => {
+        if (message.text().includes("CSP violation:")) violations.push(message.text());
+      });
+      await page.goto(`${base}/oauth/authorize?${params}`);
+      const loginHref = await page.getByRole("link", { name: "Iniciar sesión en Forja" }).getAttribute("href");
+      expect(new URL(loginHref!, base).searchParams.get("mcp_authorize")).toBe(`/oauth/authorize?${params}`);
+      await context.addCookies([{ name: "forja_session", value: "session", url: base }]);
+      await page.reload();
+      await page.getByRole("button", { name: "Autorizar", exact: true }).click();
+      await page.waitForURL((url) => `${url.origin}${url.pathname}` === redirectUri, { timeout: 10_000 });
+      expect(new URL(page.url()).searchParams.get("state")).toBe("browser-roundtrip");
+      expect(new URL(page.url()).searchParams.get("code")).toMatch(/^mcp_code_/);
+      expect(violations).toEqual([]);
+    } finally {
+      await browser?.close();
+      await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    }
+  }, 30_000);
 
   it("advertises MCP authorization metadata and registers only valid public clients", async () => {
     const { createMcpOAuthRouter } = await import("../../../server/bootstrap/mcp/oauth.js");

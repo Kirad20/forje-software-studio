@@ -1,10 +1,24 @@
-import { beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({ q: vi.fn(async (..._args: any[]): Promise<any[]> => []), one: vi.fn(async (..._args: any[]): Promise<any> => undefined), decrypt: vi.fn((v: string) => { if (v === "rotated") throw Error("key"); return `clear:${v}`; }) }));
 vi.mock("../../../../server/shared/database/index.js", () => ({ q: mocks.q, one: mocks.one }));
 vi.mock("../../../../server/shared/crypto.js", () => ({ encrypt: (v: string) => `encrypted:${v}`, decrypt: mocks.decrypt, newId: () => "id" }));
 import { integrationRepository } from "../../../../server/modules/integrations/infrastructure/connections.js";
-import { blobSha, githubRepository } from "../../../../server/modules/integrations/infrastructure/github.js";
+import { blobSha, gh, githubRepository } from "../../../../server/modules/integrations/infrastructure/github.js";
 beforeEach(() => { mocks.q.mockReset().mockResolvedValue([]); mocks.one.mockReset().mockResolvedValue(undefined); });
+afterEach(() => { vi.unstubAllGlobals(); });
+it("converts GitHub App manifests without an empty bearer while retaining authenticated requests", async () => {
+  const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {
+    const authorization = new Headers(init.headers).get("authorization");
+    return authorization?.trim() === "Bearer"
+      ? Response.json({ message: "Bad credentials" }, { status: 401 })
+      : Response.json({ id: 123 });
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  await expect(gh("", "POST", "/app-manifests/registration-code/conversions")).resolves.toEqual({ id: 123 });
+  expect(new Headers(fetchMock.mock.calls[0]![1].headers).has("authorization")).toBe(false);
+  await gh("app-jwt", "GET", "/app/installations/42");
+  expect(new Headers(fetchMock.mock.calls[1]![1].headers).get("authorization")).toBe("Bearer app-jwt");
+});
 it("real integration adapter encrypts values, scopes mutations and skips rotated keys", async () => {
   await integrationRepository.updateValue("account", "integration", "secret");
   expect(mocks.q).toHaveBeenCalledWith(expect.stringContaining("account_id = $1 and id = $2"), ["account", "integration", "encrypted:secret"]);

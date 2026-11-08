@@ -8,7 +8,7 @@ import { githubAppStore } from "./apps.js";
 export async function gh<T = any>(token: string, method: string, path: string, body?: unknown): Promise<T> {
   const res = await fetch(`${config.github.apiUrl}${path}`, {
     method,
-    headers: { authorization: `Bearer ${token}`, accept: "application/vnd.github+json", "x-github-api-version": "2022-11-28", "user-agent": "forja", ...(body === undefined ? {} : { "content-type": "application/json" }) },
+    headers: { ...(token ? { authorization: `Bearer ${token}` } : {}), accept: "application/vnd.github+json", "x-github-api-version": "2022-11-28", "user-agent": "forja", ...(body === undefined ? {} : { "content-type": "application/json" }) },
     body: body === undefined ? undefined : JSON.stringify(body), signal: AbortSignal.timeout(30_000),
   });
   if (res.status === 204) return undefined as T;

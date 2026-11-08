@@ -1,17 +1,17 @@
-# Graph Report - anemone-mcp-oauth  (2026-11-08)
+# Graph Report - connector-oauth-onboarding  (2026-11-08)
 
 ## Corpus Check
-- 717 files · ~339,394 words
+- 717 files · ~339,738 words
 - Verdict: corpus is large enough that graph structure adds value.
 - Unclassified: 14 file(s) not represented in the graph (top: (none) 6, .css 6, .example 1)
 
 ## Summary
-- 4757 nodes · 12515 edges · 185 communities (154 shown, 31 thin omitted)
+- 4757 nodes · 12518 edges · 185 communities (154 shown, 31 thin omitted)
 - Extraction: 95% EXTRACTED · 5% INFERRED · 0% AMBIGUOUS · INFERRED: 642 edges (avg confidence: 0.86)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `082ff4fa`
+- Built from commit: `6d24109f`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -52,7 +52,7 @@
 - modules/project-knowledge/index.ts
 - BuilderToolsAdapter.ts
 - with
-- createProjectRows
+- projectRows.ts
 - builderService.ts
 - domain/score.ts
 - composition.ts
@@ -77,7 +77,7 @@
 - app-services/auth.ts
 - execution-audit/index.ts
 - evaluations/bindings.test.ts
-- agents.mjs
+- studio.mjs
 - ApplicationLifecycle
 - BootstrapService
 - bundler.ts
@@ -139,7 +139,7 @@
 - PostgresProjectFileRepository
 - usage/usage.ts
 - Audit.tsx
-- infrastructure/routing.ts
+- domain/messages.ts
 - sandbox.ts
 - models/presentation/Models.tsx
 - projectMicroservices.test.ts
@@ -169,7 +169,7 @@
 - mcp-oauth.md
 - app-runtime
 - One project: orders API and durable invoice worker
-- modules/collaboration/index.ts
+- createCollaborationModule
 - Evals.tsx
 - builderServer.ts
 - GithubAuthorization
@@ -369,7 +369,7 @@ Nodes (40): dependencies, @anthropic-ai/sdk@^1.3.0, croner@^11.0.0, @electric-sq
 Cohesion: 0.09
 Nodes (29): SharePorts, createShareAccess(), DAY, parseHost(), PREVIEW_PREFIX, SHARE_COOKIE, ShareScope, tokenParts() (+21 more)
 
-### Community 36 - "createProjectRows"
+### Community 36 - "projectRows.ts"
 Cohesion: 0.13
 Nodes (12): @electric-sql/pglite, createProjectData(), createProjectRows(), columnsFor(), createProjectRow(), deleteProjectRows(), listProjectRows(), mask() (+4 more)
 
@@ -469,7 +469,7 @@ Nodes (23): sessionCookie(), endSession, testSession, EvalError, RunRequest, EVA
 Cohesion: 0.14
 Nodes (21): removeProjectData, removeProjectData(), designSignals, ensureEvalAccount(), sweepEvalProjects(), evaluationBuilder(), evaluationResources(), playgroundRoles() (+13 more)
 
-### Community 61 - "agents.mjs"
+### Community 61 - "studio.mjs"
 Cohesion: 0.09
 Nodes (29): app, DATA, app, DATA, MODELS, ROOT, SEED, MODELS (+21 more)
 
@@ -598,8 +598,8 @@ Cohesion: 0.19
 Nodes (6): BootstrapService, SetupError, BootstrapAccounts, BootstrapCrypto, BootstrapPolicy, setup()
 
 ### Community 94 - "mcp/server.ts"
-Cohesion: 0.17
-Nodes (14): createGithubImportService(), apps, imports, legacy, ports(), sync, integrationRepository, blobSha() (+6 more)
+Cohesion: 0.18
+Nodes (14): createGithubImportService(), apps, imports, legacy, ports(), sync, blobSha(), gh() (+6 more)
 
 ### Community 95 - "AppEnv"
 Cohesion: 0.12
@@ -622,8 +622,8 @@ Cohesion: 0.18
 Nodes (9): Global Constraints, Panel de administración + Postgres — plan de implementación, Review Focus, Task 2: Registro y almacén de ajustes, Task 4: API de administración (ajustes, proveedores, modelos, sondas), Task 5: Playground de agentes y enrutador, Task 6: Studio — página de administración, Task 7: `.env`, documentación y verificación final (+1 more)
 
 ### Community 100 - "Desplegar Forja en Coolify"
-Cohesion: 0.17
-Nodes (6): createIntegrationService(), Integration, INTEGRATION_TYPES, IntegrationInput, IntegrationRepository, IntegrationType
+Cohesion: 0.16
+Nodes (7): createIntegrationService(), Integration, INTEGRATION_TYPES, IntegrationInput, IntegrationRepository, IntegrationType, integrationRepository
 
 ### Community 101 - "SettingDefinition"
 Cohesion: 0.15
@@ -709,7 +709,7 @@ Nodes (5): createUsageService(), DAILY_ACTIONS, UsageRepository, actionsToday, c
 Cohesion: 0.32
 Nodes (11): AuditReport, AuditStep, contextChange(), ContextMetrics, Audit(), ContextTrend(), count(), money() (+3 more)
 
-### Community 124 - "infrastructure/routing.ts"
+### Community 124 - "domain/messages.ts"
 Cohesion: 0.11
 Nodes (23): anthropicChat(), Block, LlmMessage, LlmRequest, LlmResponse, LlmTool, CompatEndpoint, anthropicChat() (+15 more)
 
@@ -813,7 +813,7 @@ Nodes (7): command, environment, expose, restart, stop_grace_period, volumes, bu
 Cohesion: 0.29
 Nodes (7): command, environment, expose, restart, stop_grace_period, volumes, job-worker
 
-### Community 162 - "modules/collaboration/index.ts"
+### Community 162 - "createCollaborationModule"
 Cohesion: 0.15
 Nodes (6): MemberQueries, OrganizationQueries, createCollaborationModule(), IMemberQueries, IOrganizationQueries, fixture()
 
@@ -834,8 +834,8 @@ Cohesion: 0.17
 Nodes (13): [command, ...flags], main(), monolith, seedDev, seedLocal, createDevelopmentSeed(), DEV_FIXTURE, Fixture (+5 more)
 
 ### Community 170 - "infrastructure/apps.ts"
-Cohesion: 0.15
-Nodes (14): AppCredentials, appJwt(), cache, credentials(), generations, githubAppStore, pending, gh() (+6 more)
+Cohesion: 0.16
+Nodes (13): AppCredentials, appJwt(), cache, credentials(), generations, githubAppStore, pending, tokenFor() (+5 more)
 
 ### Community 193 - "ModelClassification.ts"
 Cohesion: 0.16
@@ -853,8 +853,8 @@ Nodes (3): GitHub integration, HTTP API, Native imports and synchronization
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `vitest` connect `bundler.ts` to `Chat.tsx`, `q`, `BuilderTurnAdapter.ts`, `react`, `studioApi.ts`, `roles.ts`, `infrastructure/playground.ts`, `app-runtime/index.ts`, `FusionOrchestrator.ts`, `http-client.ts`, `roles.ts`, `builderService.ts`, `FileMap`, `app-runtime/index.ts`, `http.test.ts`, `infrastructure/probe.ts`, `server/index.ts`, `model-management/index.ts`, `modules/builder/index.ts`, `ServicePanels.tsx`, `deps.ts`, `modules/identity/index.ts`, `modules/builder/index.ts`, `modules/project-knowledge/index.ts`, `BuilderToolsAdapter.ts`, `createProjectRows`, `builderService.ts`, `composition.ts`, `policies.test.ts`, `bootstrap/server.ts`, `app-services/context.ts`, `modules/projects/index.ts`, `domain/services.ts`, `AgentExecution.ts`, `model-management/index.ts`, `PostgresProjectsStore`, `dependencies`, `q`, `ref_node_fs`, `evaluations/bindings.test.ts`, `ApplicationLifecycle`, `BootstrapService`, `runtime.test.ts`, `github.mjs`, `createAdminMcpHandler`, `createJobs`, `FinishGatePolicy.ts`, `toolOutputs.test.ts`, `composition.ts`, `Panel de administración del sistema — diseño`, `index.tsx`, `OrgRole`, `adminApi.ts`, `agents.mjs`, `InviteMemberUseCase.ts`, `ProjectsApplication.ts`, `infrastructure/repositories.ts`, `IPasswordHasher`, `model-management/providers.ts`, `starterTemplate.test.ts`, `mcp/server.ts`, `AppEnv`, `createHttp`, `Desplegar Forja en Coolify`, `SettingDefinition`, `database/index.ts`, `BuilderWorkflowPorts`, `sandboxWorker.mjs`, `createSecrets`, `AuthPorts`, `policies.test.ts`, `PostgresProjectFileRepository`, `usage/usage.ts`, `Audit.tsx`, `infrastructure/routing.ts`, `sandbox.ts`, `models/presentation/Models.tsx`, `adminServer.ts`, `collaboration/postgresAdapters.test.ts`, `AccountLifecycleRepository`, `mcp/jobs.ts`, `oauth.ts`, `e2e.mjs`, `transports/mcp.test.ts`, `guides.ts`, `guides.ts`, `modules/collaboration/index.ts`, `builderServer.ts`, `infrastructure/apps.ts`, `ModelClassification.ts`?**
-  _High betweenness centrality (0.254) - this node is a cross-community bridge._
+- **Why does `vitest` connect `bundler.ts` to `Chat.tsx`, `q`, `BuilderTurnAdapter.ts`, `react`, `studioApi.ts`, `roles.ts`, `infrastructure/playground.ts`, `app-runtime/index.ts`, `FusionOrchestrator.ts`, `http-client.ts`, `roles.ts`, `builderService.ts`, `FileMap`, `app-runtime/index.ts`, `http.test.ts`, `infrastructure/probe.ts`, `server/index.ts`, `model-management/index.ts`, `modules/builder/index.ts`, `ServicePanels.tsx`, `deps.ts`, `modules/identity/index.ts`, `modules/builder/index.ts`, `modules/project-knowledge/index.ts`, `BuilderToolsAdapter.ts`, `projectRows.ts`, `builderService.ts`, `composition.ts`, `policies.test.ts`, `bootstrap/server.ts`, `app-services/context.ts`, `modules/projects/index.ts`, `domain/services.ts`, `AgentExecution.ts`, `model-management/index.ts`, `PostgresProjectsStore`, `dependencies`, `q`, `ref_node_fs`, `evaluations/bindings.test.ts`, `ApplicationLifecycle`, `BootstrapService`, `runtime.test.ts`, `github.mjs`, `createAdminMcpHandler`, `createJobs`, `FinishGatePolicy.ts`, `toolOutputs.test.ts`, `composition.ts`, `Panel de administración del sistema — diseño`, `index.tsx`, `OrgRole`, `adminApi.ts`, `agents.mjs`, `InviteMemberUseCase.ts`, `ProjectsApplication.ts`, `infrastructure/repositories.ts`, `IPasswordHasher`, `model-management/providers.ts`, `starterTemplate.test.ts`, `mcp/server.ts`, `AppEnv`, `createHttp`, `Desplegar Forja en Coolify`, `SettingDefinition`, `database/index.ts`, `BuilderWorkflowPorts`, `sandboxWorker.mjs`, `createSecrets`, `AuthPorts`, `policies.test.ts`, `PostgresProjectFileRepository`, `usage/usage.ts`, `Audit.tsx`, `domain/messages.ts`, `sandbox.ts`, `models/presentation/Models.tsx`, `adminServer.ts`, `collaboration/postgresAdapters.test.ts`, `AccountLifecycleRepository`, `mcp/jobs.ts`, `oauth.ts`, `e2e.mjs`, `transports/mcp.test.ts`, `guides.ts`, `guides.ts`, `createCollaborationModule`, `builderServer.ts`, `infrastructure/apps.ts`, `ModelClassification.ts`?**
+  _High betweenness centrality (0.251) - this node is a cross-community bridge._
 - **Are the 2 inferred relationships involving `q()` (e.g. with `infrastructure/repositories.ts` and `shared/security.ts`) actually correct?**
   _`q()` has 2 INFERRED edges - model-reasoned connections that need verification._
 - **What connects `./dynamic.js`, `./inlineType.js`, `./dynamicTemplate.js` to the rest of the system?**

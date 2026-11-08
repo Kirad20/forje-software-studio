@@ -20,7 +20,14 @@ export function App() {
   const path = usePath();
   const refreshMe = () =>
     identityController.currentAccount()
-      .then((r) => setMe(r.account))
+      .then((r) => {
+        const authorize = new URLSearchParams(location.search).get("mcp_authorize");
+        if (r.account && authorize?.startsWith("/oauth/authorize?")) {
+          location.replace(authorize);
+          return;
+        }
+        setMe(r.account);
+      })
       .catch(() => setMe(null));
   useEffect(() => {
     void refreshMe();
