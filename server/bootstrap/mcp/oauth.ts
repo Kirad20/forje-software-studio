@@ -65,7 +65,7 @@ function authorizationHtml(clientName: string, account: PublicAccount | null, cs
   const content = account
     ? `<p>Conectando como <strong>${escapeHtml(account.email)}</strong></p><p><strong>${escapeHtml(clientName)}</strong> podrá usar tus proyectos y crear proyectos con las herramientas de Forja.</p>
        <form method="post" action="/oauth/authorize">${hidden}<input type="hidden" name="csrf" value="${escapeHtml(csrf)}"><button name="decision" value="approve">Autorizar</button><button name="decision" value="deny">Cancelar</button></form>`
-    : `<p>Inicia sesión en Forja para autorizar este conector. Después vuelve a esta pestaña y recárgala.</p><p><a href="/" target="_blank" rel="noopener">Abrir Forja en otra pestaña</a></p>`;
+    : `<p>Inicia sesión en Forja para autorizar este conector.</p><p><a href="/?${escapeHtml(new URLSearchParams({ mcp_authorize: `/oauth/authorize?${params}` }).toString())}">Iniciar sesión en Forja</a></p>`;
   return `<!doctype html><html lang="es"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Conectar ${escapeHtml(clientName)} · Forja</title><body style="font:16px system-ui;max-width:38rem;margin:10vh auto;padding:0 1.5rem;color:#292524"><h1>Autorizar conector MCP</h1>${content}</body></html>`;
 }
 
@@ -178,7 +178,7 @@ export function createMcpOAuthRouter(identity: IdentityModule) {
     setCookie(c, CSRF_COOKIE, csrf, { httpOnly: true, sameSite: "Lax", secure: isHttps(), path: "/", maxAge: 600 });
     return c.html(authorizationHtml(client.client_name, account, csrf, params), 200, {
       ...noStore,
-      "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+      "content-security-policy": `default-src 'none'; style-src 'unsafe-inline'; form-action 'self' ${new URL(redirectUri).origin}; base-uri 'none'; frame-ancestors 'none'`,
     });
   });
 
