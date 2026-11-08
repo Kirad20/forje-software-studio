@@ -11,6 +11,7 @@ import { startJobRunner, stopJobRunner } from "../modules/app-services/jobs.js";
 import { closeAll } from "../modules/app-services/projectDb.js";
 import { attachSocket, stopRealtime } from "../modules/app-services/realtime.js";
 import { createMcpHandler } from "./mcp/server.js";
+import { accountFromOAuthAccessToken, createMcpOAuthRouter } from "./mcp/oauth.js";
 import { createAdminMcpHandler } from "./mcp/adminServer.js";
 import { closePlatformDb, platformDb } from "../shared/database/index.js";
 import { createLocalSeed } from "./database/localSeed.js";
@@ -101,12 +102,15 @@ app.use("*", async (c, next) => {
   c.res = withDefaultHeaders(c.res, STUDIO_HEADERS);
 });
 
+app.route("/", createMcpOAuthRouter(monolith.identity));
 app.route("/api", studioApi);
 
 app.all("/mcp", async (c) => {
-  const bearer = c.req.header("authorization")?.replace(/^Bearer\s+/i, "");
+  const bearer = /^Bearer\s+(\S+)$/i.exec(c.req.header("authorization") ?? "")?.[1];
   // Tokens only: a cookie fallback would let any page the owner visits drive the builder.
-  const account = await accountFromApiToken(bearer);
+  const account = bearer?.startsWith("mcp_at_")
+    ? await accountFromOAuthAccessToken(bearer)
+    : await accountFromApiToken(bearer);
   if (account) {
     try {
       await rateLimit(`mcp:${account.id}`, 240, 60_000);
@@ -116,7 +120,11 @@ app.all("/mcp", async (c) => {
       throw e;
     }
   }
-  if (!account) return c.json({ error: "Crea un token en el studio (Cuenta → Tokens MCP) y envíalo como Authorization: Bearer" }, 401);
+  if (!account) return c.json(
+    { error: "Se requiere un token MCP válido. Conecta Claude mediante OAuth o usa un token de Cuenta → Tokens MCP." },
+    401,
+    { "www-authenticate": `Bearer resource_metadata="${new URL("/.well-known/oauth-protected-resource/mcp", config.publicUrl).toString()}"` },
+  );
   return handleMcp(c.req.raw, account);
 });
 

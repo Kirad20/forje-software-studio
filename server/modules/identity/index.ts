@@ -22,6 +22,7 @@ export { PostgresLoginCodeRepository } from "./infrastructure/PostgresLoginCodeR
 export { PostgresAccountLifecycleRepository } from "./infrastructure/PostgresAccountLifecycleRepository.js";
 export { PostgresPasswordResetRepository } from "./infrastructure/PostgresPasswordResetRepository.js";
 export { PostgresApiTokenRepository } from "./infrastructure/PostgresApiTokenRepository.js";
+export { PostgresMcpOAuthRepository } from "./infrastructure/PostgresMcpOAuthRepository.js";
 export { BcryptArgonPasswordHasher } from "./infrastructure/BcryptArgonPasswordHasher.js";
 export { PlatformMailerService } from "./infrastructure/PlatformMailerService.js";
 export { NodeBootstrapCrypto } from "./infrastructure/NodeBootstrapCrypto.js";
