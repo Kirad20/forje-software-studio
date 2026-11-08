@@ -2,7 +2,7 @@ export type ProjectRuntime = "native" | "repository";
 
 export function repositoryPathExclusion(path: string): "environment" | "generated" | null {
   if (path.split("/").some((part) => /^\.env(?:\..*)?$/i.test(part))) return "environment";
-  if (path.split("/").some((part) => /^(?:node_modules|dist|build|coverage|cache|\.cache|\.next|\.nuxt|\.output|graphify-out|\.graphify_python|\.graphify_root)$/i.test(part))) return "generated";
+  if (path.split("/").some((part) => /^(?:node_modules|dist|build|coverage|cache|\.cache|\.next|\.nuxt|\.output|\.ms-playwright|graphify-out|\.graphify_python|\.graphify_root)$/i.test(part))) return "generated";
   return null;
 }
 

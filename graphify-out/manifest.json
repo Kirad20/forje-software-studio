@@ -4222,9 +4222,9 @@
     "semantic_hash": ""
   },
   "test/unit/modules/integrations/imports.test.ts": {
-    "mtime": 1794077175.92364,
-    "seen": 1794077217.415015,
-    "ast_hash": "15cedb2dad3ba455f9ffa21cb297f86a",
+    "mtime": 1794086849.3620415,
+    "seen": 1794086881.4932876,
+    "ast_hash": "a2d87f76cc5c26a8ac10acfc080f80ba",
     "semantic_hash": ""
   },
   "server/modules/integrations/README.md": {
@@ -4366,9 +4366,9 @@
     "semantic_hash": ""
   },
   "contracts/repository.ts": {
-    "mtime": 1794075836.7535782,
-    "seen": 1794075890.845522,
-    "ast_hash": "e07b545f7c68c7eb47d05be3e3d25cda",
+    "mtime": 1794086878.1392682,
+    "seen": 1794086881.1693048,
+    "ast_hash": "c6ef039af4fbb6c621365d42a8e5f9e6",
     "semantic_hash": ""
   },
   "test/unit/repository-secrets.test.ts": {
@@ -4387,6 +4387,12 @@
     "mtime": 1794078168.0059855,
     "seen": 1794078220.5217159,
     "ast_hash": "60bba2c3a6bb643febcd15c40728c487",
+    "semantic_hash": ""
+  },
+  "docs/repository-runtime-status.md": {
+    "mtime": 1794168276.492187,
+    "seen": 1794168319.405721,
+    "ast_hash": "1d52b3b6cb8f4200815cf9653df70254",
     "semantic_hash": ""
   },
   "package-lock.json": {

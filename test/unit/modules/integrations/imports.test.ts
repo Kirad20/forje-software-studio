@@ -3,6 +3,7 @@ import { createGithubImportService } from "../../../../server/modules/integratio
 import { blobSha } from "../../../../server/modules/integrations/infrastructure/github.js";
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { assertSafeRepositoryPath, assertSafeRepositoryContent, repositoryPathExclusion } from "../../../../contracts/repository.js";
 
 function setup(files = { "pages/_index.tsx": "export default function Home(){return <div/>}", "base.css": "body{}", "migrations/001_notes.sql": "create table notes(id integer);", "README.md": "# Preserve", ".github/workflows/ci.yml": "name: CI" } as Record<string, string>) {
@@ -43,7 +44,7 @@ describe("native GitHub import preparation", () => {
     const paths = [...new Set(execFileSync("git", ["ls-files", "--cached", "--others", "--exclude-standard", "-z"], { encoding: "utf8" }).split("\0").filter(Boolean))];
     const files = Object.fromEntries(paths.map((path) => {
       if (repositoryPathExclusion(path)) return [path, "(excluded generated/environment file)"];
-      const bytes = readFileSync(path.replaceAll("/", "\\"));
+      const bytes = readFileSync(join(...path.split("/")));
       const text = bytes.toString("utf8");
       return [path, text.includes("\uFFFD") || text.includes("\0") ? `base64:${bytes.toString("base64")}` : text];
     }));
@@ -87,6 +88,7 @@ describe("native GitHub import preparation", () => {
       "sdk/index.ts": "export {}",
       "graphify-out/graph.json": "x".repeat(2 * 1024 * 1024),
       "node_modules/vite/index.js": "generated",
+      ".ms-playwright/chromium/chrome": "generated browser",
       ".env.example": "TOKEN=replace_me",
     });
     const prepared = await s.service.prepare("a", { repo: "org/existing", runtime: "repository" });
