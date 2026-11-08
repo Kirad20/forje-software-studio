@@ -54,7 +54,8 @@ vi.mock("../../../server/shared/database/index.js", () => ({
         query: async (sql, values = []) => {
           if (sql.includes("select account_id, redirect_uri, code_challenge, scope from mcp_oauth_codes")) {
             const code = state.codes.get(String(values[0]));
-            return { rows: code && code.client_id === values[1] && !code.consumed
+            return { rows: code && code.client_id === values[1] && code.redirect_uri === values[2]
+              && code.code_challenge === values[3] && !code.consumed
               ? [{ account_id: code.account_id, redirect_uri: code.redirect_uri, code_challenge: code.code_challenge, scope: code.scope }]
               : [] };
           }

@@ -1,10 +1,9 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { Hono } from "hono";
 import { getCookie, setCookie } from "hono/cookie";
-import { platformDb, q } from "../../shared/database/index.js";
 import { config } from "../../shared/config.js";
 import { clientIp, isHttps, rateLimit, RateLimitError, RateLimitStoreError, requestOrigin, studioOrigins } from "../../shared/security.js";
-import type { IdentityModule, PublicAccount } from "../../modules/identity/index.js";
+import { PostgresMcpOAuthRepository, type IdentityModule, type PublicAccount } from "../../modules/identity/index.js";
 
 const SESSION_COOKIE = "forja_session";
 const CSRF_COOKIE = "forja_mcp_oauth_csrf";
@@ -15,15 +14,7 @@ const authorizationServer = new URL(config.publicUrl).origin;
 const resourceServer = new URL("/mcp", authorizationServer).toString();
 const validChallenge = (value: string | null) => !!value && /^[A-Za-z0-9_-]{43}$/.test(value);
 const validState = (value: string | null) => value === null || (value.length <= 1024 && !/[\u0000-\u001f]/.test(value));
-
-type Client = { client_id: string; client_name: string; redirect_uris: string[] };
-type AuthorizationCode = {
-  account_id: string;
-  redirect_uri: string;
-  code_challenge: string;
-  scope: string;
-};
-type RefreshGrant = { account_id: string; scope: string };
+const oauthRepository = new PostgresMcpOAuthRepository();
 
 const digest = (value: string) => createHash("sha256").update(value).digest("hex");
 const opaque = (prefix: string) => `${prefix}${randomBytes(32).toString("base64url")}`;
@@ -78,23 +69,18 @@ function authorizationHtml(clientName: string, account: PublicAccount | null, cs
   return `<!doctype html><html lang="es"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Conectar ${escapeHtml(clientName)} · Forja</title><body style="font:16px system-ui;max-width:38rem;margin:10vh auto;padding:0 1.5rem;color:#292524"><h1>Autorizar conector MCP</h1>${content}</body></html>`;
 }
 
-async function findClient(clientId: string): Promise<Client | null> {
-  return (await q<Client>(
-    `select client_id, client_name, redirect_uris from mcp_oauth_clients where client_id = $1`,
-    [clientId],
-  ))[0] ?? null;
-}
-
 async function issueTokens(accountId: string, clientId: string, scope: string) {
   const accessToken = opaque("mcp_at_");
   const refreshToken = opaque("mcp_rt_");
-  await q(
-    `insert into mcp_oauth_tokens
-       (access_token_hash, refresh_token_hash, client_id, account_id, scope, expires_at, refresh_expires_at)
-     values ($1, $2, $3, $4, $5, now() + ($6::double precision * interval '1 second'),
-       now() + ($7::double precision * interval '1 second'))`,
-    [digest(accessToken), digest(refreshToken), clientId, accountId, scope, ACCESS_TOKEN_TTL, REFRESH_TOKEN_TTL],
-  );
+  await oauthRepository.issueTokens({
+    accessTokenHash: digest(accessToken),
+    refreshTokenHash: digest(refreshToken),
+    clientId,
+    accountId,
+    scope,
+    accessTokenTtl: ACCESS_TOKEN_TTL,
+    refreshTokenTtl: REFRESH_TOKEN_TTL,
+  });
   return {
     access_token: accessToken,
     token_type: "Bearer",
@@ -163,10 +149,7 @@ export function createMcpOAuthRouter(identity: IdentityModule) {
     const clientName = typeof body.client_name === "string" && body.client_name.trim()
       ? body.client_name.trim().slice(0, 100)
       : "Cliente MCP";
-    await q(
-      `insert into mcp_oauth_clients (client_id, client_name, redirect_uris) values ($1, $2, $3::jsonb)`,
-      [clientId, clientName, JSON.stringify(redirects)],
-    );
+    await oauthRepository.registerClient(clientId, clientName, redirects);
     return c.json({
       client_id: clientId,
       client_id_issued_at: Math.floor(Date.now() / 1000),
@@ -183,7 +166,7 @@ export function createMcpOAuthRouter(identity: IdentityModule) {
     const clientId = params.get("client_id") ?? "";
     const redirectUri = params.get("redirect_uri") ?? "";
     const state = params.get("state");
-    const client = await findClient(clientId);
+    const client = await oauthRepository.findClient(clientId);
     if (params.get("response_type") !== "code" || !client || !client.redirect_uris.includes(redirectUri)
       || !validScope(params.get("scope")) || !validResource(params.get("resource"))
       || params.get("code_challenge_method") !== "S256"
@@ -218,7 +201,7 @@ export function createMcpOAuthRouter(identity: IdentityModule) {
     const clientId = params.get("client_id") ?? "";
     const redirectUri = params.get("redirect_uri") ?? "";
     const state = params.get("state");
-    const client = await findClient(clientId);
+    const client = await oauthRepository.findClient(clientId);
     const cookieCsrf = getCookie(c, CSRF_COOKIE);
     const formCsrf = form.get("csrf");
     if (!cookieCsrf || typeof formCsrf !== "string" || cookieCsrf.length !== formCsrf.length
@@ -235,13 +218,15 @@ export function createMcpOAuthRouter(identity: IdentityModule) {
     if (form.get("decision") !== "approve") return redirectWithError(redirectUri, "access_denied", state);
 
     const code = opaque("mcp_code_");
-    await q(`delete from mcp_oauth_codes where expires_at <= now() or consumed_at < now() - interval '10 minutes'`);
-    await q(
-      `insert into mcp_oauth_codes
-         (code_hash, client_id, account_id, redirect_uri, code_challenge, scope, expires_at)
-       values ($1, $2, $3, $4, $5, $6, now() + interval '5 minutes')`,
-      [digest(code), clientId, account.id, redirectUri, params.get("code_challenge"), SCOPE],
-    );
+    await oauthRepository.removeExpiredAuthorizationCodes();
+    await oauthRepository.createAuthorizationCode({
+      codeHash: digest(code),
+      clientId,
+      accountId: account.id,
+      redirectUri,
+      codeChallenge: params.get("code_challenge")!,
+      scope: SCOPE,
+    });
     const redirect = new URL(redirectUri);
     redirect.searchParams.set("code", code);
     if (state) redirect.searchParams.set("state", state);
@@ -261,7 +246,7 @@ export function createMcpOAuthRouter(identity: IdentityModule) {
       return typeof field === "string" ? field : "";
     };
     const clientId = value("client_id");
-    const client = await findClient(clientId);
+    const client = await oauthRepository.findClient(clientId);
     if (!client) return oauthError("invalid_client", 401);
     const grant = value("grant_type");
     if (grant === "authorization_code") {
@@ -269,40 +254,15 @@ export function createMcpOAuthRouter(identity: IdentityModule) {
       const redirectUri = value("redirect_uri");
       const verifier = value("code_verifier");
       if (!code || !validRedirectUri(redirectUri) || !/^[A-Za-z0-9._~-]{43,128}$/.test(verifier)) return oauthError("invalid_grant");
-      const db = await platformDb();
-      const result = await db.transaction(async (tx) => {
-        const found = (await tx.query<AuthorizationCode>(
-          `select account_id, redirect_uri, code_challenge, scope from mcp_oauth_codes
-           where code_hash = $1 and client_id = $2 and expires_at > now() and consumed_at is null`,
-          [digest(code), clientId],
-        )).rows[0];
-        if (!found || found.redirect_uri !== redirectUri
-          || !timingSafeEqual(Buffer.from(createHash("sha256").update(verifier).digest("base64url")), Buffer.from(found.code_challenge))) return null;
-        const consumed = await tx.query(
-          `update mcp_oauth_codes set consumed_at = now()
-           where code_hash = $1 and client_id = $2 and consumed_at is null and expires_at > now() returning code_hash`,
-          [digest(code), clientId],
-        );
-        return consumed.rows.length ? found : null;
-      });
+      const challenge = createHash("sha256").update(verifier).digest("base64url");
+      const result = await oauthRepository.consumeAuthorizationCode(digest(code), clientId, redirectUri, challenge);
       if (!result) return oauthError("invalid_grant");
       return c.json(await issueTokens(result.account_id, clientId, result.scope), 200, noStore);
     }
     if (grant === "refresh_token") {
       const refreshToken = value("refresh_token");
       if (!refreshToken.startsWith("mcp_rt_")) return oauthError("invalid_grant");
-      const db = await platformDb();
-      const result = await db.transaction(async (tx) => {
-        const consumed = await tx.query<RefreshGrant>(
-          `update mcp_oauth_tokens t set revoked_at = now()
-           from accounts a
-           where t.refresh_token_hash = $1 and t.client_id = $2 and t.revoked_at is null
-             and t.refresh_expires_at > now() and t.account_id = a.id and not a.disabled
-           returning t.account_id, t.scope`,
-          [digest(refreshToken), clientId],
-        );
-        return consumed.rows[0] ?? null;
-      });
+      const result = await oauthRepository.consumeRefreshToken(digest(refreshToken), clientId);
       if (!result) return oauthError("invalid_grant");
       return c.json(await issueTokens(result.account_id, clientId, result.scope), 200, noStore);
     }
@@ -320,12 +280,7 @@ export function createMcpOAuthRouter(identity: IdentityModule) {
     const token = form.get("token");
     const clientId = form.get("client_id");
     if (typeof token !== "string" || typeof clientId !== "string" || !token.startsWith("mcp_")) return c.body(null, 200, noStore);
-    await q(
-      `update mcp_oauth_tokens set revoked_at = now()
-       where client_id = $1 and revoked_at is null and
-       (access_token_hash = $2 or refresh_token_hash = $2)`,
-      [clientId, digest(token)],
-    );
+    await oauthRepository.revokeToken(clientId, digest(token));
     return c.body(null, 200, noStore);
   });
 
@@ -334,13 +289,5 @@ export function createMcpOAuthRouter(identity: IdentityModule) {
 
 export async function accountFromOAuthAccessToken(token: string | undefined): Promise<PublicAccount | null> {
   if (!token?.startsWith("mcp_at_")) return null;
-  const account = (await q<PublicAccount>(
-    `update mcp_oauth_tokens t set last_used_at = now()
-     from accounts a
-     where t.access_token_hash = $1 and t.account_id = a.id and t.revoked_at is null
-       and t.expires_at > now() and not a.disabled
-     returning a.id, a.email, a.name, a.credits, a.platform_role as "platformRole", null::text as "tokenOrgId", null::text as "tokenProjectId"`,
-    [digest(token)],
-  ))[0];
-  return account ?? null;
+  return oauthRepository.accountFromAccessToken(digest(token));
 }
