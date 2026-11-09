@@ -16,9 +16,10 @@ export function createLogService(repository: LogRepository, emit: (projectId: st
       repository.set(projectId, list);
       emit(projectId, { type: "log", entry: full });
     },
-    readLogs(projectId: string, opts: { level?: string; limit?: number } = {}) {
+    readLogs(projectId: string, opts: { level?: string; limit?: number; env?: "preview" | "published" } = {}) {
       let list = repository.get(projectId);
       if (opts.level === "error") list = list.filter((l) => l.level === "error");
+      if (opts.env) list = list.filter((l) => l.env === opts.env);
       return list.slice(-(opts.limit ?? 100));
     },
   };

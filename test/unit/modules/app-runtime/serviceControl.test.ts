@@ -46,6 +46,33 @@ describe("Project service control", () => {
     await expect(control.scale("p", "monolith", { replicas: 2 })).rejects.toThrow(/monolith/i);
     expect(writeManifest).not.toHaveBeenCalled();
   });
+  it("uses the published manifest and scopes production processes, queue and restart targets", async () => {
+    const production = { "jobs/retired.ts": "", "forja.services.json": JSON.stringify({ version: 1, services: {
+      retired: { kind: "worker", jobs: ["jobs/retired.ts"], replicas: 3 },
+    } }) };
+    const readFiles = vi.fn(async (_id: string, env?: "preview" | "published") => env === "published" ? production : files);
+    const restart = vi.fn();
+    const control = createServiceControl({
+      readFiles, restart, writeManifest: vi.fn(),
+      listQueue: async () => [
+        { id: "1", job: "retired", service: "retired", env: "preview", status: "failed", attempts: 1, maxAttempts: 3, error: "Preview only" },
+        { id: "2", job: "retired", service: "retired", env: "published", status: "queued", attempts: 0, maxAttempts: 3, error: null },
+      ],
+      runtime: async () => ({ available: true, scope: "app-runtime", services: [
+        { service: "retired", env: "preview", replicas: [{ pid: 1, active: 0, ready: true }] },
+        { service: "retired", env: "published", replicas: [{ pid: 2, active: 1, ready: true }] },
+      ] }),
+    });
+    const result = await control.snapshot("p", "published");
+    expect(result.services.map((service) => service.name)).toEqual(["retired", "monolith"]);
+    expect(result.services[0]).toMatchObject({
+      scalable: false, desired: { replicas: 3 }, queueCounts: { queued: 1 }, lastFailure: null,
+      runtime: [{ env: "published", replicas: [{ pid: 2 }] }],
+    });
+    await control.restart("p", "retired", "published");
+    expect(restart).toHaveBeenCalledWith("p", "retired", "published");
+    await expect(control.restart("p", "retired", "preview")).rejects.toThrow("Servicio no encontrado");
+  });
   it("persists only scaling fields, preserving other service settings", async () => {
     const { control, writeManifest } = fixture();
     await control.scale("p", "orders", { replicas: 3, maxConcurrency: 4 });

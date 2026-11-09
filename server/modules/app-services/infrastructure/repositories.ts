@@ -33,9 +33,10 @@ const statements: Record<string, string> = {
     sum(cache_read_tokens)::int as "cachedTokens", round(sum(usd)::numeric, 4)::float as usd,
     sum(credits)::int as credits, count(*)::int as calls from ai_usage where project_id = $1 group by source, model order by sum(usd) desc`,
   emailProject: `select a.email as owner_email, p.name, p.email_domain, p.email_domain_verified from projects p join accounts a on a.id = p.owner_id where p.id = $1`,
-  emailRecordOutbound: `insert into emails (project_id, to_address, intended_to, from_address, subject, html, status) values ($1, $2, $3, $4, $5, $6, $7)`,
-  emailRecordInbound: `insert into emails (project_id, direction, to_address, from_address, subject, html, status) values ($1, 'in', $2, $3, $4, $5, 'received')`,
-  emailList: `select id, direction, to_address as "to", intended_to as "intendedTo", from_address as "from", subject, html, status, created_at as "createdAt" from emails where project_id = $1 order by created_at desc limit 200`,
+  emailRecordOutbound: `insert into emails (project_id, to_address, intended_to, from_address, subject, html, status, env) values ($1, $2, $3, $4, $5, $6, $7, $8)`,
+  emailRecordInbound: `insert into emails (project_id, direction, to_address, from_address, subject, html, status, env) values ($1, 'in', $2, $3, $4, $5, 'received', $6)`,
+  emailList: `select id, direction, env, to_address as "to", intended_to as "intendedTo", from_address as "from", subject, html, status, created_at as "createdAt" from emails
+    where project_id = $1 and ($2::text is null or env = $2 or env is null) order by created_at desc, id desc limit 200`,
   secretRequest: `insert into project_secrets (project_id, name, description) values ($1, $2, $3) on conflict (project_id, name) do update set description = excluded.description`,
   secretSet: `insert into project_secrets (project_id, name, value_enc) values ($1, $2, $3) on conflict (project_id, name) do update set value_enc = excluded.value_enc`,
   secretDelete: `delete from project_secrets where project_id = $1 and name = $2`,
@@ -47,7 +48,7 @@ const statements: Record<string, string> = {
   storageDelete: `delete from storage_objects where project_id = $1 and key = $2`,
   storageList: `select key, filename, content_type as "contentType", size, created_at as "createdAt" from storage_objects where project_id = $1 order by created_at desc`,
   storageUsage: `select coalesce(sum(size), 0)::int as bytes from storage_objects where project_id = $1`,
-  jobCreateRun: `insert into job_runs (project_id, job, trigger, status) values ($1, $2, $3, 'running') returning id`,
+  jobCreateRun: `insert into job_runs (project_id, job, trigger, status, env) values ($1, $2, $3, 'running', $4) returning id`,
   jobEnqueue: `with capacity as (
     insert into job_queue_capacity (project_id, pending) values ($2, 1)
     on conflict (project_id) do update set pending = job_queue_capacity.pending + 1
@@ -121,8 +122,9 @@ const statements: Record<string, string> = {
   jobClaimTimers: `update job_timers set status = 'fired' where id in (select id from job_timers where status = 'pending' and run_at <= now() limit 20) returning id, project_id, env, job, payload`,
   jobDisabled: `select job from job_settings where project_id = $1 and not enabled`,
   jobSettings: `select job, enabled from job_settings where project_id = $1`,
-  jobRuns: `select id, job, trigger, status, error, started_at as "startedAt", finished_at as "finishedAt" from job_runs where project_id = $1 order by id desc limit 50`,
-  jobTimers: `select id, job, env, run_at as "runAt", status from job_timers where project_id = $1 and status = 'pending' order by run_at`,
+  jobRuns: `select id, job, env, trigger, status, error, started_at as "startedAt", finished_at as "finishedAt" from job_runs
+    where project_id = $1 and ($2::text is null or env = $2 or env is null) order by id desc limit 50`,
+  jobTimers: `select id, job, env, run_at as "runAt", status from job_timers where project_id = $1 and status = 'pending' and ($2::text is null or env = $2) order by run_at`,
   jobSetEnabled: `insert into job_settings (project_id, job, enabled) values ($1, $2, $3) on conflict (project_id, job) do update set enabled = excluded.enabled`,
   jobCancelTimer: `update job_timers set status = 'cancelled' where project_id = $1 and id = $2 and status = 'pending'`,
   jobPublishedProjects: `select id from projects where published_version_id is not null`,
@@ -166,6 +168,6 @@ export function createAuthRepository(db: ProjectDb): AuthRepository {
     })),
   };
 }
-export function schemaRows(projectId: string) {
-  return projectDb(projectId, "preview").query<{ table_name: string; column_name: string; data_type: string; is_nullable: string; column_default: string | null }>(statement("projectSchema"));
+export function schemaRows(projectId: string, env: AppEnv = "preview") {
+  return projectDb(projectId, env).query<{ table_name: string; column_name: string; data_type: string; is_nullable: string; column_default: string | null }>(statement("projectSchema"));
 }

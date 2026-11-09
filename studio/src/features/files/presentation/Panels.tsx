@@ -4,6 +4,7 @@ import { bytes, timeAgo } from "../../../shared/presentation/format.js";
 import type { Project } from "../../../shared/contracts/index.js";
 import { Refresh } from "../../../shared/Icons.js";
 import { Select } from "../../../shared/ui.js";
+import { servicePath, type ServiceEnvironment } from "../../../shared/application/service-environment.js";
 
 export function useLoad<T>(path: string, deps: unknown[] = []) {
   const [data, setData] = useState<T | null>(null);
@@ -154,9 +155,9 @@ export function CodePanel({ projectId, reloadKey, initialPath = null }: { projec
 
 // --- Users -----------------------------------------------------------------------------
 
-export function UsersPanel({ projectId }: { projectId: string }) {
+export function UsersPanel({ projectId, env = "preview" }: { projectId: string; env?: ServiceEnvironment }) {
   const { data, error, reload } = useLoad<{ users: { id: string; email: string; name: string | null; role: string; hasPassword: boolean; createdAt: string }[] }>(
-    `/projects/${projectId}/users`,
+    servicePath(projectId, "users", env),
   );
   const [query, setQuery] = useState("");
   if (!data) return <Loading error={error} />;
@@ -217,15 +218,16 @@ export function UsersPanel({ projectId }: { projectId: string }) {
 
 // --- Email -------------------------------------------------------------------------------
 
-export function EmailPanel({ project, onChange }: { project: Project; onChange: () => void }) {
+export function EmailPanel({ project, onChange, env = "preview" }: { project: Project; onChange: () => void; env?: ServiceEnvironment }) {
   const { data, reload, error } = useLoad<{
-    emails: { id: number; direction: string; to: string; intendedTo: string | null; from: string; subject: string; html: string; status: string; createdAt: string }[];
-  }>(`/projects/${project.id}/emails`);
+    emails: { id: number; direction: string; env: ServiceEnvironment | null; to: string; intendedTo: string | null; from: string; subject: string; html: string; status: string; createdAt: string }[];
+  }>(servicePath(project.id, "emails", env));
   const [domain, setDomain] = useState(project.emailDomain ?? "");
   const [open, setOpen] = useState<number | null>(null);
   return (
     <div className="stack">
-      <Header title="Correo" hint="Correos que envía y recibe tu app." />
+      <Header title="Correo" hint={`Correos de ${env === "published" ? "producción" : "vista previa"}, incluidos los simulados y los códigos de recuperación. El dominio de envío es compartido.`} />
+      {error && data && <div className="error-box" role="alert">{error}</div>}
       <div className="card stack" style={{ padding: 14 }}>
         <div className="section-title">Dominio de envío</div>
         {!project.emailDomainVerified && (
@@ -255,6 +257,7 @@ export function EmailPanel({ project, onChange }: { project: Project; onChange: 
             {project.emailDomainVerified ? "Marcar sin verificar" : "Marcar verificado"}
           </button>
         </div>
+        <p className="small muted">Sin SMTP, los mensajes quedan registrados aquí. Los registros históricos sin entorno se muestran en ambos entornos.</p>
         <div className="small muted">
           Añade en tu DNS los registros DKIM, SPF y DMARC de tu proveedor SMTP y márcalo como verificado. Entonces los correos enviados desde una dirección
           @{project.emailDomain || "tudominio"} llegan a su destinatario real.
@@ -275,6 +278,7 @@ export function EmailPanel({ project, onChange }: { project: Project; onChange: 
           {data.emails.map((e) => (
             <div key={e.id} style={{ padding: "10px 14px", borderBottom: "1px solid var(--border)", cursor: "pointer" }} onClick={() => setOpen(open === e.id ? null : e.id)}>
               <div className="row">
+                <span className="pill">{e.env === "published" ? "producción" : e.env === "preview" ? "vista previa" : "histórico · sin entorno"}</span>
                 <span className={`pill ${e.direction === "in" ? "accent" : e.status === "failed" ? "err" : e.status === "sent" ? "ok" : ""}`}>
                   {e.direction === "in" ? "recibido" : e.status === "logged" ? "registrado" : e.status === "sent" ? "enviado" : e.status}
                 </span>
@@ -298,19 +302,19 @@ export function EmailPanel({ project, onChange }: { project: Project; onChange: 
 
 // --- Jobs -------------------------------------------------------------------------------
 
-export function JobsPanel({ projectId, reloadKey }: { projectId: string; reloadKey: number }) {
+export function JobsPanel({ projectId, reloadKey, env = "preview" }: { projectId: string; reloadKey: number; env?: ServiceEnvironment }) {
   const { data, reload, error } = useLoad<{
     jobs: { name: string; schedule: string | null; timezone: string | null; enabled: boolean; nextRun: string | null }[];
-    runs: { id: number; job: string; trigger: string; status: string; error: string | null; startedAt: string }[];
+    runs: { id: number; job: string; env: ServiceEnvironment | null; trigger: string; status: string; error: string | null; startedAt: string }[];
     timers: { id: string; job: string; env: string; runAt: string }[];
-  }>(`/projects/${projectId}/jobs`, [reloadKey]);
+  }>(servicePath(projectId, "jobs", env), [reloadKey]);
   const [busy, setBusy] = useState("");
   if (!data) return <Loading error={error} />;
   return (
     <div className="stack">
       <Header
         title="Tareas programadas"
-        hint="Las tareas con horario solo corren en la app publicada, con el código de la última publicación. «Ejecutar ahora» usa el código actual y datos reales."
+        hint={`Las tareas con horario solo corren en producción. «Ejecutar ahora» usa el código y los datos de ${env === "published" ? "la última publicación" : "vista previa"}. La programación es compartida y los cambios se aplican a producción.`}
       />
       {data.jobs.length === 0 ? (
         <div className="card empty">Sin tareas. Pide algo como «cada mañana a las 8 envíame un resumen de pedidos».</div>
@@ -346,8 +350,9 @@ export function JobsPanel({ projectId, reloadKey }: { projectId: string; reloadK
                     className="sm"
                     disabled={!!busy}
                     onClick={async () => {
+                      if (env === "published" && !confirm(`¿Ejecutar ${j.name} en producción con datos reales?`)) return;
                       setBusy(j.name);
-                      await api(`/projects/${projectId}/jobs/${j.name}/run`, { body: {} }).catch((e) => alert(e.message));
+                      await api(servicePath(projectId, `jobs/${j.name}/run`, env), { body: {} }).catch((e) => alert(e.message));
                       setBusy("");
                       void reload();
                     }}
@@ -390,6 +395,7 @@ export function JobsPanel({ projectId, reloadKey }: { projectId: string; reloadK
             {data.runs.map((r) => (
               <tr key={r.id}>
                 <td>{r.job}</td>
+                <td>{r.env === "published" ? "producción" : r.env === "preview" ? "vista previa" : "histórico · sin entorno"}</td>
                 <td>{r.trigger}</td>
                 <td>
                   <span className={`pill ${r.status === "ok" ? "ok" : r.status === "error" ? "err" : "warn"}`}>{r.status}</span>
@@ -530,11 +536,11 @@ export function AiPanel({ project, onChange }: { project: Project; onChange: () 
 
 // --- Logs ------------------------------------------------------------------------------------
 
-export function LogsPanel({ projectId, lines }: { projectId: string; lines: { at: string; env: string; level: string; source: string; message: string }[] }) {
-  const { data, error, reload } = useLoad<{ logs: typeof lines }>(`/projects/${projectId}/logs`);
+export function LogsPanel({ projectId, lines, env: selectedEnv }: { projectId: string; lines: { at: string; env: string; level: string; source: string; message: string }[]; env?: ServiceEnvironment }) {
+  const { data, error, reload } = useLoad<{ logs: typeof lines }>(selectedEnv ? servicePath(projectId, "logs", selectedEnv) : `/projects/${projectId}/logs`);
   const [errorsOnly, setErrorsOnly] = useState(false);
   const [query, setQuery] = useState("");
-  const [env, setEnv] = useState("all");
+  const [env, setEnv] = useState(selectedEnv ?? "all");
   const entries = [...(data?.logs ?? []), ...lines];
   const all = entries.filter((l) => (!errorsOnly || l.level === "error") && (env === "all" || l.env === env) && `${l.source} ${l.message}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()));
   const filtered = errorsOnly || !!query || env !== "all";
@@ -546,8 +552,8 @@ export function LogsPanel({ projectId, lines }: { projectId: string; lines: { at
       {error && <div className="error-box" role="alert">{error}</div>}
       <div className="panel-filters">
         <input type="search" aria-label="Buscar registros" placeholder="Buscar mensaje o fuente…" value={query} onChange={(e) => setQuery(e.target.value)} />
-        <Select label="Entorno de los registros" value={env} onValueChange={setEnv}
-          options={[{ value: "all", label: "Todos los entornos" }, { value: "preview", label: "Vista previa" }, { value: "published", label: "Publicada" }]} />
+        {!selectedEnv && <Select label="Entorno de los registros" value={env} onValueChange={setEnv}
+          options={[{ value: "all", label: "Todos los entornos" }, { value: "preview", label: "Vista previa" }, { value: "published", label: "Publicada" }]} />}
         <label className="row" style={{ color: "var(--text)" }}>
           <input type="checkbox" style={{ width: "auto" }} checked={errorsOnly} onChange={(e) => setErrorsOnly(e.target.checked)} />
           Solo errores
@@ -559,7 +565,7 @@ export function LogsPanel({ projectId, lines }: { projectId: string; lines: { at
         {data && all.length === 0 && <div className="tools-empty">
          <strong>{filtered ? "No hay registros con estos filtros" : "Todavía no hay actividad"}</strong>
          <p>{filtered ? "Prueba con otra búsqueda o muestra todos los entornos." : "Aquí aparecerán las peticiones, tareas y mensajes de tu app."}</p>
-         {filtered && <button className="sm" onClick={() => { setQuery(""); setEnv("all"); setErrorsOnly(false); }}>Limpiar filtros</button>}
+         {filtered && <button className="sm" onClick={() => { setQuery(""); setEnv(selectedEnv ?? "all"); setErrorsOnly(false); }}>Limpiar filtros</button>}
         </div>}
         {all
           .slice(-400)

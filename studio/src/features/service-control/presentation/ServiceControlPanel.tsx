@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ControlledService, ServiceControlSnapshot } from "../../../shared/contracts/api.js";
 import { serviceControlController } from "../application/controller.js";
+import type { ServiceEnvironment } from "../../../shared/application/service-environment.js";
 import "./ServiceControl.css";
 
 type Actions = {
@@ -17,14 +18,14 @@ const STATUS_LABEL: Record<string, string> = { pending: "pendientes", running: "
 const observed = (service: ControlledService) => service.runtime.reduce((n, group) => n + group.replicas.filter((replica) => replica.pid !== null).length, 0);
 const failed = (service: ControlledService) => service.queueCounts.failed ?? 0;
 
-export function ServiceControlPanel({ projectId, reloadKey }: { projectId: string; reloadKey: number }) {
+export function ServiceControlPanel({ projectId, reloadKey, env = "preview" }: { projectId: string; reloadKey: number; env?: ServiceEnvironment }) {
   const [data, setData] = useState<ServiceControlSnapshot | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState("");
   const refresh = useCallback(async () => {
-    try { setData(await serviceControlController.load(projectId)); setError(""); }
+    try { setData(await serviceControlController.load(projectId, env)); setError(""); }
     catch (error) { setError((error as Error).message); }
-  }, [projectId]);
+  }, [projectId, env]);
   useEffect(() => { void refresh(); }, [refresh, reloadKey]);
   const execute = async (service: string, action: () => Promise<unknown>) => {
     setBusy(service);
@@ -35,13 +36,13 @@ export function ServiceControlPanel({ projectId, reloadKey }: { projectId: strin
   return <div className="sc">
     {error && <p role="alert" className="error-box">{error}</p>}
     {!data ? <p>{error ? "No se pudo cargar el centro de control." : "Cargando servicios…"}</p> :
-      <ServiceControlView data={data} busy={busy} onRefresh={() => void refresh()}
+      <ServiceControlView data={data} env={env} busy={busy} onRefresh={() => void refresh()}
         onScale={(service, replicas, maxConcurrency) => execute(service, () => serviceControlController.scale(projectId, service, { replicas, maxConcurrency }))}
         onRestart={(service, env) => execute(service, () => serviceControlController.restart(projectId, service, env))} />}
   </div>;
 }
 
-export function ServiceControlView({ data, ...actions }: Actions & { data: ServiceControlSnapshot }) {
+export function ServiceControlView({ data, env, ...actions }: Actions & { data: ServiceControlSnapshot; env?: ServiceEnvironment }) {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
   const stats = useMemo(() => ({
@@ -90,7 +91,7 @@ export function ServiceControlView({ data, ...actions }: Actions & { data: Servi
       <div><strong>{data.runtime.available ? "Runtime de aplicaciones disponible" : "Runtime no disponible"}</strong>
         {data.runtime.error && <p>{data.runtime.error}</p>}
         <p className="muted">Los procesos observados pertenecen solo al runtime de aplicaciones. Métricas de procesos de workers remotos no disponibles; esto no indica su salud.</p>
-        <p className="muted">{data.queueScope}. Los contadores incluyen preview y publicada.</p></div>
+        <p className="muted">{data.queueScope}. {env ? `Contadores de ${env === "published" ? "producción" : "vista previa"}.` : "Los contadores incluyen preview y publicada."}</p></div>
     </div>
 
     {data.services.length > 4 && <div className="sc-tools" role="search">
@@ -99,16 +100,16 @@ export function ServiceControlView({ data, ...actions }: Actions & { data: Servi
     </div>}
 
     <div className="sc-list">
-      {visible.map((service) => <ServiceCard key={`${service.name}:${service.desired.replicas}:${service.desired.maxConcurrency}`} service={service} runtimeAvailable={data.runtime.available} {...actions} />)}
+      {visible.map((service) => <ServiceCard key={`${env}:${service.name}:${service.desired.replicas}:${service.desired.maxConcurrency}`} service={service} environment={env} runtimeAvailable={data.runtime.available} {...actions} />)}
     </div>
     {!visible.length && <p className="card sc-empty">Ningún servicio coincide con el filtro.</p>}
   </div>;
 }
 
-function ServiceCard({ service, runtimeAvailable, ...actions }: Actions & { service: ControlledService; runtimeAvailable: boolean }) {
+function ServiceCard({ service, environment, runtimeAvailable, ...actions }: Actions & { service: ControlledService; environment?: ServiceEnvironment; runtimeAvailable: boolean }) {
   const [replicas, setReplicas] = useState(service.desired.replicas);
   const [concurrency, setConcurrency] = useState(service.desired.maxConcurrency ?? 1);
-  const [env, setEnv] = useState<"preview" | "published">("preview");
+  const [env, setEnv] = useState<"preview" | "published">(environment ?? "preview");
   const [confirm, setConfirm] = useState(false);
   const total = observed(service);
   const entries = service.endpoints.length + service.jobs.length;
@@ -128,7 +129,7 @@ function ServiceCard({ service, runtimeAvailable, ...actions }: Actions & { serv
       {entries ? <details><summary>{service.endpoints.length} endpoints · {service.jobs.length} jobs</summary>
         <ul>{[...service.endpoints, ...service.jobs].map((file) => <li key={file}><code>{file}</code></li>)}</ul></details> : <p className="muted">Sin entradas asignadas.</p>}</div>
 
-    <div className="sc-section"><strong>Configuración deseada (preview)</strong>
+    <div className="sc-section"><strong>{environment === "published" ? "Configuración publicada (producción)" : "Configuración deseada (preview)"}</strong>
       <p>{service.desired.replicas} réplicas · concurrencia por réplica: {service.desired.maxConcurrency ?? "sin límite (compatibilidad)"}</p>
       {service.scalable && <form className="sc-scale" onSubmit={(event) => { event.preventDefault(); void actions.onScale(service.name, replicas, concurrency); }}>
         <label>Réplicas (1–8) <input aria-label={`Réplicas ${service.name}`} type="number" min={1} max={8} step={1} required value={replicas} onChange={(event) => setReplicas(event.currentTarget.valueAsNumber)} /></label>

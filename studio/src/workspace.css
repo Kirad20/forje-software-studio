@@ -331,8 +331,11 @@ button.step:disabled { opacity: 1; cursor: default; }
 .svc-detail { overflow: auto; min-height: 0; }
 .svc-detail.pad { padding: 22px 26px; }
 .svc-icon { display: grid; place-items: center; width: 16px; flex: none; opacity: 0.85; }
-.svc-workspace { display: grid; grid-template-rows: auto minmax(0, 1fr); min-width: 0; min-height: 0; }
-.svc-workspace:not(:has(.svc-context)) { grid-template-rows: minmax(0, 1fr); }
+.svc-workspace { display: grid; grid-template-rows: auto auto minmax(0, 1fr); min-width: 0; min-height: 0; }
+.svc-workspace:not(:has(.svc-context)) { grid-template-rows: auto minmax(0, 1fr); }
+.svc-environment { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 12px 18px; border-bottom: 1px solid var(--border); }
+.svc-environment label { flex-shrink: 0; }
+.svc-environment > .small { flex: 1 1 280px; }
 .svc-context { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 12px 20px; border-bottom: 1px solid var(--border); background: var(--surface); }
 .svc-context h2 { font-size: 18px; margin: 4px 0 2px; }
 .svc-context p { margin: 0; color: var(--muted); font-size: 12.5px; }

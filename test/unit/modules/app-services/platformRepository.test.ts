@@ -25,6 +25,7 @@ it("runs production email, secrets, storage, analytics and jobs SQL through inje
       create table job_settings (project_id text, job text, enabled boolean, primary key(project_id, job));
     `);
     await pg.exec(readFileSync(new URL("../../../../server/shared/database/migrations/007_job_queue.sql", import.meta.url), "utf8"));
+    await pg.exec(readFileSync(new URL("../../../../server/shared/database/migrations/015_service_environments.sql", import.meta.url), "utf8"));
     const repository = createQueryRepository({
       q: async (sql, params = []) => (await pg.query(sql, params)).rows as never,
       one: async (sql, params = []) => (await pg.query(sql, params)).rows[0] as never,
@@ -35,6 +36,12 @@ it("runs production email, secrets, storage, analytics and jobs SQL through inje
     expect(await email.listEmails("p")).toEqual([expect.objectContaining({ to: "owner@example.com", intendedTo: "user@example.com", status: "logged" })]);
     await email.receiveEmail("p", { from: "user@example.com", to: "owner@example.com", subject: "Reply", html: "Reply" });
     expect(await email.listEmails("p")).toHaveLength(2);
+    await email.sendEmail("p", { to: "owner@example.com", subject: "Preview", html: "Preview only" }, "preview");
+    await pg.query("insert into emails (project_id, subject) values ('p', 'Legacy')");
+    expect((await email.listEmails("p", "published")).map((row) => row.subject)).toEqual(["Legacy", "Reply", "[para: user@example.com] Subject"]);
+    expect((await email.listEmails("p", "preview")).map((row) => row.subject)).toEqual(["Legacy", "Preview"]);
+    expect(log).toHaveBeenCalledWith("p", expect.objectContaining({ env: "published", source: "email" }));
+    expect(log).toHaveBeenCalledWith("p", expect.objectContaining({ env: "preview", source: "email" }));
 
     const secrets = createSecrets({ ...repository, encrypt: (value) => `enc:${value}`, decrypt: (value) => value.slice(4),
       integrationEnv: async () => ({ KEY: "integration" }), onDecryptError: vi.fn() });
@@ -78,6 +85,9 @@ it("runs production email, secrets, storage, analytics and jobs SQL through inje
     expect((await jobs.listJobs("p")).timers).toHaveLength(0);
     await jobs.runJob("p", "preview", "task", null, "background");
     expect((await jobs.listJobs("p")).runs).toEqual([expect.objectContaining({ status: "ok", job: "task" })]);
+    await jobs.runJob("p", "published", "task", null, "manual");
+    expect((await jobs.listJobs("p", "published")).runs).toEqual([expect.objectContaining({ status: "ok", env: "published" })]);
+    expect((await jobs.listJobs("p", "preview")).runs).toEqual([expect.objectContaining({ status: "ok", env: "preview" })]);
     await jobs.stopJobRunner();
   } finally {
     await pg.close();

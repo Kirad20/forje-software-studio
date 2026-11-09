@@ -21,6 +21,9 @@ import {
   closeAll,
   projectDb,
 } from "../../../../server/modules/app-services/infrastructure/projectDb.js";
+import { createProjectRows } from "../../../../server/modules/app-services/application/projectData.js";
+import { createProjectRowsRepository } from "../../../../server/modules/app-services/infrastructure/projectRows.js";
+import { schemaRows } from "../../../../server/modules/app-services/infrastructure/repositories.js";
 
 afterEach(async () => {
   await closeAll();
@@ -64,6 +67,7 @@ it("publishes only unapplied migrations without copying preview rows", async () 
   await expect(applyProjectMigrations(id, migrations, "published")).resolves.toEqual({
     applied: ["migrations/20260101000000002_add_archived.sql"],
   });
+
   await expect(projectDb(id, "published").query("select id, value, archived from notes order by id")).resolves.toEqual([
     { id: 1, value: "production", archived: false },
   ]);
@@ -120,3 +124,29 @@ it("rejects schema changes through ordinary runtime database SQL", async () => {
   expect(() => db.exec("select '\\'; create table untracked (id int); --'")).toThrow(/execute_sql/);
   await expect(db.one("select E'it\\'s valid' as value")).resolves.toEqual({ value: "it's valid" });
 });
+
+it("routes service schema, users and all row operations to the selected isolated database", async () => {
+  const id = "service-panel";
+  await applyProjectMigrations(id, {
+    "migrations/001_items.sql": "create table items (id int primary key, name text);",
+  }, "published");
+  await projectDb(id, "published").query("insert into items values (1, 'production')");
+  await projectDb(id, "published").query("insert into _forja_users (id, email) values ('prod', 'prod@example.test')");
+  await projectDb(id, "preview").query("update items set name='preview'");
+  await projectDb(id, "preview").query("delete from _forja_users");
+  await projectDb(id, "preview").query("insert into _forja_users (id, email) values ('prev', 'prev@example.test')");
+  await applyProjectMigrations(id, {
+    "migrations/001_items.sql": "create table items (id int primary key, name text);",
+    "migrations/002_draft.sql": "create table draft_only (id int);",
+  }, "preview");
+  const api = createProjectRows(schemaRows, createProjectRowsRepository(projectDb, vi.fn()));
+  expect((await api.listProjectRows(id, { table: "items" }, "published")).rows).toEqual([{ id: 1, name: "production" }]);
+  expect((await api.listProjectRows(id, { table: "items" }, "preview")).rows).toEqual([{ id: 1, name: "preview" }]);
+  expect(await api.listAppUsers(id, "published")).toEqual([expect.objectContaining({ id: "prod" })]);
+  expect(await api.listAppUsers(id, "preview")).toEqual([expect.objectContaining({ id: "prev" })]);
+  await expect(api.listProjectRows(id, { table: "draft_only" }, "published")).rejects.toMatchObject({ status: 404 });
+  await api.createProjectRow(id, "items", { id: 2, name: "live" }, "published");
+  await api.deleteProjectRows(id, "items", [1], "published");
+  expect((await api.listProjectRows(id, { table: "items" }, "published")).rows).toEqual([{ id: 2, name: "live" }]);
+  expect((await api.listProjectRows(id, { table: "items" }, "preview")).rows).toEqual([{ id: 1, name: "preview" }]);
+}, 120_000);

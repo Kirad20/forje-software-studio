@@ -219,15 +219,20 @@ describe("app service capability boundaries", () => {
 
   it("binds endpoint and job contexts to the requested database environment", async () => {
     const projectDb = vi.fn(() => ({ query: vi.fn(), one: vi.fn(), exec: vi.fn(), transaction: vi.fn() }));
+    const sendEmail = vi.fn();
     const api = createContext({
       secretEnv: async () => ({}), projectDb, log: vi.fn(),
       cacheRepository: () => ({ get: async () => undefined, set: async () => {}, delete: async () => {} }),
       paymentsFor: vi.fn(), putObject: vi.fn(), getObject: vi.fn(), deleteObject: vi.fn(),
-      listObjects: vi.fn(), sendEmail: vi.fn(), appAiChat: vi.fn(), publish: vi.fn(),
+      listObjects: vi.fn(), sendEmail, appAiChat: vi.fn(), publish: vi.fn(),
     });
-    await api.serviceContext("p", "preview", "https://preview", "endpoint");
-    await api.serviceContext("p", "published", "https://app", "job");
+    const preview = await api.serviceContext("p", "preview", "https://preview", "endpoint");
+    const published = await api.serviceContext("p", "published", "https://app", "job");
+    const input = { to: "user@example.test", subject: "Subject", html: "Body" };
+    await preview.email.send(input);
+    await published.email.send(input);
     expect(projectDb.mock.calls).toEqual([["p", "preview"], ["p", "published"]]);
+    expect(sendEmail.mock.calls).toEqual([["p", input, "preview"], ["p", input, "published"]]);
   });
 
   it("requires explicit jobs binding and reports background failure without blocking requests", async () => {

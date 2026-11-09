@@ -37,4 +37,15 @@ describe("Service control center rendering", () => {
     }} />);
     expect(html).toContain("Sin procesos observados");
   });
+  it("labels production configuration without offering preview scaling", () => {
+    const html = renderToStaticMarkup(<ServiceControlView env="published" busy="" onRefresh={() => {}} onScale={async () => {}} onRestart={async () => {}} data={{
+      manifest: true, queueScope: "Últimas 100 tareas", runtime: { available: true, scope: "app-runtime", services: [] },
+      services: [{ name: "live", kind: "worker", endpoints: [], jobs: ["jobs/live.ts"], scalable: false,
+        desired: { replicas: 3, maxConcurrency: 1 }, runtime: [], queueCounts: {}, queue: [], lastFailure: null }],
+    }} />);
+    expect(html).toContain("Configuración publicada (producción)");
+    expect(html).toContain("Contadores de producción");
+    expect(html).not.toContain("Guardar escala");
+    expect(html).toContain('value="published" selected=""');
+  });
 });

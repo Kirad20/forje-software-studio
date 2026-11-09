@@ -37,6 +37,15 @@ describe("project observation", () => {
     await service.stopProblems(); await service.stopProblems();
     expect(projectEvents.listenerCount("p")).toBe(0);
   });
+  it("filters by environment before limiting so preview traffic does not hide production logs", () => {
+    const { logRepository } = createEventAdapters();
+    const service = createLogService(logRepository, vi.fn(), () => "now");
+    service.log("p", { env: "published", level: "error", source: "email", message: "Production reset" });
+    for (let i = 0; i < 10; i++) service.log("p", { env: "preview", level: "info", source: "request", message: "Preview" });
+    expect(service.readLogs("p", { env: "published", limit: 1 })).toEqual([
+      expect.objectContaining({ env: "published", message: "Production reset" }),
+    ]);
+  });
   it("deep scan admission preserves atomic repository ownership and ignores findings across both scan types", async () => {
     const finding: Finding = { id: "f", rule: "r", severity: "high", title: "bad", detail: "detail", fix: "fix", source: "quick" };
     const repository = { scans: vi.fn(async () => [{ kind: "quick" as const, status: "done" as const, findings: [finding], summary: "", scanned_at: "2026-01-01" }]), ignored: vi.fn(async () => ["f"]), save: vi.fn(), startDeep: vi.fn(async () => false), setIgnored: vi.fn() };

@@ -90,7 +90,7 @@ async function serviceContext(projectId: string, env: AppEnv, base: string, sour
       list: () => listObjects(projectId),
       url: (key) => `${base}/_baas/storage/files/${encodeURIComponent(key)}`,
     },
-    email: { send: (input) => sendEmail(projectId, input) },
+    email: { send: (input) => sendEmail(projectId, input, env) },
     ai: { chat: (input) => appAiChat(projectId, input) },
     jobs: {
       enqueue: (name, payload) => {
