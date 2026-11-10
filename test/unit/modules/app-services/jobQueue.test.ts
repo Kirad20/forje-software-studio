@@ -9,6 +9,10 @@ import { createJobs } from "../../../../server/modules/app-services/application/
 
 const database = await freshDatabase();
 const pool = new pg.Pool({ connectionString: database.url });
+const disconnected: Promise<void>[] = [];
+pool.on("connect", (client) => {
+  disconnected.push(new Promise<void>((resolve) => { client.once("end", resolve); }));
+});
 const repository = createQueryRepository({
   q: async (sql, params) => (await pool.query(sql, params)).rows,
   one: async (sql, params) => (await pool.query(sql, params)).rows[0],
@@ -33,7 +37,12 @@ beforeEach(async () => {
   await pool.query("truncate job_queue, job_queue_capacity, job_timers");
   ports.log.mockClear();
 });
-afterAll(async () => { await pool.end(); await database.drop(); });
+afterAll(async () => {
+  await pool.end();
+  // pg-pool can resolve end() before its client sockets finish disconnecting.
+  await Promise.all(disconnected);
+  await database.drop();
+});
 
 describe("durable jobs on real PostgreSQL", () => {
   it("scopes atomic claims to one generated project's selected services before limiting", async () => {
