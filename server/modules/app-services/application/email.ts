@@ -13,9 +13,8 @@ export interface EmailInput {
 export function createEmail({ one, q, log, getTransport, emailFrom }: EmailPorts) {
 
 /**
- * Sends one email from an app. Until the project has a verified sending domain and the
- * From address uses it, mail addressed to anyone but the owner is delivered to the owner
- * instead, with the intended recipient in the subject — testing never reaches real users.
+ * A verified domain supplies the default sender. Unverified or foreign senders redirect
+ * mail to the owner, with the intended recipient in the subject.
  */
 async function sendEmail(projectId: string, input: EmailInput, env: AppEnv = "published") {
   const project = await one<{ owner_email: string; name: string; email_domain: string | null; email_domain_verified: boolean }>(
@@ -24,8 +23,9 @@ async function sendEmail(projectId: string, input: EmailInput, env: AppEnv = "pu
   );
   if (!project) throw new Error("Proyecto no encontrado");
 
-  const domainOk = verifiedSender(project, input.from);
-  const from = domainOk ? input.from! : `${input.from && !input.from.includes("@") ? input.from : project.name} <${emailFrom()}>`;
+  const sender = input.from ?? (project.email_domain_verified && project.email_domain ? `${project.name} <noreply@${project.email_domain}>` : undefined);
+  const domainOk = verifiedSender(project, sender);
+  const from = domainOk ? sender! : `${input.from && !input.from.includes("@") ? input.from : project.name} <${emailFrom()}>`;
 
   const recipients = Array.isArray(input.to) ? input.to : [input.to];
   const results = [];

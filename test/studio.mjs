@@ -554,6 +554,80 @@ async function main() {
     }
   });
 
+  await step("usuarios: crear cuentas y cambiar contraseñas respeta entorno, errores y permisos", async () => {
+    const sandbox = await context.newPage();
+    const users = { preview: [], published: [] };
+    const writes = [];
+    let owner = true;
+    let rejectPassword = true;
+    await sandbox.route(/\/api\/projects\/[^/?]+$/, async (route) => {
+      const response = await route.fetch();
+      const data = await response.json();
+      await route.fulfill({ response, json: { ...data, project: { ...data.project, slug: "users-regression", access: owner ? "owner" : "editor" } } });
+    });
+    await sandbox.route(/\/api\/projects\/[^/]+\/users(?:\/[^/]+\/password)?\?env=(preview|published)$/, async (route) => {
+      const request = route.request();
+      const env = new URL(request.url()).searchParams.get("env");
+      if (request.method() === "GET") return route.fulfill({ json: { users: users[env] } });
+      const body = request.postDataJSON();
+      writes.push({ env, method: request.method(), body });
+      if (request.method() === "POST") {
+        const user = { id: `${env}-member`, email: body.email, name: body.name ?? null, role: "user", hasPassword: true, createdAt: new Date().toISOString() };
+        users[env].push(user);
+        return route.fulfill({ status: 201, json: { user } });
+      }
+      if (rejectPassword) {
+        rejectPassword = false;
+        return route.fulfill({ status: 400, json: { error: "No se pudo actualizar la contraseña." } });
+      }
+      return route.fulfill({ json: { user: users[env][0] } });
+    });
+    try {
+      await sandbox.goto(projectUrl);
+      await sandbox.getByRole("button", { name: "Servicios", exact: true }).click();
+      await sandbox.getByRole("navigation", { name: "Herramientas del proyecto" }).getByRole("button", { name: "Usuarios", exact: true }).click();
+      for (const env of ["preview", "published"]) {
+        await sandbox.getByLabel("Entorno de servicios").selectOption(env);
+        await sandbox.getByRole("button", { name: "Crear usuario", exact: true }).click();
+        const dialog = sandbox.getByRole("dialog");
+        await dialog.getByText(env === "published" ? /cuenta real de producción/ : /Solo se modificará vista previa/).waitFor();
+        await dialog.getByLabel("Correo electrónico").fill(`${env}@example.test`);
+        await dialog.getByLabel("Nombre (opcional)").fill("Nuevo usuario");
+        await dialog.getByLabel("Nueva contraseña").fill("short");
+        assert(await dialog.getByRole("button", { name: "Crear usuario", exact: true }).isDisabled(), "se aceptó una contraseña débil");
+        await dialog.getByLabel("Nueva contraseña").fill(`${env}-initial-password`);
+        await dialog.getByRole("button", { name: "Crear usuario", exact: true }).click();
+        await sandbox.getByRole("cell", { name: `${env}@example.test`, exact: true }).waitFor();
+        assert(await dialog.count() === 0, "crear usuario no cerró el formulario");
+        await sandbox.getByRole("button", { name: `Cambiar contraseña de ${env}@example.test`, exact: true }).click();
+        assert(await dialog.getByLabel("Correo electrónico").getAttribute("readonly") !== null, "el cambio de contraseña permite modificar el correo");
+        assert(await dialog.getByLabel("Nueva contraseña").inputValue() === "", "se conservó la contraseña anterior en el formulario");
+        if (env === "published") {
+          await sandbox.setViewportSize({ width: 320, height: 740 });
+          assert(await sandbox.evaluate(() => document.documentElement.scrollWidth) <= 321, "la administración de usuarios desborda en móvil");
+        }
+        await dialog.getByLabel("Nueva contraseña").fill(`${env}-replacement-password`);
+        await dialog.getByRole("button", { name: "Guardar contraseña" }).click();
+        if (env === "preview") {
+          await dialog.getByRole("alert").filter({ hasText: "No se pudo actualizar la contraseña." }).waitFor();
+          await dialog.getByRole("button", { name: "Guardar contraseña" }).click();
+        }
+        await sandbox.getByRole("status").filter({ hasText: "Contraseña actualizada." }).waitFor();
+        assert(await sandbox.locator('input[type="password"]').count() === 0, "la contraseña quedó visible después de guardar");
+      }
+      assert(writes.length === 5 && writes.filter((w) => w.env === "preview").length === 3 && writes.filter((w) => w.env === "published").length === 2, "se cruzaron las operaciones entre entornos");
+      await screenshot(sandbox, "builder-users-management-mobile");
+      owner = false;
+      await sandbox.reload();
+      await sandbox.getByRole("button", { name: "Servicios", exact: true }).click();
+      await sandbox.getByRole("navigation", { name: "Herramientas del proyecto" }).getByRole("button", { name: "Usuarios", exact: true }).click();
+      await sandbox.getByText("Solo la persona dueña del proyecto puede crear usuarios o cambiar contraseñas.").waitFor();
+      assert(await sandbox.getByRole("button", { name: "Crear usuario", exact: true }).count() === 0, "un colaborador ve controles de administración");
+    } finally {
+      await sandbox.close();
+    }
+  });
+
   await step("tema: elegir Oscuro persiste tras recargar", async () => {
     await page.goto("/");
     await page.locator("aside.sidebar .account-mini button").first().click();

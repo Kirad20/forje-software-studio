@@ -12,6 +12,7 @@ function fixture() {
     checkProject: vi.fn(async () => []),
     scan: vi.fn(async () => []),
     applyMigrations: vi.fn(async () => ({ applied: [] })),
+    ensureOwner: vi.fn(async () => {}),
     recordPublish: vi.fn(async (_id, slug, snapshot) => { live.slug = slug; live.files = snapshot as typeof live.files; }),
     unpublish: vi.fn(async () => {}),
     scheduleProject: vi.fn(async () => {}),
@@ -29,6 +30,7 @@ describe("publication application", () => {
     expect(ports.recordPublish).not.toHaveBeenCalled();
     expect(ports.scheduleProject).not.toHaveBeenCalled();
     expect(ports.applyMigrations).not.toHaveBeenCalled();
+    expect(ports.ensureOwner).not.toHaveBeenCalled();
     expect(ports.scan).not.toHaveBeenCalled();
   });
 
@@ -48,7 +50,9 @@ describe("publication application", () => {
     expect(live).toEqual({ slug: "nueva-app", files });
     expect(ports.recordPublish).toHaveBeenCalledWith("p", "nueva-app", files, "builder");
     expect(ports.applyMigrations).toHaveBeenCalledWith("p", files);
-    expect(vi.mocked(ports.applyMigrations).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(ports.recordPublish).mock.invocationCallOrder[0]!);
+    expect(ports.ensureOwner).toHaveBeenCalledWith("p");
+    expect(vi.mocked(ports.applyMigrations).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(ports.ensureOwner).mock.invocationCallOrder[0]!);
+    expect(vi.mocked(ports.ensureOwner).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(ports.recordPublish).mock.invocationCallOrder[0]!);
     expect(vi.mocked(ports.recordPublish).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(ports.scheduleProject).mock.invocationCallOrder[0]!);
   });
 
@@ -84,6 +88,15 @@ describe("publication application", () => {
     releaseFirst();
     await Promise.all([first, second]);
     expect(ports.applyMigrations).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not publish an app without its default owner account when initialization fails", async () => {
+    const { ports, runtime, live } = fixture();
+    vi.mocked(ports.ensureOwner).mockRejectedValueOnce(new Error("Owner initialization failed"));
+    await expect(runtime.publishProject("p", "replacement")).rejects.toThrow("Owner initialization failed");
+    expect(live.slug).toBe("live-app");
+    expect(ports.recordPublish).not.toHaveBeenCalled();
+    expect(ports.scheduleProject).not.toHaveBeenCalled();
   });
 
   it("withdraws the snapshot before rescheduling jobs", async () => {

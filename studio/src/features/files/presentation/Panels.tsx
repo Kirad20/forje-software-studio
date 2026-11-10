@@ -3,7 +3,7 @@ import { api } from "../application/controller.js";
 import { bytes, timeAgo } from "../../../shared/presentation/format.js";
 import type { Project } from "../../../shared/contracts/index.js";
 import { Refresh } from "../../../shared/Icons.js";
-import { Select } from "../../../shared/ui.js";
+import { Modal, Select } from "../../../shared/ui.js";
 import { servicePath, type ServiceEnvironment } from "../../../shared/application/service-environment.js";
 
 export function useLoad<T>(path: string, deps: unknown[] = []) {
@@ -155,22 +155,48 @@ export function CodePanel({ projectId, reloadKey, initialPath = null }: { projec
 
 // --- Users -----------------------------------------------------------------------------
 
-export function UsersPanel({ projectId, env = "preview" }: { projectId: string; env?: ServiceEnvironment }) {
+export function UsersPanel({ projectId, env = "preview", canManage }: { projectId: string; env?: ServiceEnvironment; canManage: boolean }) {
   const { data, error, reload } = useLoad<{ users: { id: string; email: string; name: string | null; role: string; hasPassword: boolean; createdAt: string }[] }>(
     servicePath(projectId, "users", env),
   );
   const [query, setQuery] = useState("");
+  const [editing, setEditing] = useState<{ id: string; email: string } | "create" | null>(null);
+  const [email, setEmail] = useState("");
+  const [name, setName] = useState("");
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [saveError, setSaveError] = useState("");
+  const [notice, setNotice] = useState("");
+  const closeEditor = () => {
+    if (busy) return;
+    setEditing(null);
+    setPassword("");
+    setSaveError("");
+  };
+  const openEditor = (user?: { id: string; email: string }) => {
+    setEditing(user ?? "create");
+    setEmail(user?.email ?? "");
+    setName("");
+    setPassword("");
+    setSaveError("");
+    setNotice("");
+  };
   if (!data) return <Loading error={error} />;
   const visible = data.users.filter((u) => `${u.email} ${u.name ?? ""} ${u.role}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()));
   return (
     <div className="stack">
       <Header
         title="Usuarios de la app"
-        hint="Cuentas de las personas que usan tu app. Viven en la base de datos del proyecto, separadas de tu cuenta de Forja."
+        hint="Cuentas separadas de tu cuenta de Forja y del otro entorno. La cuenta propietaria se crea como administradora sin contraseña: fíjala aquí o usa la recuperación de la app."
       >
-        <button className="sm" onClick={reload}><Refresh /> Actualizar</button>
+        <div className="row" style={{ flexWrap: "wrap" }}>
+          {canManage && <button className="primary sm" onClick={() => openEditor()}>Crear usuario</button>}
+          <button className="sm" onClick={reload}><Refresh /> Actualizar</button>
+        </div>
       </Header>
       {error && <div className="error-box" role="alert">{error}</div>}
+      {notice && <p className="small" role="status">{notice}</p>}
+      {!canManage && <p className="small muted">Solo la persona dueña del proyecto puede crear usuarios o cambiar contraseñas.</p>}
       <div className="tools-summary">
         <div><strong>{data.users.length}</strong><span>Usuarios registrados</span></div>
         <div><strong>{data.users.filter((u) => u.role === "admin").length}</strong><span>Administradores</span></div>
@@ -183,7 +209,7 @@ export function UsersPanel({ projectId, env = "preview" }: { projectId: string; 
         </div>
       )}
       {data.users.length === 0 ? (
-        <div className="card empty">Nadie se ha registrado todavía. Pide al constructor «añade inicio de sesión».</div>
+        <div className="card empty">No hay usuarios en este entorno.</div>
       ) : visible.length === 0 ? (
         <div className="tools-empty"><strong>No hay usuarios que coincidan</strong><p>Prueba con otro nombre, correo o rol.</p><button className="sm" onClick={() => setQuery("")}>Limpiar búsqueda</button></div>
       ) : (
@@ -196,6 +222,7 @@ export function UsersPanel({ projectId, env = "preview" }: { projectId: string; 
               <th>Rol</th>
               <th>Contraseña</th>
               <th>Alta</th>
+              {canManage && <th>Acciones</th>}
             </tr>
           </thead>
           <tbody>
@@ -206,11 +233,64 @@ export function UsersPanel({ projectId, env = "preview" }: { projectId: string; 
                 <td>{u.role === "admin" ? <span className="pill accent">admin</span> : u.role}</td>
                 <td>{u.hasPassword ? "sí" : <span className="pill warn">sin fijar</span>}</td>
                 <td>{timeAgo(u.createdAt)}</td>
+                {canManage && <td><button className="sm" aria-label={`Cambiar contraseña de ${u.email}`} onClick={() => openEditor(u)}>{u.hasPassword ? "Cambiar contraseña" : "Fijar contraseña"}</button></td>}
               </tr>
             ))}
           </tbody>
         </table>
         </div>
+      )}
+      {editing && (
+        <Modal onClose={closeEditor}>
+          <form
+            className="stack"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="app-user-title"
+            onSubmit={async (event) => {
+              event.preventDefault();
+              if (busy) return;
+              setBusy(true);
+              setSaveError("");
+              try {
+                if (editing === "create") {
+                  await api(servicePath(projectId, "users", env), { method: "POST", body: { email, password, name: name.trim() || undefined } });
+                } else {
+                  await api(servicePath(projectId, `users/${encodeURIComponent(editing.id)}/password`, env), { method: "PATCH", body: { password } });
+                }
+                setNotice(editing === "create" ? `Usuario creado en ${env === "published" ? "producción" : "vista previa"}.` : "Contraseña actualizada. Se cerraron las sesiones anteriores de este usuario.");
+                setPassword("");
+                setEditing(null);
+                setQuery("");
+                await reload();
+              } catch (e) {
+                setSaveError(e instanceof Error ? e.message : "No se pudieron guardar las credenciales.");
+              } finally {
+                setBusy(false);
+              }
+            }}
+          >
+            <h3 id="app-user-title">{editing === "create" ? "Crear usuario" : "Cambiar contraseña"}</h3>
+            <p className={env === "published" ? "small pill warn" : "small muted"}>
+              {env === "published" ? "Modificarás una cuenta real de producción." : "Solo se modificará vista previa."} {editing !== "create" && "Se cerrarán sus sesiones y se invalidarán sus códigos de recuperación."}
+            </p>
+            <label className="stack">Correo electrónico
+              <input type="email" autoComplete="off" autoFocus={editing === "create"} required value={email} readOnly={editing !== "create"} disabled={busy} onChange={(e) => setEmail(e.target.value)} />
+            </label>
+            {editing === "create" && <label className="stack">Nombre (opcional)
+              <input autoComplete="off" value={name} disabled={busy} onChange={(e) => setName(e.target.value)} />
+            </label>}
+            <label className="stack">Nueva contraseña
+              <input type="password" autoComplete="new-password" autoFocus={editing !== "create"} required minLength={8} value={password} disabled={busy} onChange={(e) => setPassword(e.target.value)} />
+              <span className="small muted">Al menos 8 caracteres. No se puede consultar después de guardarla.</span>
+            </label>
+            {saveError && <div className="error-box" role="alert">{saveError}</div>}
+            <div className="row" style={{ justifyContent: "flex-end", flexWrap: "wrap" }}>
+              <button type="button" disabled={busy} onClick={closeEditor}>Cancelar</button>
+              <button className="primary" type="submit" disabled={busy || password.length < 8}>{busy ? "Guardando…" : editing === "create" ? "Crear usuario" : "Guardar contraseña"}</button>
+            </div>
+          </form>
+        </Modal>
       )}
     </div>
   );
@@ -257,7 +337,7 @@ export function EmailPanel({ project, onChange, env = "preview" }: { project: Pr
             {project.emailDomainVerified ? "Marcar sin verificar" : "Marcar verificado"}
           </button>
         </div>
-        <p className="small muted">Sin SMTP, los mensajes quedan registrados aquí. Los registros históricos sin entorno se muestran en ambos entornos.</p>
+        <p className="small muted">Sin SMTP, los mensajes quedan registrados aquí. La recuperación solo genera correo si la cuenta existe en este entorno; revisa Usuarios. Las solicitudes omitidas se explican en Registros. Los registros históricos sin entorno se muestran en ambos entornos.</p>
         <div className="small muted">
           Añade en tu DNS los registros DKIM, SPF y DMARC de tu proveedor SMTP y márcalo como verificado. Entonces los correos enviados desde una dirección
           @{project.emailDomain || "tudominio"} llegan a su destinatario real.

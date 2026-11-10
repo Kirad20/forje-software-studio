@@ -1,6 +1,7 @@
 import { Hono, type Context } from "hono";
 import { getCookie, setCookie, deleteCookie } from "hono/cookie";
 import { aiUsage } from "../../modules/app-services/ai.js";
+import { AuthError, createAppUser, ensureProjectOwner, updateAppUserPassword } from "../../modules/app-services/auth.js";
 import { listEmails, receiveEmail, sendEmail } from "../../modules/app-services/email.js";
 import { cancelTimer, listJobs, runJob, scheduleProject, setJobEnabled } from "../../modules/app-services/jobs.js";
 import {
@@ -94,6 +95,7 @@ const studioApi = new Hono<Env>();
 const publicRoutes = new Hono<Env>();
 
 studioApi.onError((err, c) => {
+  if (err instanceof AuthError) return c.json({ error: err.message }, err.status);
   if (err instanceof RateLimitError) return c.json({ error: err.message }, 429, { "retry-after": String(err.retryAfterSec) });
   if (err instanceof RateLimitStoreError) return c.json({ error: err.message }, 503);
   if (err instanceof github.GithubError) return c.json({ error: err.message }, ([400, 401, 403, 404, 409, 413, 422].includes(err.status) ? err.status : 502) as 400);
@@ -1050,7 +1052,36 @@ projectRoutes.get("/projects/:id/db/export", async (c) => {
 projectRoutes.get("/projects/:id/db/metrics", async (c) => c.json(await projectDbMetrics(pid(c), serviceEnv(c))));
 
 // App users
-projectRoutes.get("/projects/:id/users", async (c) => c.json({ users: await listAppUsers(pid(c), serviceEnv(c)) }));
+projectRoutes.get("/projects/:id/users", async (c) => {
+  const env = serviceEnv(c);
+  await ensureProjectOwner(pid(c), env);
+  return c.json({ users: await listAppUsers(pid(c), env) });
+});
+projectRoutes.post("/projects/:id/users", async (c) => {
+  const denied = ownerOnly(c);
+  if (denied) return denied;
+  const env = serviceEnv(c);
+  const body: unknown = await c.req.json();
+  if (!body || typeof body !== "object" || !("email" in body) || typeof body.email !== "string" ||
+      !("password" in body) || typeof body.password !== "string" ||
+      ("name" in body && typeof body.name !== "string")) {
+    return c.json({ error: "Indica correo, contraseña y, opcionalmente, nombre." }, 400);
+  }
+  await ensureProjectOwner(pid(c), env);
+  const user = await createAppUser(pid(c), { email: body.email, password: body.password, name: "name" in body && typeof body.name === "string" ? body.name : undefined }, env);
+  return c.json({ user }, 201);
+});
+projectRoutes.patch("/projects/:id/users/:userId/password", async (c) => {
+  const denied = ownerOnly(c);
+  if (denied) return denied;
+  const env = serviceEnv(c);
+  const body: unknown = await c.req.json();
+  if (!body || typeof body !== "object" || !("password" in body) || typeof body.password !== "string") {
+    return c.json({ error: "Indica la nueva contraseña." }, 400);
+  }
+  const user = await updateAppUserPassword(pid(c), c.req.param("userId"), body.password, env);
+  return c.json({ user });
+});
 
 // Storage
 projectRoutes.get("/projects/:id/storage", async (c) =>
