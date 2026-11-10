@@ -18,7 +18,7 @@ describe("runtime ports and policies", () => {
       getProject: async () => ({ id: "p", name: "Working app" }),
       isSlugTaken: async () => false,
       readAllFiles: async () => ({ "pages/_index.tsx": "export default function Broken() { return <main> }" }),
-      checkProject, scan, applyMigrations: async () => ({ applied: [] }), recordPublish, scheduleProject,
+      checkProject, scan, applyMigrations: async () => ({ applied: [] }), ensureOwner: async () => {}, recordPublish, scheduleProject,
       unpublish: async () => {}, appUrl: (slug) => `http://${slug}.localhost`,
     });
     await expect(publication.publishProject("p", "new-app")).rejects.toThrow("No se publicó: la app tiene errores");

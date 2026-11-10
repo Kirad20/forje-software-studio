@@ -6,7 +6,7 @@ import type { AppEnv } from "../domain/contracts.js";
 
 const statements: Record<string, string> = {
   authEmailExists: `select 1 from _forja_users where email = $1`,
-  authCreateUser: `insert into _forja_users (id, email, name, password_hash) values ($1, $2, $3, $4) returning id, email, name, role`,
+  authCreateUser: `insert into _forja_users (id, email, name, password_hash) values ($1, $2, $3, $4) on conflict (email) do nothing returning id, email, name, role`,
   authSignInUser: `select id, email, name, role, password_hash, coalesce(locked_until > now(), false) as locked from _forja_users where email = $1`,
   authFailedLogin: `update _forja_users set failed_logins = failed_logins + 1,
     locked_until = case when failed_logins + 1 >= $2 then now() + ($3 || ' minutes')::interval else locked_until end where id = $1`,
@@ -22,9 +22,10 @@ const statements: Record<string, string> = {
     where u.email = $1 and not c.used and c.expires_at > now() order by c.created_at desc limit 1`,
   authFailedReset: `update _forja_reset_codes set attempts = attempts + 1 where id = $1`,
   authUseReset: `update _forja_reset_codes set used = true where id = $1`,
-  authChangePassword: `update _forja_users set password_hash = $2, failed_logins = 0, locked_until = null where id = $1`,
+  authChangePassword: `update _forja_users set password_hash = $2, failed_logins = 0, locked_until = null where id = $1 returning id, email, name, role`,
   authRevokeUserSessions: `delete from _forja_sessions where user_id = $1`,
-  authCreateAdmin: `insert into _forja_users (id, email, role) values ($1, $2, 'admin')`,
+  authCreateAdmin: `insert into _forja_users (id, email, role) values ($1, $2, 'admin') on conflict (email) do nothing returning id`,
+  authProjectOwner: `select a.email from projects p join accounts a on a.id = p.owner_id where p.id = $1`,
   authFindUser: `select id, email, name, role from _forja_users where email = $1`,
   authCreateTestSession: `insert into _forja_sessions (token_hash, user_id, expires_at) values ($1, $2, now() + interval '5 minutes')`,
   authTemporaryPassword: `update _forja_users set password_hash = $2, failed_logins = 0, locked_until = null where email = $1 returning id`,

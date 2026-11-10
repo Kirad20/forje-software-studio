@@ -218,7 +218,7 @@ ok((await req("GET", "/_baas/auth/me", { host: pv })).json?.user === null, "rese
 const rows = await req("GET", `/api/projects/${project.id}/db/rows?table=todos`);
 ok(rows.json?.total === 1, "data tab rows", rows.text);
 const users = await req("GET", `/api/projects/${project.id}/db/rows?table=_forja_users`);
-ok(users.json.rows[0].password_hash === "••••", "password hash masked");
+ok(users.json.rows.find((user) => user.email === "ana@example.com")?.password_hash === "••••", "password hash masked");
 const jobs = await req("GET", `/api/projects/${project.id}/jobs`);
 ok(jobs.json?.jobs?.[0]?.schedule === "0 8 * * *", "jobs listed with schedule", jobs.text.slice(0, 300));
 const logs = await req("GET", `/api/projects/${project.id}/logs`);
@@ -227,6 +227,10 @@ ok(logs.json.logs.some((l) => l.message.includes("/_api/todos/create")), "reques
 // Publish
 const pub = await req("POST", `/api/projects/${project.id}/publish`, { body: { slug: "tareas-equipo" } });
 ok(pub.status === 200 && pub.json.slug === "tareas-equipo", "publish", pub.text);
+const deployedUsers = await req("GET", `/api/projects/${project.id}/db/rows?table=_forja_users&env=published`);
+ok(deployedUsers.json?.rows?.some((user) => user.email === "owner@example.com" && user.role === "admin"), "owner admin exists before opening the Users panel", deployedUsers.text);
+const defaultUsers = await req("GET", `/api/projects/${project.id}/users?env=published`);
+ok(defaultUsers.json?.users?.some((user) => user.email === "owner@example.com" && user.role === "admin" && !user.hasPassword), "publish creates a passwordless owner admin", defaultUsers.text);
 const live = await req("GET", "/", { host: "tareas-equipo.localhost" });
 ok(live.status === 200 && live.text.includes("Hecho con Forja"), "published app served");
 const liveSignup = await req("POST", "/_baas/auth/signup", {
@@ -235,6 +239,25 @@ const liveSignup = await req("POST", "/_baas/auth/signup", {
 ok(liveSignup.status === 200, "preview users are not copied to production", liveSignup.text);
 const liveTodos = await req("GET", "/_api/todos/list", { host: "tareas-equipo.localhost" });
 ok(liveTodos.status === 200 && liveTodos.json?.todos?.length === 0, "publish applies schema without preview rows", liveTodos.text);
+await req("POST", "/_baas/auth/reset/request", { host: "tareas-equipo.localhost", body: { email: "owner@example.com" } });
+const ownerResetMail = (await req("GET", `/api/projects/${project.id}/emails?env=published`)).json.emails[0];
+const ownerResetCode = /<b>(\d{8})<\/b>/.exec(ownerResetMail?.html ?? "")?.[1];
+ok(ownerResetMail?.env === "published" && ownerResetMail.status === "logged" && ownerResetCode, "production owner recovery is recorded as simulated email");
+const ownerReset = await req("POST", "/_baas/auth/reset/confirm", {
+  host: "tareas-equipo.localhost", body: { email: "owner@example.com", code: ownerResetCode, password: "production-owner-password" },
+});
+ok(ownerReset.status === 200, "production owner can initialize their password through recovery", ownerReset.text);
+for (const env of ["preview", "published"]) {
+  const created = await req("POST", `/api/projects/${project.id}/users?env=${env}`, {
+    body: { email: "managed@example.com", password: `${env}-initial-password`, name: "Managed user" },
+  });
+  ok(created.status === 201 && !created.json.token, `studio creates a ${env} user without an app session`, created.text);
+  const changed = await req("PATCH", `/api/projects/${project.id}/users/${created.json.user.id}/password?env=${env}`, { body: { password: `${env}-replacement-password` } });
+  ok(changed.status === 200, `studio updates the ${env} password`, changed.text);
+  const host = env === "preview" ? pv : "tareas-equipo.localhost";
+  const login = await req("POST", "/_baas/auth/login", { host, body: { email: "managed@example.com", password: `${env}-replacement-password` } });
+  ok(login.status === 200, `${env} user signs in with the managed password`, login.text);
+}
 const jobs2 = await req("GET", `/api/projects/${project.id}/jobs`);
 ok(jobs2.json.jobs[0].nextRun, "cron armed after publish", JSON.stringify(jobs2.json.jobs[0]));
 // Preview change does not leak to live until republish

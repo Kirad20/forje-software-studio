@@ -38,16 +38,19 @@ it("uses the production PGlite repository for signup, sessions, lockout and tran
         one: async (sql, params = []) => (await tx.query(sql, params)).rows[0] as never,
       })),
     };
+    const repository = createQueryRepository({
+      q: async (sql, params = []) => (await pg.query(sql, params)).rows as never,
+      one: async (sql, params = []) => (await pg.query(sql, params)).rows[0] as never,
+    });
     const email = createEmail({
-      ...createQueryRepository({
-        q: async (sql, params = []) => (await pg.query(sql, params)).rows as never,
-        one: async (sql, params = []) => (await pg.query(sql, params)).rows[0] as never,
-      }),
+      ...repository,
       getTransport: () => null, emailFrom: () => "platform@example.test", log: vi.fn(),
     });
     const sendEmail = vi.fn(email.sendEmail);
     const api = createAuth({
       projectDb: () => createAuthRepository(db), sendEmail,
+      projectOwnerEmail: async (id) => (await repository.one<{ email: string }>("authProjectOwner", [id]))!.email,
+      log: vi.fn(),
       hashPassword, verifyPassword, sha256, newId, newToken, numericCode: () => "12345678",
     });
     const signed = await api.signUp("p", { email: " User@Example.com ", password: "initial-password", name: "User" });

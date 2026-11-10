@@ -70,6 +70,19 @@ describe("app service capability boundaries", () => {
     expect(q).toHaveBeenCalled();
   });
 
+  it("uses the verified domain for automatic mail while still sandboxing an explicit foreign sender", async () => {
+    const sendMail = vi.fn();
+    const api = createEmail({
+      one: vi.fn().mockResolvedValue({ owner_email: "owner@example.com", name: "App", email_domain: "mail.example.test", email_domain_verified: true }),
+      q: vi.fn(), log: vi.fn(), getTransport: () => ({ sendMail }), emailFrom: () => "platform@example.com",
+    });
+    const input = { to: "user@example.com", subject: "Reset", html: "<p>Code</p>" };
+    expect((await api.sendEmail("p", input))[0].redirected).toBe(false);
+    expect(sendMail).toHaveBeenLastCalledWith(expect.objectContaining({ to: input.to, from: "App <noreply@mail.example.test>" }));
+    expect((await api.sendEmail("p", { ...input, from: "foreign@other.test" }))[0].redirected).toBe(true);
+    expect(sendMail).toHaveBeenLastCalledWith(expect.objectContaining({ to: "owner@example.com" }));
+  });
+
   it("rejects storage traversal before any driver access", async () => {
     const read = vi.fn();
     const one = vi.fn();

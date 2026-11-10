@@ -23,6 +23,14 @@ vi.mock("../../../server/modules/app-services/jobs.js", async (importOriginal) =
   listJobs: vi.fn(async () => ({ jobs: [], runs: [], timers: [], queue: [] })),
   runJob: vi.fn(async () => {}),
 }));
+vi.mock("../../../server/modules/app-services/auth.js", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../../../server/modules/app-services/auth.js")>(),
+  ensureProjectOwner: vi.fn(async () => false),
+  createAppUser: vi.fn(async (_id: string, input: { email: string; password: string; name?: string }) => ({
+    id: "app-user", email: input.email, name: input.name ?? null, role: "user",
+  })),
+  updateAppUserPassword: vi.fn(async () => ({ id: "app-user", email: "app@example.test", name: null, role: "user" })),
+}));
 
 vi.mock("../../../server/modules/app-services/projectDb.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../../server/modules/app-services/projectDb.js")>();
@@ -78,6 +86,7 @@ const eventModule = await import("../../../server/modules/project-observability/
 const dbModule = await import("../../../server/modules/app-services/projectDb.js");
 const emailModule = await import("../../../server/modules/app-services/email.js");
 const jobsModule = await import("../../../server/modules/app-services/jobs.js");
+const authModule = await import("../../../server/modules/app-services/auth.js");
 
 describe("HTTP transport contract", () => {
   it.each(["preview", "published"] as const)("routes service reads and writes explicitly to %s", async (env) => {
@@ -105,6 +114,7 @@ describe("HTTP transport contract", () => {
     expect((await get("db/metrics")).status).toBe(200);
     expect(dbModule.projectDbMetrics).toHaveBeenLastCalledWith("project-1", env);
     expect((await get("users")).status).toBe(200);
+    expect(authModule.ensureProjectOwner).toHaveBeenLastCalledWith("project-1", env);
     expect(dbModule.listAppUsers).toHaveBeenLastCalledWith("project-1", env);
     expect((await get("emails")).status).toBe(200);
     expect(emailModule.listEmails).toHaveBeenLastCalledWith("project-1", env);
@@ -120,6 +130,60 @@ describe("HTTP transport contract", () => {
     const logs = await get("logs");
     expect(logs.status).toBe(200);
     expect(eventModule.readLogs).toHaveBeenLastCalledWith("project-1", { env, level: undefined, limit: 300 });
+  });
+  it.each(["preview", "published"] as const)("creates users without sessions and updates passwords only in %s", async (env) => {
+    const root = `/api/projects/project-1/users?env=${env}`;
+    const headers = { cookie: "forja_session=valid", "content-type": "application/json" };
+    const input = { email: "app@example.test", password: "initial-password", name: "App user" };
+    const created = await app.request(root, { method: "POST", headers, body: JSON.stringify({ ...input, role: "admin" }) });
+    expect(created.status).toBe(201);
+    expect(await created.json()).toEqual({ user: { id: "app-user", email: input.email, name: input.name, role: "user" } });
+    expect(created.headers.get("set-cookie")).toBeNull();
+    expect(authModule.createAppUser).toHaveBeenLastCalledWith("project-1", input, env);
+    const updated = await app.request(`/api/projects/project-1/users/app-user/password?env=${env}`, {
+      method: "PATCH", headers, body: JSON.stringify({ password: "replacement-password" }),
+    });
+    expect(updated.status).toBe(200);
+    expect(authModule.updateAppUserPassword).toHaveBeenLastCalledWith("project-1", "app-user", "replacement-password", env);
+  });
+  it("rejects malformed credentials and unknown environments before administering users", async () => {
+    vi.mocked(authModule.createAppUser).mockClear();
+    vi.mocked(authModule.updateAppUserPassword).mockClear();
+    const headers = { cookie: "forja_session=valid", "content-type": "application/json" };
+    for (const body of [null, {}, { email: 1, password: "password" }, { email: "app@example.test", password: 1 }, { email: "app@example.test", password: "password", name: {} }]) {
+      expect((await app.request("/api/projects/project-1/users", { method: "POST", headers, body: JSON.stringify(body) })).status).toBe(400);
+    }
+    expect((await app.request("/api/projects/project-1/users?env=wrong", { method: "POST", headers, body: '{"email":"app@example.test","password":"password"}' })).status).toBe(400);
+    for (const body of [null, {}, { password: 1 }]) {
+      expect((await app.request("/api/projects/project-1/users/app-user/password", { method: "PATCH", headers, body: JSON.stringify(body) })).status).toBe(400);
+    }
+    expect((await app.request("/api/projects/project-1/users/app-user/password?env=wrong", { method: "PATCH", headers, body: '{"password":"password"}' })).status).toBe(400);
+    expect(authModule.createAppUser).not.toHaveBeenCalled();
+    expect(authModule.updateAppUserPassword).not.toHaveBeenCalled();
+  });
+  it("restricts credential administration to the authenticated project owner", async () => {
+    vi.mocked(authModule.createAppUser).mockClear();
+    vi.mocked(authModule.updateAppUserPassword).mockClear();
+    const headers = { cookie: "forja_session=valid", "content-type": "application/json" };
+    for (const [resource, method] of [["users", "POST"], ["users/app-user/password", "PATCH"]]) {
+      const request = { method, headers, body: '{"email":"app@example.test","password":"password"}' };
+      expect((await app.request(`/api/projects/project-1/${resource}`, { ...request, headers: { "content-type": "application/json" } })).status).toBe(401);
+      vi.mocked(collaboration.accessOf).mockResolvedValueOnce(null);
+      expect((await app.request(`/api/projects/project-1/${resource}`, request)).status).toBe(404);
+      vi.mocked(collaboration.accessOf).mockResolvedValueOnce("editor");
+      expect((await app.request(`/api/projects/project-1/${resource}`, request)).status).toBe(403);
+    }
+    expect(authModule.createAppUser).not.toHaveBeenCalled();
+    expect(authModule.updateAppUserPassword).not.toHaveBeenCalled();
+  });
+  it("preserves duplicate-user and missing-user errors from credential administration", async () => {
+    const headers = { cookie: "forja_session=valid", "content-type": "application/json" };
+    vi.mocked(authModule.createAppUser).mockRejectedValueOnce(new authModule.AuthError("Ya existe esa cuenta.", 409));
+    const duplicate = await app.request("/api/projects/project-1/users", { method: "POST", headers, body: '{"email":"app@example.test","password":"password"}' });
+    expect(duplicate.status).toBe(409);
+    expect(await duplicate.json()).toEqual({ error: "Ya existe esa cuenta." });
+    vi.mocked(authModule.updateAppUserPassword).mockRejectedValueOnce(new authModule.AuthError("No existe ese usuario.", 404));
+    expect((await app.request("/api/projects/project-1/users/missing/password", { method: "PATCH", headers, body: '{"password":"password"}' })).status).toBe(404);
   });
   it("rejects unknown environments and prevents editing the production manifest", async () => {
     const headers = { cookie: "forja_session=valid", "content-type": "application/json" };

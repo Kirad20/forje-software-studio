@@ -670,7 +670,7 @@ export function ProjectView({
                 )}
                 {service === "control" && <ServiceControlPanel projectId={id} env={serviceEnv} reloadKey={filesKey} />}
                 {service === "data" && <DataPanel projectId={id} env={serviceEnv} projectName={project.name} reloadKey={filesKey} />}
-                {service === "users" && <UsersPanel projectId={id} env={serviceEnv} />}
+                {service === "users" && <UsersPanel projectId={id} env={serviceEnv} canManage={project.access === "owner"} />}
                 {service === "ai" && <AiPanel project={project} onChange={load} />}
                 {service === "integrations" && <IntegrationsPanel projectId={id} reloadKey={filesKey} />}
                 {service === "analytics" && <AnalyticsPanel project={project} />}

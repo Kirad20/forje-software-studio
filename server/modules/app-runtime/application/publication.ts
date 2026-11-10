@@ -30,6 +30,7 @@ export function createPublication(ports: PublicationPorts) {
       assertPublishable(await ports.checkProject(files));
       assertPublishable([], await ports.scan(projectId, files));
       await ports.applyMigrations(projectId, files);
+      await ports.ensureOwner(projectId);
       await ports.recordPublish(projectId, slug, files, author);
       await ports.scheduleProject(projectId);
       return { slug, url: ports.appUrl(slug) };

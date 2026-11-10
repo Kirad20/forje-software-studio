@@ -1,6 +1,6 @@
 import type { AuthPorts } from "../ports/auth.js";
 import type { AppEnv } from "../domain/contracts.js";
-import { AuthError, AUTH_POLICY, normalizeEmail } from "../domain/auth.js";
+import { AuthError, AUTH_POLICY, normalizeEmail, validatePassword } from "../domain/auth.js";
 export { AuthError } from "../domain/auth.js";
 
 /**
@@ -19,11 +19,18 @@ const MAX_FAILED = AUTH_POLICY.maxFailed;
 const LOCK_MINUTES = AUTH_POLICY.lockMinutes;
 export const sessionCookie = (projectId: string) => `forja_s_${projectId}`;
 
-export function createAuth({ hashPassword, newId, newToken, numericCode, sha256, verifyPassword, projectDb, sendEmail }: AuthPorts) {
+export function createAuth({ hashPassword, newId, newToken, numericCode, sha256, verifyPassword, projectDb, projectOwnerEmail, sendEmail, log }: AuthPorts) {
 
 async function signUp(projectId: string, input: { email: string; password: string; name?: string }, env: AppEnv = "published") {
+  const user = await createAppUser(projectId, input, env);
+  return { user, token: await createSession(projectId, user.id, env) };
+}
+
+/** Studio administration creates credentials without signing in as the new user. */
+async function createAppUser(projectId: string, input: { email: string; password: string; name?: string }, env: AppEnv = "preview") {
   const email = normalizeEmail(input.email);
-  if (input.password.length < 8) throw new AuthError("La contraseña debe tener al menos 8 caracteres.");
+  validatePassword(input.password);
+  if (input.name !== undefined && typeof input.name !== "string") throw new AuthError("Nombre no válido.");
   const db = projectDb(projectId, env);
   if (await db.one("authEmailExists", [email])) {
     throw new AuthError("Ya existe una cuenta con ese correo.", 409);
@@ -31,8 +38,9 @@ async function signUp(projectId: string, input: { email: string; password: strin
   const user = (await db.one<AppUser>(
     "authCreateUser",
     [newId(), email, input.name ?? null, await hashPassword(input.password)],
-  ))!;
-  return { user, token: await createSession(projectId, user.id, env) };
+  ));
+  if (!user) throw new AuthError("Ya existe una cuenta con ese correo.", 409);
+  return user;
 }
 
 async function signIn(projectId: string, input: { email: string; password: string }, env: AppEnv = "published") {
@@ -86,14 +94,21 @@ const RESET_LIMIT_PER_HOUR = AUTH_POLICY.resetLimitPerHour;
 /** Same answer whether or not the email exists, so the form can't reveal who is registered. */
 async function requestPasswordReset(projectId: string, rawEmail: string, appName: string, env: AppEnv = "published") {
   const email = normalizeEmail(rawEmail);
+  await ensureProjectOwner(projectId, env);
   const db = projectDb(projectId, env);
   const user = await db.one<{ id: string }>("authResetUser", [email]);
-  if (!user) return;
+  if (!user) {
+    log(projectId, { env, level: "info", source: "email", message: "Recuperación sin envío: el correo solicitado no tiene una cuenta en este entorno." });
+    return;
+  }
   const recent = await db.one<{ n: number }>(
     "authRecentResets",
     [user.id],
   );
-  if ((recent?.n ?? 0) >= RESET_LIMIT_PER_HOUR) return;
+  if ((recent?.n ?? 0) >= RESET_LIMIT_PER_HOUR) {
+    log(projectId, { env, level: "info", source: "email", message: "Recuperación sin envío: se alcanzó el límite de solicitudes por hora." });
+    return;
+  }
   const code = numericCode(8);
   await db.query("authInvalidateResets", [user.id]);
   await db.query(
@@ -108,7 +123,7 @@ async function requestPasswordReset(projectId: string, rawEmail: string, appName
 }
 
 async function confirmPasswordReset(projectId: string, input: { email: string; code: string; password: string }, env: AppEnv = "published") {
-  if (input.password.length < 8) throw new AuthError("La contraseña debe tener al menos 8 caracteres.");
+  validatePassword(input.password);
   const db = projectDb(projectId, env);
   const row = await db.one<{ id: number; user_id: string; code_hash: string; attempts: number }>(
     "authLatestReset",
@@ -134,9 +149,23 @@ async function confirmPasswordReset(projectId: string, input: { email: string; c
 async function ensureOwnerAdmin(projectId: string, ownerEmail: string, env: AppEnv = "published") {
   const db = projectDb(projectId, env);
   const email = normalizeEmail(ownerEmail);
-  if (await db.one("authEmailExists", [email])) return false;
-  await db.query("authCreateAdmin", [newId(), email]);
-  return true;
+  return (await db.query("authCreateAdmin", [newId(), email])).length > 0;
+}
+
+async function ensureProjectOwner(projectId: string, env: AppEnv = "published") {
+  return ensureOwnerAdmin(projectId, await projectOwnerEmail(projectId), env);
+}
+
+async function updateAppUserPassword(projectId: string, userId: string, password: string, env: AppEnv = "preview") {
+  validatePassword(password);
+  const hash = await hashPassword(password);
+  return projectDb(projectId, env).transaction(async (tx) => {
+    const user = await tx.one<AppUser>("authChangePassword", [userId, hash]);
+    if (!user) throw new AuthError("No existe ese usuario en este entorno.", 404);
+    await tx.query("authRevokeUserSessions", [userId]);
+    await tx.query("authInvalidateResets", [userId]);
+    return user;
+  });
 }
 
 /**
@@ -165,5 +194,5 @@ async function setTemporaryPassword(projectId: string, email: string, password: 
   if (!r.length) throw new AuthError("No existe ese usuario.", 404);
 }
 
-return { signUp, signIn, userFromSession, signOut, requestPasswordReset, confirmPasswordReset, ensureOwnerAdmin, testSession, endSession, setTemporaryPassword };
+return { signUp, signIn, userFromSession, signOut, requestPasswordReset, confirmPasswordReset, ensureOwnerAdmin, ensureProjectOwner, createAppUser, updateAppUserPassword, testSession, endSession, setTemporaryPassword };
 }
