@@ -9,7 +9,7 @@ export interface JobsApi {
 }
 export interface ContextPorts extends ObserverPorts {
   appAiChat(projectId: string, input: AppAiInput): Promise<AppAiResult>;
-  sendEmail(projectId: string, input: EmailInput): Promise<EmailResult[]>;
+  sendEmail(projectId: string, input: EmailInput, env?: AppEnv): Promise<EmailResult[]>;
   paymentsFor(env: Record<string, string>): {
     checkout(input: CheckoutInput): Promise<{ id: string; url: string }>;
     getCheckout(id: string): Promise<{ id: string; status: string; paymentStatus: string; amountTotal: number }>;

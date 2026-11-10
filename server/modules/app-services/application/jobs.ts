@@ -43,7 +43,7 @@ export function createJobs(ports: JobPorts) {
     const job = rt.jobFiles(files).find((j) => j.name === name);
     if (!job) throw new Error(`No existe la tarea jobs/${name}.ts`);
     const [run] = await q<{ id: number }>(
-      "jobCreateRun", [projectId, name, trigger]);
+      "jobCreateRun", [projectId, name, trigger, env]);
     try {
       const mod = await rt.compileServerModule(files, job.file);
       let base = rt.previewOrigin(projectId);
@@ -120,19 +120,19 @@ export function createJobs(ports: JobPorts) {
     }
     crons.set(projectId, list);
   }
-  async function listJobs(projectId: string) {
+  async function listJobs(projectId: string, env?: AppEnv) {
     const rt = runtime();
-    const files = await rt.readAllFiles(projectId);
+    const files = env === "published" ? (await rt.publishedFiles(projectId)) ?? {} : await rt.readAllFiles(projectId);
     const settings = new Map((await q<{ job: string; enabled: boolean }>("jobSettings", [projectId])).map((row) => [row.job, row.enabled]));
-    const active = new Map((crons.get(projectId) ?? []).map((cron) => [cron.getPattern(), cron]));
+    const active = new Map((env === "preview" ? [] : crons.get(projectId) ?? []).map((cron) => [cron.getPattern(), cron]));
     const jobs = rt.jobFiles(files).map((job) => {
       const { schedule, timezone } = rt.readJobSettings(files[job.file]!);
       return { name: job.name, schedule, timezone, enabled: settings.get(job.name) ?? true, nextRun: schedule ? active.get(schedule)?.nextRun()?.toISOString() ?? null : null };
     });
-    const runs = await q("jobRuns", [projectId]);
-    const timers = await q("jobTimers", [projectId]);
+    const runs = await q("jobRuns", [projectId, env ?? null]);
+    const timers = await q("jobTimers", [projectId, env ?? null]);
     const queued = await q("jobQueue", [projectId]);
-    return { jobs, runs, timers, queue: queued };
+    return { jobs, runs, timers, queue: env ? queued.filter((entry) => entry.env === env) : queued };
   }
   async function setJobEnabled(projectId: string, job: string, enabled: boolean) {
     await q("jobSetEnabled", [projectId, job, enabled]);

@@ -13,6 +13,7 @@ import { AnalyticsPanel, DataPanel, DocsPanel, IntegrationsPanel, PaymentsPanel,
 import { ServiceControlPanel } from "../../service-control/index.js";
 import { ProjectKnowledge } from "../../project-knowledge/index.js";
 import { Avatar, copyText, Menu, MenuItem, useDismiss } from "../../../shared/ui.js";
+import { servicePath, type ServiceEnvironment } from "../../../shared/application/service-environment.js";
 import { CheckpointPanel, Collaborators, DEVICES, PagePalette, PreviewCanvas, ProjectSettings, PublishPanel, type Device, type PreviewHandle, type TextEdit } from "./Workspace.js";
 
 type Notice = { text: string; tone?: "ok" | "warn"; action?: { label: string; run: () => void } };
@@ -88,6 +89,8 @@ export function ProjectView({
   const [error, setError] = useState("");
   const [view, setView] = useState<View>("preview");
   const [service, setService] = useState<ServiceKey | "overview">("overview");
+  const [serviceEnv, setServiceEnv] = useState<ServiceEnvironment>("preview");
+  const [servicesError, setServicesError] = useState("");
   const [serviceSearch, setServiceSearch] = useState("");
   const [favorites, setFavorites] = useState<ServiceKey[]>(() => {
     try {
@@ -194,11 +197,18 @@ export function ProjectView({
     projectsController.loadProject(id)
       .then((r) => setProject(r.project))
       .catch((e) => setError(e.message));
-  const loadUsed = () => api<Record<string, boolean>>(`/projects/${id}/services`).then(setUsed).catch(() => {});
+  useEffect(() => {
+    let active = true;
+    setUsed({});
+    setServicesError("");
+    void api<Record<string, boolean>>(servicePath(id, "services", serviceEnv))
+      .then((data) => { if (active) setUsed(data); })
+      .catch((e) => { if (active) setServicesError(e.message); });
+    return () => { active = false; };
+  }, [id, serviceEnv, filesKey]);
 
   useEffect(() => {
     void load();
-    void loadUsed();
     void api<{ problems: Problem[] }>(`/projects/${id}/problems`).then((r) => setProblems(r.problems)).catch(() => {});
     let t: ReturnType<typeof setTimeout>;
     const unsubscribe = projectsController.subscribeToEvents(id, (e) => {
@@ -505,7 +515,7 @@ export function ProjectView({
               reloadKey={chatKey}
               onTurnEnd={() => {
                 void load();
-                void loadUsed();
+                setFilesKey((key) => key + 1);
                 onCredits();
               }}
             />
@@ -597,6 +607,16 @@ export function ProjectView({
                 </div>
               </nav>
               <div className="svc-workspace">
+                <div className="svc-environment">
+                  <label className="row">Entorno de servicios
+                    <select aria-label="Entorno de servicios" value={serviceEnv} onChange={(e) => setServiceEnv(e.target.value as ServiceEnvironment)}>
+                      <option value="preview">Vista previa</option>
+                      <option value="published" disabled={!project.slug}>Producción (despliegue)</option>
+                    </select>
+                  </label>
+                  <span className="small muted">{serviceEnv === "published" ? "Datos y ejecuciones reales de la app publicada." : "Datos y código aislados de vista previa."} Configuración, integraciones, IA y subidas son compartidas; analítica mide producción. Código, documentos y seguridad corresponden al espacio de construcción.</span>
+                  {servicesError && <p className="error-box" role="alert">{servicesError}</p>}
+                </div>
                 {service !== "overview" && (
                   <header className="svc-context">
                     <div className="grow">
@@ -607,7 +627,7 @@ export function ProjectView({
                     <button className="sm" aria-label="Pedir ayuda al constructor" onClick={() => draftRequest(SERVICE_GUIDES[service].prompt)}>✦ Pedir ayuda<span className="svc-help-detail"> al constructor</span></button>
                   </header>
                 )}
-              <div className={`svc-detail ${["data", "docs", "storage", "code"].includes(service) ? "" : "pad"}`}>
+              <div key={`${id}:${serviceEnv}`} className={`svc-detail ${["data", "docs", "storage", "code"].includes(service) ? "" : "pad"}`}>
                 {service === "overview" && (
                   <div className="tools-home">
                     <header className="tools-intro">
@@ -648,19 +668,19 @@ export function ProjectView({
                     )}
                   </div>
                 )}
-                {service === "control" && <ServiceControlPanel projectId={id} reloadKey={filesKey} />}
-                {service === "data" && <DataPanel projectId={id} projectName={project.name} reloadKey={filesKey} />}
-                {service === "users" && <UsersPanel projectId={id} />}
+                {service === "control" && <ServiceControlPanel projectId={id} env={serviceEnv} reloadKey={filesKey} />}
+                {service === "data" && <DataPanel projectId={id} env={serviceEnv} projectName={project.name} reloadKey={filesKey} />}
+                {service === "users" && <UsersPanel projectId={id} env={serviceEnv} />}
                 {service === "ai" && <AiPanel project={project} onChange={load} />}
                 {service === "integrations" && <IntegrationsPanel projectId={id} reloadKey={filesKey} />}
                 {service === "analytics" && <AnalyticsPanel project={project} />}
                 {service === "seo" && <SeoPanel project={project} onChange={load} />}
                 {service === "docs" && <DocsPanel projectId={id} reloadKey={filesKey} />}
-                {service === "jobs" && <JobsPanel projectId={id} reloadKey={filesKey} />}
-                {service === "storage" && <StoragePanel projectId={id} reloadKey={filesKey} />}
-                {service === "email" && <EmailPanel project={project} onChange={load} />}
+                {service === "jobs" && <JobsPanel projectId={id} env={serviceEnv} reloadKey={filesKey} />}
+                {service === "storage" && <StoragePanel projectId={id} env={serviceEnv} reloadKey={filesKey} />}
+                {service === "email" && <EmailPanel project={project} env={serviceEnv} onChange={load} />}
                 {service === "payments" && <PaymentsPanel projectId={id} />}
-                {service === "logs" && <LogsPanel projectId={id} lines={logLines} />}
+                {service === "logs" && <LogsPanel projectId={id} env={serviceEnv} lines={logLines} />}
                 {service === "security" && (
                   <SecurityPanel
                     projectId={id}

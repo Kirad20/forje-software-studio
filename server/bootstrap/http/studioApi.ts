@@ -15,6 +15,7 @@ import {
   listAppUsers,
   projectServiceCounts,
   ProjectDataError,
+  type ProjectDbEnv,
 } from "../../modules/app-services/projectDb.js";
 import { realtimeStats } from "../../modules/app-services/realtime.js";
 import { deleteSecret, listSecrets, setSecret } from "../../modules/app-services/secrets.js";
@@ -544,6 +545,11 @@ projectRoutes.use("/projects/:id", async (c, next) => {
 const ownerOnly = (c: Context<Env>) => (c.get("access") === "owner" ? null : c.json({ error: "Solo la persona dueña del proyecto puede hacer esto." }, 403));
 
 const pid = (c: Context<Env>) => c.get("project").id;
+const serviceEnv = (c: Context<Env>): ProjectDbEnv => {
+  const env = c.req.query("env") ?? "preview";
+  if (env !== "preview" && env !== "published") throw new Error("Entorno no válido");
+  return env;
+};
 
 projectRoutes.get("/projects/:id/knowledge", async (c) => c.json(await knowledge.graph(pid(c))));
 projectRoutes.post("/projects/:id/knowledge/rebuild", async (c) => c.json(await knowledge.graph(pid(c), true)));
@@ -561,14 +567,20 @@ projectRoutes.post("/projects/:id/knowledge/question", async (c) => {
 });
 
 const serviceControl = (c: Context<Env>) => createServiceControl({
-  readFiles: (id) => projects.readAllFiles(id),
+  readFiles: async (id, env) => {
+    if (env !== "published") return projects.readAllFiles(id);
+    const files = await projects.publishedFiles(id);
+    if (!files) throw new Error("El proyecto no tiene una publicación");
+    return files;
+  },
   writeManifest: (id, content) => projects.writeFile(id, SERVICES_MANIFEST, content, "owner", c.get("account").email),
   listQueue: async (id) => (await listJobs(id)).queue as unknown as ServiceQueueEntry[],
   runtime: readServiceRuntime,
   restart: restartServiceRuntime,
 });
-projectRoutes.get("/projects/:id/service-control", async (c) => c.json(await serviceControl(c).snapshot(pid(c))));
+projectRoutes.get("/projects/:id/service-control", async (c) => c.json(await serviceControl(c).snapshot(pid(c), serviceEnv(c))));
 projectRoutes.patch("/projects/:id/service-control/:service", async (c) => {
+  if (serviceEnv(c) === "published") return c.json({ error: "Edita la escala en preview y publica para aplicarla." }, 400);
   const patch: unknown = await c.req.json();
   return c.json(await withManifestLock(pid(c), () => serviceControl(c).scale(pid(c), c.req.param("service"), patch)));
 });
@@ -632,9 +644,10 @@ projectRoutes.get("/projects/:id/stats", async (c) => {
 /** Which services this project already uses: the services nav lists those first and dims the rest. */
 projectRoutes.get("/projects/:id/services", async (c) => {
   const id = pid(c);
-  const files = Object.keys(await projects.readAllFiles(id));
-  const tables = Object.keys(await describeSchema(id));
-  const counts = await projectServiceCounts(id);
+  const env = serviceEnv(c);
+  const files = Object.keys(env === "published" ? (await projects.publishedFiles(id)) ?? {} : await projects.readAllFiles(id));
+  const tables = Object.keys(await describeSchema(id, false, env));
+  const counts = await projectServiceCounts(id, env);
   const secrets = await listSecrets(id);
   return c.json({
     data: tables.length > 0,
@@ -843,7 +856,12 @@ projectRoutes.get("/projects/:id/events", (c) => {
 });
 
 // Files
-projectRoutes.get("/projects/:id/files", async (c) => c.json({ files: await projects.listFiles(pid(c)) }));
+projectRoutes.get("/projects/:id/files", async (c) => {
+  if (serviceEnv(c) === "preview") return c.json({ files: await projects.listFiles(pid(c)) });
+  const files = await projects.publishedFiles(pid(c));
+  if (!files) return c.json({ error: "El proyecto no tiene una publicación" }, 404);
+  return c.json({ files: Object.entries(files).map(([path, content]) => ({ path, size: Buffer.byteLength(content) })) });
+});
 projectRoutes.get("/projects/:id/file", async (c) => {
   const content = await projects.readFile(pid(c), c.req.query("path") ?? "");
   return content === undefined ? c.json({ error: "No existe" }, 404) : c.json({ content });
@@ -977,7 +995,7 @@ projectRoutes.post("/projects/:id/chat/stop", async (c) => {
 
 // Data
 projectRoutes.get("/projects/:id/db/schema", async (c) =>
-  c.json({ tables: await describeSchema(pid(c), c.req.query("internal") === "1"), awake: await isAwake(pid(c)) }),
+  c.json({ tables: await describeSchema(pid(c), c.req.query("internal") === "1", serviceEnv(c)), awake: await isAwake(pid(c), serviceEnv(c)) }),
 );
 projectRoutes.get("/projects/:id/db/rows", async (c) => {
   const table = c.req.query("table") ?? "";
@@ -985,7 +1003,7 @@ projectRoutes.get("/projects/:id/db/rows", async (c) => {
   const offset = Number(c.req.query("offset") ?? 0);
   const search = (c.req.query("search") ?? "").trim();
   try {
-    return c.json(await listProjectRows(pid(c), { table, limit, offset, search }));
+    return c.json(await listProjectRows(pid(c), { table, limit, offset, search }, serviceEnv(c)));
   } catch (error) {
     if (error instanceof ProjectDataError) return c.json({ error: error.message }, error.status as 400 | 404);
     throw error;
@@ -995,7 +1013,7 @@ projectRoutes.get("/projects/:id/db/rows", async (c) => {
 projectRoutes.post("/projects/:id/db/rows", async (c) => {
   const { table, values } = await c.req.json<{ table: string; values: Record<string, unknown> }>();
   try {
-    return c.json({ row: await createProjectRow(pid(c), table, values ?? {}) });
+    return c.json({ row: await createProjectRow(pid(c), table, values ?? {}, serviceEnv(c)) });
   } catch (e) {
     if (e instanceof ProjectDataError) return c.json({ error: e.message }, e.status as 400 | 404);
     return c.json({ error: (e as Error).message }, 400);
@@ -1005,7 +1023,7 @@ projectRoutes.post("/projects/:id/db/rows", async (c) => {
 projectRoutes.post("/projects/:id/db/rows/delete", async (c) => {
   const { table, keys } = await c.req.json<{ table: string; keys: unknown[] }>();
   try {
-    return c.json({ deleted: await deleteProjectRows(pid(c), table, keys ?? []) });
+    return c.json({ deleted: await deleteProjectRows(pid(c), table, keys ?? [], serviceEnv(c)) });
   } catch (e) {
     if (e instanceof ProjectDataError) return c.json({ error: e.message }, e.status as 400 | 404);
     return c.json({ error: (e as Error).message }, 400);
@@ -1014,28 +1032,30 @@ projectRoutes.post("/projects/:id/db/rows/delete", async (c) => {
 projectRoutes.post("/projects/:id/db/sql", async (c) => {
   const { sql } = await c.req.json<{ sql: string }>();
   try {
-    return c.json({ results: await execSql(pid(c), sql) });
+    return c.json({ results: await execSql(pid(c), sql, serviceEnv(c)) });
   } catch (e) {
     return c.json({ error: (e as Error).message }, 400);
   }
 });
 projectRoutes.get("/projects/:id/db/export", async (c) => {
-  const blob = await dumpDatabase(pid(c));
+  const env = serviceEnv(c);
+  const blob = await dumpDatabase(pid(c), env);
   return new Response(blob, {
     headers: {
       "content-type": "application/gzip",
-      "content-disposition": `attachment; filename="${suggestSlug(c.get("project").name)}-db.tar.gz"`,
+      "content-disposition": `attachment; filename="${suggestSlug(c.get("project").name)}-${env}-db.tar.gz"`,
     },
   });
 });
-projectRoutes.get("/projects/:id/db/metrics", async (c) => c.json(await projectDbMetrics(pid(c))));
+projectRoutes.get("/projects/:id/db/metrics", async (c) => c.json(await projectDbMetrics(pid(c), serviceEnv(c))));
 
 // App users
-projectRoutes.get("/projects/:id/users", async (c) => c.json({ users: await listAppUsers(pid(c)) }));
+projectRoutes.get("/projects/:id/users", async (c) => c.json({ users: await listAppUsers(pid(c), serviceEnv(c)) }));
 
 // Storage
 projectRoutes.get("/projects/:id/storage", async (c) =>
-  c.json({ objects: await listObjects(pid(c)), bytes: await storageUsage(pid(c)), quotaBytes: MAX_PROJECT_STORAGE_BYTES, origin: previewOrigin(pid(c)) }),
+  c.json({ objects: await listObjects(pid(c)), bytes: await storageUsage(pid(c)), quotaBytes: MAX_PROJECT_STORAGE_BYTES,
+    origin: serviceEnv(c) === "published" && c.get("project").slug ? appUrl(c.get("project").slug!) : previewOrigin(pid(c)) }),
 );
 projectRoutes.delete("/projects/:id/storage/:key{.+}", async (c) => {
   await deleteObject(pid(c), c.req.param("key"));
@@ -1043,21 +1063,21 @@ projectRoutes.delete("/projects/:id/storage/:key{.+}", async (c) => {
 });
 
 // Email
-projectRoutes.get("/projects/:id/emails", async (c) => c.json({ emails: await listEmails(pid(c)) }));
+projectRoutes.get("/projects/:id/emails", async (c) => c.json({ emails: await listEmails(pid(c), c.req.query("env") === undefined ? undefined : serviceEnv(c)) }));
 projectRoutes.post("/projects/:id/emails/test", async (c) => {
   const { to } = await c.req.json<{ to: string }>();
-  return c.json({ results: await sendEmail(pid(c), { to, subject: "Correo de prueba", html: "<p>Funciona 🎉</p>" }) });
+  return c.json({ results: await sendEmail(pid(c), { to, subject: "Correo de prueba", html: "<p>Funciona 🎉</p>" }, serviceEnv(c)) });
 });
 projectRoutes.post("/projects/:id/emails/inbound", async (c) => {
-  await receiveEmail(pid(c), await c.req.json());
+  await receiveEmail(pid(c), await c.req.json(), serviceEnv(c));
   return c.json({ ok: true });
 });
 
 // Jobs
-projectRoutes.get("/projects/:id/jobs", async (c) => c.json(await listJobs(pid(c))));
+projectRoutes.get("/projects/:id/jobs", async (c) => c.json(await listJobs(pid(c), c.req.query("env") === undefined ? undefined : serviceEnv(c))));
 projectRoutes.post("/projects/:id/jobs/:name/run", async (c) => {
   try {
-    await runJob(pid(c), "preview", c.req.param("name"), null, "manual");
+    await runJob(pid(c), serviceEnv(c), c.req.param("name"), null, "manual");
     return c.json({ ok: true });
   } catch (e) {
     return c.json({ error: (e as Error).message }, 400);
@@ -1066,7 +1086,8 @@ projectRoutes.post("/projects/:id/jobs/:name/run", async (c) => {
 projectRoutes.post("/projects/:id/jobs/:name/enabled", async (c) => {
   const { enabled } = await c.req.json<{ enabled: boolean }>();
   await setJobEnabled(pid(c), c.req.param("name"), enabled);
-  return c.json({ ok: true, note: "Se aplica a la app publicada en la próxima publicación." });
+  await scheduleProject(pid(c));
+  return c.json({ ok: true, note: "Se aplica a la programación de la app publicada." });
 });
 projectRoutes.delete("/projects/:id/timers/:timerId", async (c) => {
   await cancelTimer(pid(c), c.req.param("timerId"));
@@ -1092,7 +1113,9 @@ projectRoutes.delete("/projects/:id/secrets/:name", async (c) => {
 // AI usage, realtime, logs
 projectRoutes.get("/projects/:id/ai", async (c) => c.json({ usage: await aiUsage(pid(c)), enabled: c.get("project").aiEnabled }));
 projectRoutes.get("/projects/:id/realtime", async (c) => c.json({ channels: realtimeStats(pid(c)) }));
-projectRoutes.get("/projects/:id/logs", (c) => c.json({ logs: readLogs(pid(c), { limit: 300, level: c.req.query("level") }) }));
+projectRoutes.get("/projects/:id/logs", (c) => c.json({ logs: readLogs(pid(c), {
+  limit: 300, level: c.req.query("level"), env: c.req.query("env") === undefined ? undefined : serviceEnv(c),
+}) }));
 
 // Change timeline and named checkpoints
 projectRoutes.get("/projects/:id/changes", async (c) => c.json({ changes: await projects.listChanges(pid(c)) }));

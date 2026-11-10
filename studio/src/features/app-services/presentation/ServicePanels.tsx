@@ -7,6 +7,7 @@ import { browser } from "../../../shared/infrastructure/browser.js";
 import { Refresh } from "../../../shared/Icons.js";
 import { Header, Loading, SecretsPanel, useLoad } from "../../files/index.js";
 import { Menu, MenuItem, Modal, Select, Switch } from "../../../shared/ui.js";
+import { servicePath, type ServiceEnvironment } from "../../../shared/application/service-environment.js";
 
 const fmt = (v: unknown) => (v === null || v === undefined ? "NULL" : v instanceof Object ? JSON.stringify(v) : String(v));
 
@@ -15,10 +16,10 @@ const fmt = (v: unknown) => (v === null || v === undefined ? "NULL" : v instance
 type Col = { name: string; type: string; nullable: boolean; default: string | null };
 type Rows = { rows: Record<string, unknown>[]; total: number; columns: Col[]; primaryKey: string | null };
 
-export function DataPanel({ projectId, projectName, reloadKey }: { projectId: string; projectName: string; reloadKey: number }) {
-  const schema = useLoad<{ tables: Record<string, Col[]>; awake: boolean }>(`/projects/${projectId}/db/schema?internal=1`, [reloadKey]);
+export function DataPanel({ projectId, projectName, reloadKey, env = "preview" }: { projectId: string; projectName: string; reloadKey: number; env?: ServiceEnvironment }) {
+  const schema = useLoad<{ tables: Record<string, Col[]>; awake: boolean }>(servicePath(projectId, "db/schema?internal=1", env), [reloadKey]);
   const metrics = useLoad<{ active: boolean; opens: number; openFailures: number; closes: number; operations: number; failedOperations: number; openMs: number; queueWaitMs: number; operationMs: number }>(
-    `/projects/${projectId}/db/metrics`,
+    servicePath(projectId, "db/metrics", env),
     [reloadKey],
   );
   const [opened, setOpened] = useState(false);
@@ -39,7 +40,7 @@ export function DataPanel({ projectId, projectName, reloadKey }: { projectId: st
 
   const loadRows = () =>
     table
-      ? api<Rows>(`/projects/${projectId}/db/rows?table=${encodeURIComponent(table)}&limit=${PAGE}&offset=${page * PAGE}&search=${encodeURIComponent(search)}`)
+      ? api<Rows>(servicePath(projectId, `db/rows?table=${encodeURIComponent(table)}&limit=${PAGE}&offset=${page * PAGE}&search=${encodeURIComponent(search)}`, env))
           .then((r) => {
             setRows(r);
             setSelected(new Set());
@@ -49,7 +50,7 @@ export function DataPanel({ projectId, projectName, reloadKey }: { projectId: st
   useEffect(() => {
     if (opened) void loadRows();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [opened, table, page, search, reloadKey]);
+  }, [opened, table, page, search, reloadKey, env]);
 
   if (!schema.data) return <Loading error={schema.error} />;
   const key = (r: Record<string, unknown>) => (rows?.primaryKey ? String(r[rows.primaryKey]) : "");
@@ -59,7 +60,7 @@ export function DataPanel({ projectId, projectName, reloadKey }: { projectId: st
       <div className="list" style={{ padding: 12 }}>
         <div style={{ fontWeight: 700, fontSize: 15 }}>Datos</div>
         <div className="small muted" style={{ marginBottom: 10 }}>
-          Los datos de tu app.
+          Datos de {env === "published" ? "producción" : "vista previa"}.
         </div>
         <div className="card" style={{ padding: 12, boxShadow: "none", borderColor: opened ? "var(--accent)" : undefined, display: "grid", gap: 6 }}>
           <span className="pill ok" style={{ justifySelf: "start" }}>
@@ -98,7 +99,7 @@ export function DataPanel({ projectId, projectName, reloadKey }: { projectId: st
               {(close) => (
                 <>
                   <MenuItem onClick={() => (close(), setSqlOpen(true))}>Consola SQL…</MenuItem>
-                  <MenuItem onClick={() => (close(), browser.navigate(`/api/projects/${projectId}/db/export`))}>Exportar base de datos</MenuItem>
+                  <MenuItem onClick={() => (close(), browser.navigate(`/api${servicePath(projectId, "db/export", env)}`))}>Exportar base de datos</MenuItem>
                 </>
               )}
             </Menu>
@@ -110,9 +111,9 @@ export function DataPanel({ projectId, projectName, reloadKey }: { projectId: st
               <button
                 className="sm danger"
                 onClick={async () => {
-                  if (!confirm(`¿Borrar ${selected.size} fila(s)? Es definitivo y afecta también a la app publicada.`)) return;
+                  if (!confirm(`¿Borrar ${selected.size} fila(s) en ${env === "published" ? "producción" : "vista previa"}? Es definitivo.`)) return;
                   try {
-                    await api(`/projects/${projectId}/db/rows/delete`, { body: { table, keys: [...selected] } });
+                    await api(servicePath(projectId, "db/rows/delete", env), { body: { table, keys: [...selected] } });
                     void loadRows();
                   } catch (e) {
                     setError((e as Error).message);
@@ -205,13 +206,13 @@ export function DataPanel({ projectId, projectName, reloadKey }: { projectId: st
           columns={rows.columns}
           onClose={() => setAdding(false)}
           onSubmit={async (values) => {
-            await api(`/projects/${projectId}/db/rows`, { body: { table, values } });
+            await api(servicePath(projectId, "db/rows", env), { body: { table, values } });
             setAdding(false);
             void loadRows();
           }}
         />
       )}
-      {sqlOpen && <SqlConsole projectId={projectId} onClose={() => (setSqlOpen(false), void schema.reload(), void loadRows())} />}
+      {sqlOpen && <SqlConsole projectId={projectId} env={env} onClose={() => (setSqlOpen(false), void schema.reload(), void loadRows())} />}
     </div>
   );
 }
@@ -249,12 +250,12 @@ function AddRowDialog(props: { table: string; columns: Col[]; onClose: () => voi
   );
 }
 
-function SqlConsole({ projectId, onClose }: { projectId: string; onClose: () => void }) {
+function SqlConsole({ projectId, env, onClose }: { projectId: string; env: ServiceEnvironment; onClose: () => void }) {
   const [sql, setSql] = useState("");
   const [out, setOut] = useState<{ error?: string; results?: { fields: string[]; rows: Record<string, unknown>[]; affectedRows: number }[] } | null>(null);
   return (
     <Modal onClose={onClose} className="modal" >
-      <h3>Consola SQL</h3>
+      <h3>Consola SQL · {env === "published" ? "Producción" : "Vista previa"}</h3>
       <textarea className="code" rows={6} autoFocus placeholder="select * from …" value={sql} onChange={(e) => setSql(e.target.value)} />
       <div className="row">
         <span className="small muted grow">Postgres 18. Los cambios son reales e inmediatos.</span>
@@ -263,7 +264,7 @@ function SqlConsole({ projectId, onClose }: { projectId: string; onClose: () => 
           disabled={!sql.trim()}
           onClick={async () => {
             try {
-              setOut(await api(`/projects/${projectId}/db/sql`, { body: { sql } }));
+              setOut(await api(servicePath(projectId, "db/sql", env), { body: { sql } }));
             } catch (e) {
               setOut({ error: (e as Error).message });
             }
@@ -697,12 +698,12 @@ export function PaymentsPanel({ projectId }: { projectId: string }) {
 
 // --- Storage ---------------------------------------------------------------------------------
 
-export function StoragePanel({ projectId, reloadKey }: { projectId: string; reloadKey: number }) {
+export function StoragePanel({ projectId, reloadKey, env = "preview" }: { projectId: string; reloadKey: number; env?: ServiceEnvironment }) {
   const store = useLoad<{ objects: { key: string; filename: string; contentType: string; size: number; createdAt: string }[]; bytes: number; quotaBytes: number }>(
-    `/projects/${projectId}/storage`,
+    servicePath(projectId, "storage", env),
     [reloadKey],
   );
-  const files = useLoad<{ files: { path: string; size: number }[] }>(`/projects/${projectId}/files`, [reloadKey]);
+  const files = useLoad<{ files: { path: string; size: number }[] }>(servicePath(projectId, "files", env), [reloadKey]);
   const [section, setSection] = useState<"uploads" | "static">("uploads");
   if (!store.data || !files.data) return <Loading error={store.error || files.error} />;
   const statics = files.data.files.filter((f) => f.path.startsWith("static/") && !f.path.startsWith("static/__dev/"));
@@ -712,7 +713,7 @@ export function StoragePanel({ projectId, reloadKey }: { projectId: string; relo
       <div className="list" style={{ padding: 12, display: "grid", alignContent: "start", gap: 6 }}>
         <div style={{ fontWeight: 700, fontSize: 15 }}>Archivos</div>
         <div className="small muted" style={{ marginBottom: 6 }}>
-          Lo que guarda tu app
+          Subidas compartidas entre entornos. Estáticos de {env === "published" ? "producción" : "vista previa"}.
         </div>
         <button className={section === "uploads" ? "active" : ""} onClick={() => setSection("uploads")}>
           ⇪ Subidos por usuarios <span className="count" style={{ marginLeft: "auto" }}>{store.data.objects.length}</span>

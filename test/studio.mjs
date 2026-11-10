@@ -508,11 +508,16 @@ async function main() {
 
   await step("paneles: buscar usuarios y filtrar registros muestra resultados y vacíos útiles", async () => {
     const sandbox = await context.newPage();
-    await sandbox.route("**/api/projects/*/users", (route) => route.fulfill({ json: { users: [
+    await sandbox.route("**/api/projects/*", async (route) => {
+      const response = await route.fetch();
+      const data = await response.json();
+      await route.fulfill({ response, json: { ...data, project: { ...data.project, slug: "panel-regression" } } });
+    });
+    await sandbox.route(/\/api\/projects\/[^/]+\/users\?env=(preview|published)$/, (route) => route.fulfill({ json: { users: [
       { id: "ux-admin", email: "admin@example.test", name: "Admin", role: "admin", hasPassword: true, createdAt: new Date().toISOString() },
       { id: "ux-member", email: "member@example.test", name: "Invitado", role: "user", hasPassword: false, createdAt: new Date().toISOString() },
     ] } }));
-    await sandbox.route("**/api/projects/*/logs", (route) => route.fulfill({ json: { logs: [
+    await sandbox.route(/\/api\/projects\/[^/]+\/logs\?env=(preview|published)$/, (route) => route.fulfill({ json: { logs: [
       { at: new Date().toISOString(), env: "preview", level: "info", source: "http", message: "Vista previa lista" },
       { at: new Date().toISOString(), env: "published", level: "error", source: "job", message: "No se pudo enviar resumen" },
     ] } }));
@@ -530,14 +535,16 @@ async function main() {
       await sandbox.getByRole("cell", { name: "member@example.test", exact: true }).waitFor();
       await screenshot(sandbox, "builder-users-desktop");
       await nav.getByRole("button", { name: "Registros", exact: true }).click();
-      await sandbox.getByRole("button", { name: /^Entorno de los registros:/ }).click();
-      await sandbox.getByRole("option", { name: "Publicada", exact: true }).click();
+      await sandbox.getByLabel("Entorno de servicios").selectOption("published");
       await sandbox.getByLabel("Solo errores").check();
       await sandbox.locator(".log-line").filter({ hasText: "No se pudo enviar resumen" }).waitFor();
       assert(await sandbox.locator(".log-line").filter({ hasText: "Vista previa lista" }).count() === 0, "no se filtró el entorno");
       await sandbox.getByRole("searchbox", { name: "Buscar registros" }).fill("inexistente");
       await sandbox.getByText("No hay registros con estos filtros").waitFor();
       await sandbox.getByRole("button", { name: "Limpiar filtros" }).click();
+      await sandbox.locator(".log-line").filter({ hasText: "No se pudo enviar resumen" }).waitFor();
+      assert(await sandbox.locator(".log-line").filter({ hasText: "Vista previa lista" }).count() === 0, "limpiar filtros cambió el entorno seleccionado");
+      await sandbox.getByLabel("Entorno de servicios").selectOption("preview");
       await sandbox.locator(".log-line").filter({ hasText: "Vista previa lista" }).waitFor();
       await sandbox.setViewportSize({ width: 390, height: 844 });
       assert(await sandbox.evaluate(() => document.documentElement.scrollWidth) <= 391, "los filtros de registros desbordan en móvil");
@@ -1304,6 +1311,8 @@ async function main() {
     assert((await security.getAttribute("aria-current")) === "page", "Seguridad no se pudo abrir desde la navegación móvil");
     const bounds = await nav.evaluate((el) => ({ left: el.getBoundingClientRect().left, right: el.getBoundingClientRect().right, scrollWidth: document.documentElement.scrollWidth }));
     assert(bounds.left >= 0 && bounds.right <= 320 && bounds.scrollWidth <= 321, `la navegación móvil de herramientas desborda: ${JSON.stringify(bounds)}`);
+    const selector = await page.getByLabel("Entorno de servicios").boundingBox();
+    assert(selector && selector.x >= 0 && selector.x + selector.width <= 320, "el selector de entorno desborda en móvil");
   });
 
   await step("pwa: servidor publica manifest y worker con cabeceras revalidables", async () => {

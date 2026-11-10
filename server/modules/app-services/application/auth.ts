@@ -104,7 +104,7 @@ async function requestPasswordReset(projectId: string, rawEmail: string, appName
     to: email,
     subject: `Tu código para restablecer la contraseña de ${appName}`,
     html: `<p>Tu código es:</p><p style="font-size:28px;letter-spacing:4px"><b>${code}</b></p><p>Caduca en 15 minutos.</p>`,
-  });
+  }, env);
 }
 
 async function confirmPasswordReset(projectId: string, input: { email: string; code: string; password: string }, env: AppEnv = "published") {

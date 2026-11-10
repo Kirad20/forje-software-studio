@@ -21,11 +21,19 @@ vi.mock("../../../server/modules/app-runtime/index.js", async (importOriginal) =
 vi.mock("../../../server/modules/app-services/jobs.js", async (importOriginal) => ({
   ...await importOriginal<typeof import("../../../server/modules/app-services/jobs.js")>(),
   listJobs: vi.fn(async () => ({ jobs: [], runs: [], timers: [], queue: [] })),
+  runJob: vi.fn(async () => {}),
 }));
 
 vi.mock("../../../server/modules/app-services/projectDb.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../../server/modules/app-services/projectDb.js")>();
-  return { ...actual, execSql: vi.fn(async () => [{ n: 1 }]) };
+  return {
+    ...actual, execSql: vi.fn(async () => [{ n: 1 }]),
+    describeSchema: vi.fn(async () => ({})), isAwake: vi.fn(async () => true),
+    listProjectRows: vi.fn(async () => ({ rows: [], total: 0 })),
+    createProjectRow: vi.fn(async () => ({ id: 1 })), deleteProjectRows: vi.fn(async () => 1),
+    listAppUsers: vi.fn(async () => []), projectDbMetrics: vi.fn(async () => ({ operations: 1 })),
+    dumpDatabase: vi.fn(async () => new Blob(["database"])),
+  };
 });
 vi.mock("../../../server/modules/app-services/email.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../../server/modules/app-services/email.js")>();
@@ -48,11 +56,15 @@ const identity = {
 } as unknown as IdentityModule;
 const projects = {
   createProject: vi.fn(async () => ({ id: "created-project", ownerId: "account-1", name: "Orders demo" })),
-  getProject: vi.fn(async () => ({ id: "project-1", ownerId: "account-1" })),
+  getProject: vi.fn(async () => ({ id: "project-1", ownerId: "account-1", name: "App" })),
   readFile: vi.fn(async () => "existing content"),
   readAllFiles: vi.fn(async () => ({
     "jobs/invoices.ts": "",
     "forja.services.json": '{"version":1,"services":{"invoices":{"kind":"worker","jobs":["jobs/invoices.ts"],"replicas":1}}}',
+  })),
+  publishedFiles: vi.fn(async () => ({
+    "jobs/live.ts": "",
+    "forja.services.json": '{"version":1,"services":{"live":{"kind":"worker","jobs":["jobs/live.ts"],"replicas":3}}}',
   })),
   writeFile: vi.fn(async () => undefined),
 } as unknown as ProjectsModule;
@@ -63,8 +75,61 @@ const models = {} as ReturnType<typeof import("../../../server/modules/model-man
 const studioApi = createStudioApi({ identity, projects, knowledge, collaboration, settings, models });
 const app = new Hono().route("/api", studioApi);
 const eventModule = await import("../../../server/modules/project-observability/events.js");
+const dbModule = await import("../../../server/modules/app-services/projectDb.js");
+const emailModule = await import("../../../server/modules/app-services/email.js");
+const jobsModule = await import("../../../server/modules/app-services/jobs.js");
 
 describe("HTTP transport contract", () => {
+  it.each(["preview", "published"] as const)("routes service reads and writes explicitly to %s", async (env) => {
+    const root = "/api/projects/project-1";
+    const headers = { cookie: "forja_session=valid", "content-type": "application/json" };
+    const get = (resource: string) => app.request(`${root}/${resource}${resource.includes("?") ? "&" : "?"}env=${env}`, { headers });
+    const post = (resource: string, body: unknown) => app.request(`${root}/${resource}?env=${env}`, {
+      method: "POST", headers, body: JSON.stringify(body),
+    });
+    expect((await get("db/schema?internal=1")).status).toBe(200);
+    expect(dbModule.describeSchema).toHaveBeenLastCalledWith("project-1", true, env);
+    expect(dbModule.isAwake).toHaveBeenLastCalledWith("project-1", env);
+    expect((await get("db/rows?table=items")).status).toBe(200);
+    expect(dbModule.listProjectRows).toHaveBeenLastCalledWith("project-1", expect.objectContaining({ table: "items" }), env);
+    expect((await post("db/rows", { table: "items", values: { id: 1 } })).status).toBe(200);
+    expect(dbModule.createProjectRow).toHaveBeenLastCalledWith("project-1", "items", { id: 1 }, env);
+    expect((await post("db/rows/delete", { table: "items", keys: [1] })).status).toBe(200);
+    expect(dbModule.deleteProjectRows).toHaveBeenLastCalledWith("project-1", "items", [1], env);
+    expect((await post("db/sql", { sql: "select 1" })).status).toBe(200);
+    expect(dbModule.execSql).toHaveBeenLastCalledWith("project-1", "select 1", env);
+    const dump = await get("db/export");
+    expect(dump.status).toBe(200);
+    expect(await dump.text()).toBe("database");
+    expect(dbModule.dumpDatabase).toHaveBeenLastCalledWith("project-1", env);
+    expect((await get("db/metrics")).status).toBe(200);
+    expect(dbModule.projectDbMetrics).toHaveBeenLastCalledWith("project-1", env);
+    expect((await get("users")).status).toBe(200);
+    expect(dbModule.listAppUsers).toHaveBeenLastCalledWith("project-1", env);
+    expect((await get("emails")).status).toBe(200);
+    expect(emailModule.listEmails).toHaveBeenLastCalledWith("project-1", env);
+    expect((await get("jobs")).status).toBe(200);
+    expect(jobsModule.listJobs).toHaveBeenLastCalledWith("project-1", env);
+    expect((await post("jobs/task/run", {})).status).toBe(200);
+    expect(jobsModule.runJob).toHaveBeenLastCalledWith("project-1", env, "task", null, "manual");
+    const services = await get("service-control");
+    expect(services.status).toBe(200);
+    expect(await services.json()).toMatchObject({
+      services: [{ name: env === "published" ? "live" : "invoices", scalable: env === "preview" }, { name: "monolith" }],
+    });
+    const logs = await get("logs");
+    expect(logs.status).toBe(200);
+    expect(eventModule.readLogs).toHaveBeenLastCalledWith("project-1", { env, level: undefined, limit: 300 });
+  });
+  it("rejects unknown environments and prevents editing the production manifest", async () => {
+    const headers = { cookie: "forja_session=valid", "content-type": "application/json" };
+    expect((await app.request("/api/projects/project-1/users?env=production", { headers })).status).toBe(400);
+    vi.mocked(projects.writeFile).mockClear();
+    expect((await app.request("/api/projects/project-1/service-control/live?env=published", {
+      method: "PATCH", headers, body: '{"replicas":2}',
+    })).status).toBe(400);
+    expect(projects.writeFile).not.toHaveBeenCalled();
+  });
   it("authenticates project service reads and validates persistent scaling and targeted restarts", async () => {
     const url = "/api/projects/project-1/service-control";
     expect((await app.request(url)).status).toBe(401);
