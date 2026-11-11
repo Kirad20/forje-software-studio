@@ -2,7 +2,8 @@ import { createServer } from "node:http";
 import { config } from "../shared/config.js";
 import { closePlatformDb, platformDb } from "../shared/database/index.js";
 import { startJobRunner, stopJobRunner, isJobRunnerStarted } from "../modules/app-services/jobs.js";
-import { stopAppRuntime } from "../modules/app-runtime/index.js";
+import { stopAppRuntime, localMemoryReport } from "../modules/app-runtime/index.js";
+import { isInternalServiceRequest } from "../shared/internalServiceAuth.js";
 import { stopEmailTransport } from "../modules/app-services/email.js";
 import { stopRealtime } from "../modules/app-services/realtime.js";
 import { reloadProviders } from "../modules/model-management/providers.js";
@@ -16,6 +17,17 @@ if (!config.appDataServiceUrl || !config.appDataServiceToken) {
 const monolith = createMonolith();
 const server = createServer((request, response) => {
   response.setHeader("content-type", "application/json");
+  if (request.url === "/internal/memory" && request.method === "POST") {
+    if (!isInternalServiceRequest(request.headers.authorization, config.appDataServiceToken)) {
+      response.writeHead(401).end('{"error":"Unauthorized"}');
+      return;
+    }
+    localMemoryReport("job-worker").then(
+      (report) => response.writeHead(200).end(JSON.stringify(report)),
+      (error) => response.writeHead(500).end(JSON.stringify({ error: (error as Error).message })),
+    );
+    return;
+  }
   if (request.url !== "/healthz") {
     response.writeHead(404).end('{"error":"not found"}');
     return;

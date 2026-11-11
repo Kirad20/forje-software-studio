@@ -20,8 +20,11 @@ vi.mock("../../../../server/shared/config.js", async (importOriginal) => {
 import {
   applyProjectMigrations,
   closeAll,
+  isAwake,
   projectDb,
+  projectDbStats,
 } from "../../../../server/modules/app-services/infrastructure/projectDb.js";
+import { config } from "../../../../server/shared/config.js";
 import { createProjectRows } from "../../../../server/modules/app-services/application/projectData.js";
 import { createProjectRowsRepository } from "../../../../server/modules/app-services/infrastructure/projectRows.js";
 import { createAuthRepository, createQueryRepository, schemaRows } from "../../../../server/modules/app-services/infrastructure/repositories.js";
@@ -239,3 +242,37 @@ it("repairs owner accounts, records recovery emails and safely administers crede
     await platform.close();
   }
 }, 120_000);
+
+it("caps open databases by closing the least recently used idle one, never a busy one, with a small buffer pool", async () => {
+  const previous = config.projectDbs.maxOpen;
+  config.projectDbs.maxOpen = 2;
+  try {
+    await projectDb("lru-a", "published").exec("insert into _forja_migrations values ('a', 'x')");
+    await expect(projectDb("lru-a", "published").one("show shared_buffers")).resolves.toEqual({ shared_buffers: "16MB" });
+    await projectDb("lru-b", "published").one("select 1");
+    await projectDb("lru-a", "published").one("select 1");
+    await projectDb("lru-c", "published").one("select 1");
+    // b was the least recently used.
+    expect(await isAwake("lru-b", "published")).toBe(false);
+    expect(await isAwake("lru-a", "published")).toBe(true);
+    expect(projectDbStats()).toMatchObject({ open: 2, maxOpen: 2 });
+
+    let release!: () => void;
+    const held = projectDb("lru-a", "published").transaction(async (tx) => {
+      await tx.query("select 1");
+      await new Promise<void>((resolve) => { release = resolve; });
+      return tx.one("select count(*)::int as n from _forja_migrations");
+    });
+    await vi.waitFor(() => expect(release).toBeTypeOf("function"));
+    await projectDb("lru-b", "published").one("select 1");
+    await projectDb("lru-d", "published").one("select 1");
+    expect(await isAwake("lru-a", "published")).toBe(true);
+    release();
+    await expect(held).resolves.toEqual({ n: 1 });
+    // Reopening an evicted database keeps its data.
+    await projectDb("lru-c", "published").one("select 1");
+    await expect(projectDb("lru-a", "published").one("select count(*)::int as n from _forja_migrations")).resolves.toEqual({ n: 1 });
+  } finally {
+    config.projectDbs.maxOpen = previous;
+  }
+}, 180_000);

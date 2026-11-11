@@ -27,6 +27,9 @@ interface Open {
   db: PGlite;
   timer: NodeJS.Timeout;
   queue: Promise<unknown>;
+  /** Operations queued or running; an entry with any is never evicted. */
+  active: number;
+  closed: boolean;
 }
 
 export interface ProjectDbMetrics {
@@ -42,7 +45,11 @@ export interface ProjectDbMetrics {
   lastOperationAt: string | null;
 }
 
+/** Insertion order is recency: `get` moves a key to the end, so the first keys are the least recently used. */
 const open = new Map<string, Promise<Open>>();
+const ready = new Map<string, Open>();
+/** A database being closed must finish before the same files are opened again. */
+const closing = new Map<string, Promise<void>>();
 const metricSnapshots = new Map<string, Omit<ProjectDbMetrics, "active">>();
 const previewCopies = new Map<string, Promise<void>>();
 const migrationQueues = new Map<string, Promise<unknown>>();
@@ -106,12 +113,13 @@ async function openDb(projectId: string, env: ProjectDbEnv): Promise<Open> {
   const metrics = metricsFor(key);
   try {
     mkdirSync(dir, { recursive: true });
-    const db = await PGlite.create(dir);
+    const db = await PGlite.create(dir, pgliteOptions());
     await db.exec(BAAS_SCHEMA);
     await db.exec(PROJECT_CACHE_SCHEMA);
     metrics.opens++;
     metrics.openMs += Date.now() - started;
-    const entry: Open = { db, timer: setTimeout(() => {}, 0), queue: Promise.resolve() };
+    const entry: Open = { db, timer: setTimeout(() => {}, 0), queue: Promise.resolve(), active: 0, closed: false };
+    ready.set(key, entry);
     return entry;
   } catch (error) {
     metrics.openFailures++;
@@ -120,10 +128,24 @@ async function openDb(projectId: string, env: ProjectDbEnv): Promise<Open> {
   }
 }
 
-function scheduleSleep(key: string, entry: Open) {
+/**
+ * Postgres' default buffer pool (128MB) is sized for a server; an app database has one connection
+ * and the OS page cache behind it. A small pool cuts each open database's memory roughly in three.
+ */
+function pgliteOptions() {
+  return { startParams: [...PGlite.defaultStartParams, "-c", `shared_buffers=${config.projectDbs.sharedBuffers}`, "-c", "temp_buffers=2MB", "-c", "wal_buffers=1MB"] };
+}
+
+/** Marks the entry closed at once (callers retry with a fresh one), then waits for queued work and closes it. */
+function closeEntry(key: string, entry: Open): Promise<void> {
+  if (entry.closed) return closing.get(key) ?? Promise.resolve();
+  entry.closed = true;
   clearTimeout(entry.timer);
-  entry.timer = setTimeout(async () => {
+  if (ready.get(key) === entry) {
+    ready.delete(key);
     open.delete(key);
+  }
+  const done = (async () => {
     await entry.queue.catch(() => {});
     try {
       await entry.db.close();
@@ -131,8 +153,33 @@ function scheduleSleep(key: string, entry: Open) {
     } catch (error) {
       console.warn(`[forja] no se pudo cerrar la base del proyecto ${key}:`, (error as Error).message);
     }
+  })();
+  closing.set(key, done);
+  void done.finally(() => {
+    if (closing.get(key) === done) closing.delete(key);
+  });
+  return done;
+}
+
+function scheduleSleep(key: string, entry: Open) {
+  clearTimeout(entry.timer);
+  entry.timer = setTimeout(() => {
+    if (entry.active > 0) scheduleSleep(key, entry);
+    else void closeEntry(key, entry);
   }, config.dbIdleMs);
   entry.timer.unref();
+}
+
+/** Over the cap, close the least recently used idle databases. Busy ones are never closed, so the cap is soft. */
+function evictOverflow(keep: string) {
+  let excess = open.size - config.projectDbs.maxOpen;
+  for (const key of open.keys()) {
+    if (excess <= 0) break;
+    const entry = ready.get(key);
+    if (key === keep || !entry || entry.active > 0) continue;
+    void closeEntry(key, entry);
+    excess--;
+  }
 }
 
 async function ensurePreviewCopy(projectId: string): Promise<void> {
@@ -145,7 +192,7 @@ async function ensurePreviewCopy(projectId: string): Promise<void> {
       const dump = await run(projectId, "published", (db) => db.dumpDataDir("gzip"));
       mkdirSync(path.dirname(dir), { recursive: true });
       try {
-        const copy = await PGlite.create(dir, { loadDataDir: dump });
+        const copy = await PGlite.create(dir, { ...pgliteOptions(), loadDataDir: dump });
         await copy.close();
       } catch (error) {
         rmSync(dir, { recursive: true, force: true });
@@ -163,15 +210,24 @@ async function ensurePreviewCopy(projectId: string): Promise<void> {
 async function get(projectId: string, env: ProjectDbEnv): Promise<Open> {
   if (env === "preview") await ensurePreviewCopy(projectId);
   const key = dbKey(projectId, env);
-  let p = open.get(key);
-  if (!p) {
-    p = openDb(projectId, env);
-    open.set(key, p);
-    p.catch(() => open.delete(key));
+  for (;;) {
+    await closing.get(key);
+    let p = open.get(key);
+    if (p) {
+      open.delete(key);
+      open.set(key, p);
+    } else {
+      p = openDb(projectId, env);
+      open.set(key, p);
+      p.catch(() => { if (open.get(key) === p) open.delete(key); });
+      evictOverflow(key);
+    }
+    const entry = await p;
+    // Evicted or put to sleep while we waited: open it again.
+    if (entry.closed) continue;
+    scheduleSleep(key, entry);
+    return entry;
   }
-  const entry = await p;
-  scheduleSleep(key, entry);
-  return entry;
 }
 
 /** PGlite is single-connection; queue work so a transaction never interleaves with other queries. */
@@ -179,6 +235,7 @@ async function run<T>(projectId: string, env: ProjectDbEnv, fn: (db: PGlite) => 
   const queuedAt = Date.now();
   const key = dbKey(projectId, env);
   const entry = await get(projectId, env);
+  entry.active++;
   const metrics = metricsFor(key);
   metrics.queueWaitMs += Date.now() - queuedAt;
   const next = entry.queue.then(async () => {
@@ -192,6 +249,7 @@ async function run<T>(projectId: string, env: ProjectDbEnv, fn: (db: PGlite) => 
       throw error;
     } finally {
       metrics.operationMs += Date.now() - started;
+      entry.active--;
     }
   });
   entry.queue = next.catch(() => {});
@@ -408,15 +466,11 @@ export async function closeProject(projectId: string, env?: ProjectDbEnv) {
   for (const currentEnv of env ? [env] : ["published", "preview"] as const) {
     const key = dbKey(projectId, currentEnv);
     const existing = open.get(key);
-    if (!existing) continue;
-    open.delete(key);
-    const e = await existing.catch(() => null);
-    if (e) {
-      clearTimeout(e.timer);
-      await e.queue.catch(() => {});
-      await e.db.close();
-      metricsFor(key).closes++;
+    if (existing) {
+      const e = await existing.catch(() => null);
+      if (e) await closeEntry(key, e);
     }
+    await closing.get(key);
   }
 }
 
@@ -430,23 +484,23 @@ export async function cloneDatabase(fromProjectId: string, toProjectId: string) 
   rmSync(dir, { recursive: true, force: true });
   rmSync(previewDir, { recursive: true, force: true });
   mkdirSync(dir, { recursive: true });
-  const db = await PGlite.create(dir, { loadDataDir: dump });
+  const db = await PGlite.create(dir, { ...pgliteOptions(), loadDataDir: dump });
   await db.close();
 }
 
 export async function closeAll() {
   if (remote) return remote.closeAll();
   await Promise.all([...previewCopies.values()].map((copy) => copy.catch(() => {})));
-  for (const [id, p] of open) {
-    open.delete(id);
+  for (const [id, p] of [...open]) {
     const e = await p.catch(() => null);
-    if (e) {
-      clearTimeout(e.timer);
-      await e.queue.catch(() => {});
-      await e.db.close();
-      metricsFor(id).closes++;
-    }
+    if (e) await closeEntry(id, e);
   }
+  await Promise.all(closing.values());
+}
+
+/** Databases open in this process and the cap; zero in processes that reach them remotely. */
+export function projectDbStats() {
+  return { open: open.size, closing: closing.size, maxOpen: config.projectDbs.maxOpen, sharedBuffers: config.projectDbs.sharedBuffers };
 }
 
 export async function isAwake(projectId: string, env?: ProjectDbEnv) {

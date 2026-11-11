@@ -21,6 +21,7 @@ export interface AppRuntimeHttpPorts {
   reloadSettings(): Promise<void>;
   getSandboxServices?: typeof getSandboxServices;
   restartSandboxService?: typeof restartSandboxService;
+  memoryReport?: () => Promise<unknown>;
 }
 
 export interface ResolvedApp {
@@ -148,6 +149,11 @@ export function createAppRuntimeHttpApp(ports: AppRuntimeHttpPorts) {
     if (!parsed.success) return c.json({ error: "Invalid project event", issues: parsed.error.issues }, 400);
     ports.emitProject(parsed.data.projectId, parsed.data.event);
     return c.json({ ok: true });
+  });
+  app.post("/internal/runtime/memory", async (c) => {
+    if (!isInternalServiceRequest(c.req.header("authorization"), ports.internalToken)) return c.json({ error: "Unauthorized" }, 401);
+    if (!ports.memoryReport) return c.json({ error: "Not available" }, 404);
+    return c.json(await ports.memoryReport());
   });
   app.post("/internal/runtime/reload", async (c) => {
     if (!isInternalServiceRequest(c.req.header("authorization"), ports.internalToken)) {

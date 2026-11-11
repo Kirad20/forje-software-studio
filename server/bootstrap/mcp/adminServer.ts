@@ -14,6 +14,8 @@ interface AdminMcpModules {
   projects: ProjectsModule;
   models: ReturnType<typeof createPlatformModelManagement>;
   auditQuery?: (filter: AuditFilter) => Promise<AuditReport>;
+  /** Memory of each platform service (heap, RSS, open databases, sandboxes, JVMs). */
+  memory?: () => Promise<unknown>;
 }
 
 const id = z.string().trim().min(1).max(200);
@@ -63,7 +65,7 @@ const schemas = {
 };
 type ToolName = keyof typeof schemas;
 const descriptions: Record<ToolName, string> = {
-  system_status: "Estado de configuración de la plataforma: proveedores, modelos y claves configuradas, sin secretos.",
+  system_status: "Estado de la plataforma: proveedores, modelos y claves configuradas (sin secretos) y memoria de cada servicio (heap, RSS, bases PGlite abiertas, sandboxes y JVM).",
   list_settings: "Lista ajustes de plataforma. Los secretos solo indican si están configurados o dañados; nunca se devuelven.",
   update_settings: "Actualiza ajustes no secretos usando sus claves registradas y validación del sistema. No admite claves de API ni secretos.",
   reset_setting: "Restaura un ajuste no secreto a su valor predeterminado. Lee list_settings antes de cambiarlo.",
@@ -119,11 +121,14 @@ export function createAdminMcpHandler(modules: AdminMcpModules) {
     switch (name) {
       case "system_status": {
         schemas[name].parse(input);
-        const [providerList, catalog, list] = await Promise.all([providers(), models.catalog.listCatalog(), settingViews()]);
+        const [providerList, catalog, list, memory] = await Promise.all([
+          providers(), models.catalog.listCatalog(), settingViews(), modules.memory?.(),
+        ]);
         return {
           providers: providerList.length, availableProviders: providerList.filter(p => p.available).length,
           models: catalog.length, availableModels: catalog.filter(m => m.available && m.allowed).length,
           brokenSecrets: list.filter(s => s.secret?.broken).map(s => s.key),
+          ...(memory ? { memory } : {}),
         };
       }
       case "list_settings": schemas[name].parse(input); return { settings: await settingViews() };

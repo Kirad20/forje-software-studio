@@ -20,6 +20,9 @@ services:
         BROWSER: ${FORJA_BROWSER:-1}
         # 0 quita Java/Maven/bubblewrap (backends Spring Boot): imagen ~350 MB menor.
         JAVA: ${FORJA_JAVA:-1}
+    # Heap de V8 acotado por servicio (docs/memory.md). Va en el comando, no en NODE_OPTIONS, para
+    # que npm, los sandboxes y demás procesos hijos no lo hereden.
+    command: ["node", "--max-old-space-size=${FORJA_HEAP_MB:-1024}", "--import", "tsx", "server/bootstrap/server.ts"]
     restart: unless-stopped
     # bubblewrap aísla las compilaciones y JVM de los backends Java; el perfil seccomp por
     # defecto de Docker bloquea sus user namespaces (docs/language-runtimes.md).
@@ -53,6 +56,7 @@ services:
       - APP_RUNTIME_INTERNAL_URL=http://app-runtime:4200
       - BUILDER_SERVICE_URL=http://builder:4300
       - BUILDER_SERVICE_TOKEN=${SERVICE_PASSWORD_BUILDER:?Set SERVICE_PASSWORD_BUILDER}
+      - JOB_WORKER_INTERNAL_URL=http://job-worker:4400
       - APP_RUNTIME_PUBLIC_PORT=${APP_RUNTIME_PUBLIC_PORT:-}
       - FORJA_JOB_WORKER_MODE=external
       - FORJA_JOB_MAX_ATTEMPTS=${FORJA_JOB_MAX_ATTEMPTS:-3}
@@ -108,7 +112,7 @@ services:
         BROWSER: ${FORJA_BROWSER:-1}
         # 0 quita Java/Maven/bubblewrap (backends Spring Boot): imagen ~350 MB menor.
         JAVA: ${FORJA_JAVA:-1}
-    command: ["node", "--import", "tsx", "server/bootstrap/appRuntimeServer.ts"]
+    command: ["node", "--max-old-space-size=${FORJA_APP_RUNTIME_HEAP_MB:-1024}", "--import", "tsx", "server/bootstrap/appRuntimeServer.ts"]
     restart: unless-stopped
     # bubblewrap aísla las compilaciones y JVM de los backends Java; el perfil seccomp por
     # defecto de Docker bloquea sus user namespaces (docs/language-runtimes.md).
@@ -128,6 +132,14 @@ services:
       - DATABASE_URL=postgres://forja:${SERVICE_PASSWORD_POSTGRES:-forja-internal-db}@postgres:5432/forja
       - APP_RUNTIME_PUBLIC_PORT=${APP_RUNTIME_PUBLIC_PORT:-}
       - APP_DATA_SERVICE_TOKEN=${SERVICE_PASSWORD_APP_DATA:-${SERVICE_PASSWORD_BUILDER:?Set SERVICE_PASSWORD_BUILDER}}
+      # Límites de memoria de lo que este servicio aloja (docs/memory.md): bases PGlite abiertas y su
+      # buffer pool, procesos sandbox de endpoints y JVM de los backends Java.
+      - FORJA_DB_MAX_OPEN=${FORJA_DB_MAX_OPEN:-16}
+      - FORJA_DB_SHARED_BUFFERS=${FORJA_DB_SHARED_BUFFERS:-16MB}
+      - FORJA_SANDBOX_MAX_PROCESSES=${FORJA_SANDBOX_MAX_PROCESSES:-16}
+      - FORJA_SANDBOX_MAX_HEAP_MB=${FORJA_SANDBOX_MAX_HEAP_MB:-512}
+      - FORJA_JAVA_MAX_HEAP_MB=${FORJA_JAVA_MAX_HEAP_MB:-256}
+      - FORJA_LANG_MAX_PROCESSES=${FORJA_LANG_MAX_PROCESSES:-4}
     volumes:
       # Este es el único proceso que abre/escribe las bases PGlite de los proyectos.
       - forja-data:/app/data
@@ -166,7 +178,7 @@ services:
         BROWSER: ${FORJA_BROWSER:-1}
         # 0 quita Java/Maven/bubblewrap (backends Spring Boot): imagen ~350 MB menor.
         JAVA: ${FORJA_JAVA:-1}
-    command: ["node", "--import", "tsx", "server/bootstrap/jobWorkerServer.ts"]
+    command: ["node", "--max-old-space-size=${FORJA_JOB_WORKER_HEAP_MB:-512}", "--import", "tsx", "server/bootstrap/jobWorkerServer.ts"]
     restart: unless-stopped
     expose:
       - "4400"
@@ -190,6 +202,9 @@ services:
       - FORJA_JOB_LEASE_MS=${FORJA_JOB_LEASE_MS:-60000}
       - FORJA_JOB_MAX_ATTEMPTS=${FORJA_JOB_MAX_ATTEMPTS:-3}
       - FORJA_JOB_QUEUE_LIMIT=${FORJA_JOB_QUEUE_LIMIT:-1000}
+      # Los jobs corren en procesos sandbox de este servicio (docs/memory.md).
+      - FORJA_SANDBOX_MAX_PROCESSES=${FORJA_SANDBOX_MAX_PROCESSES:-16}
+      - FORJA_SANDBOX_MAX_HEAP_MB=${FORJA_SANDBOX_MAX_HEAP_MB:-512}
     volumes:
       # Compiled source and dependencies only; project DB access is always remote.
       - forja-data:/app/data
@@ -215,7 +230,7 @@ services:
         BROWSER: ${FORJA_BROWSER:-1}
         # 0 quita Java/Maven/bubblewrap (backends Spring Boot): imagen ~350 MB menor.
         JAVA: ${FORJA_JAVA:-1}
-    command: ["node", "--import", "tsx", "server/bootstrap/builderServer.ts"]
+    command: ["node", "--max-old-space-size=${FORJA_BUILDER_HEAP_MB:-1536}", "--import", "tsx", "server/bootstrap/builderServer.ts"]
     restart: unless-stopped
     # bubblewrap aísla las compilaciones y JVM de los backends Java; el perfil seccomp por
     # defecto de Docker bloquea sus user namespaces (docs/language-runtimes.md).

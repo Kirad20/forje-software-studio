@@ -102,6 +102,8 @@ export const config = {
   /** Optional isolated worker for builder turns and MCP tools. */
   builderServiceUrl: env.BUILDER_SERVICE_URL ?? "",
   builderServiceToken: env.BUILDER_SERVICE_TOKEN ?? "",
+  /** Optional external jobs worker; only used to read its memory report (system_status). */
+  jobWorkerInternalUrl: env.JOB_WORKER_INTERNAL_URL ?? "",
   /** Optional public port for preview/published app hosts when the runtime has its own local port. */
   appRuntimePublicPort: env.APP_RUNTIME_PUBLIC_PORT ?? "",
   /**
@@ -115,6 +117,20 @@ export const config = {
     maxProcesses: Math.max(1, Number(env.FORJA_LANG_MAX_PROCESSES ?? 4) || 4),
     idleMs: Math.max(60_000, Number(env.FORJA_LANG_IDLE_MS ?? 5 * 60_000) || 5 * 60_000),
     buildTimeoutMs: Math.max(60_000, Number(env.FORJA_LANG_BUILD_TIMEOUT_MS ?? 10 * 60_000) || 10 * 60_000),
+  },
+  /**
+   * Per-project PGlite databases are the largest memory consumer (docs/memory.md): each open one
+   * keeps its own Postgres buffer pool. `maxOpen` caps how many stay open in this process (the
+   * least recently used idle one closes first); `sharedBuffers` sizes each pool.
+   */
+  projectDbs: {
+    maxOpen: Math.max(1, Number(env.FORJA_DB_MAX_OPEN ?? 16) || 16),
+    sharedBuffers: /^\d+(kB|MB)$/.test(env.FORJA_DB_SHARED_BUFFERS ?? "") ? env.FORJA_DB_SHARED_BUFFERS! : "16MB",
+  },
+  /** Node sandbox processes for endpoints and jobs: at most `maxProcesses` alive, each with this heap. */
+  sandbox: {
+    maxProcesses: Math.max(1, Number(env.FORJA_SANDBOX_MAX_PROCESSES ?? 16) || 16),
+    maxHeapMb: Math.max(64, Number(env.FORJA_SANDBOX_MAX_HEAP_MB ?? 512) || 512),
   },
   secretsKey: env.SECRETS_KEY ?? "",
   /**

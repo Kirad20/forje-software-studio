@@ -50,7 +50,8 @@ borran con el proyecto. La caché Maven es por proyecto a propósito: compartida
 envenenarla con un plugin o procesador de anotaciones para otro.
 
 Memoria aproximada: `heap + ~150 MB` por JVM y ~600 MB durante una compilación. Con los valores
-por defecto, reserva ~2 GB extra para el contenedor `app-runtime`.
+por defecto, reserva ~2 GB extra para el contenedor `app-runtime`. El resto de límites de memoria
+(bases PGlite, sandboxes y heap de cada servicio) y cómo medirla están en [memory.md](memory.md).
 
 ## Imagen y despliegue
 

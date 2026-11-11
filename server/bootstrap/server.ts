@@ -14,6 +14,7 @@ import { attachSocket, stopRealtime } from "../modules/app-services/realtime.js"
 import { createMcpHandler } from "./mcp/server.js";
 import { accountFromOAuthAccessToken, createMcpOAuthRouter } from "./mcp/oauth.js";
 import { createAdminMcpHandler } from "./mcp/adminServer.js";
+import { platformMemoryReport } from "./platformMemory.js";
 import { closePlatformDb, platformDb } from "../shared/database/index.js";
 import { createLocalSeed } from "./database/localSeed.js";
 import { reloadProviders } from "../modules/model-management/providers.js";
@@ -38,7 +39,7 @@ const monolith = createMonolith();
 const builderClient = config.builderServiceUrl ? new BuilderServiceClient(config.builderServiceUrl, config.builderServiceToken) : undefined;
 const studioApi = createStudioApi(monolith, builderClient);
 const handleMcp = createMcpHandler(monolith, builderClient);
-const handleAdminMcp = createAdminMcpHandler(monolith);
+const handleAdminMcp = createAdminMcpHandler({ ...monolith, memory: platformMemoryReport });
 const { getProject, getProjectBySlug } = monolith.projects;
 const { accountFromApiToken, accountFromAdminApiToken } = monolith.identity;
 const seedLocal = createLocalSeed(monolith.settings);

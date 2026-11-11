@@ -7,7 +7,7 @@ import { createAppDataService } from "../modules/app-services/appDataService.js"
 import { applyProjectMigrations, closeAll, closeProject, cloneDatabase, dumpDatabase, execSql, isAwake, projectDb, projectDbMetrics } from "../modules/app-services/projectDb.js";
 import { attachSocket, stopRealtime } from "../modules/app-services/realtime.js";
 import { stopEmailTransport } from "../modules/app-services/email.js";
-import { parseAppHost, checkShareToken, cookie, serveApp, stopAppRuntime } from "../modules/app-runtime/index.js";
+import { parseAppHost, checkShareToken, cookie, serveApp, stopAppRuntime, localMemoryReport } from "../modules/app-runtime/index.js";
 import { reloadProviders } from "../modules/model-management/providers.js";
 import { ApplicationLifecycle } from "./ApplicationLifecycle.js";
 import { createMonolith } from "./composition.js";
@@ -25,6 +25,7 @@ const runtimePorts = {
   serveApp,
   internalToken: config.appDataServiceToken,
   emitProject,
+  memoryReport: () => localMemoryReport("app-runtime"),
   reloadSettings: async () => {
     await monolith.settings.loadSettings();
     await reloadProviders();

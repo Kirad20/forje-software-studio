@@ -27,6 +27,7 @@ export interface BuilderServicePorts {
   startSecurityReview(account: Account, projectId: string): Promise<boolean>;
   runTurn(input: BuilderTurnInput, emit: (event: AgentEvent) => void): Promise<void>;
   runTool(name: string, input: Record<string, unknown>, context: ToolContext, structured: boolean): Promise<BuilderToolResult>;
+  memoryReport?(): Promise<unknown>;
 }
 
 type BuilderStreamSubscriber = { send: (event: AgentEvent) => void; close: () => void };
@@ -51,6 +52,10 @@ export function createBuilderService(ports: BuilderServicePorts, token: string) 
   });
 
   app.get("/healthz", (c) => c.json({ ok: true }));
+  app.post("/internal/builder/memory", async (c) => {
+    if (!ports.memoryReport) return c.json({ error: "Not available" }, 404);
+    return c.json(await ports.memoryReport());
+  });
   app.post("/internal/builder/reload", async (c) => {
     await ports.reloadSettings();
     return c.json({ ok: true });
