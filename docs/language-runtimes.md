@@ -59,19 +59,39 @@ La imagen instala `openjdk-17-jdk-headless`, `maven` y `bubblewrap` (~350 MB). P
 construye con `--build-arg JAVA=0` (variable `FORJA_JAVA=0` en `docker-compose.yml`/Coolify); el
 proyecto Spring mostrará entonces «Java no está instalado en este servidor».
 
-bubblewrap crea un *user namespace* sin privilegios. El perfil seccomp por defecto de Docker lo
-bloquea, así que los contenedores que compilan o ejecutan Java (`app-runtime` y `builder`) llevan
-en `docker-compose.yml`:
+bubblewrap crea *user/PID namespaces* sin privilegios y monta su propio `/proc`. Además de
+seccomp y AppArmor, las rutas de sistema enmascaradas por Docker pueden bloquear ese montaje.
+Por eso los servicios que compilan o ejecutan Java (`forja`, `app-runtime` y `builder`) llevan
+en `docker-compose.yml` las tres opciones:
 
 ```yaml
 security_opt:
   - seccomp=unconfined
   - apparmor=unconfined
+  - systempaths=unconfined
 ```
 
-Sin eso, `check_build` informa «bubblewrap no puede aislar procesos aquí» y el backend Java no se
-ejecuta; el resto de Forja funciona igual. En Kubernetes equivale a
-`securityContext.seccompProfile.type: Unconfined` y AppArmor `unconfined`. El host necesita
+Si el error concreto es `bwrap: Can't mount proc on /newroot/proc: Operation not permitted`,
+comprueba especialmente `systempaths=unconfined`: seccomp y AppArmor por sí solos no quitan las
+máscaras de `/proc`. Esta opción retira las rutas enmascaradas y de solo lectura del contenedor
+exterior; amplía su superficie de acceso al kernel, aunque bubblewrap conserva sus propios
+namespaces, raíz mínima y entorno vacío. No añadas `privileged`, `SYS_ADMIN`, `pid: host` ni uses
+`FORJA_LANG_SANDBOX=unsafe` como solución en producción.
+
+Los cambios de `security_opt` requieren **recrear**, no solo reiniciar los contenedores:
+
+```sh
+docker compose up -d --force-recreate forja builder app-runtime
+```
+
+En Coolify, aplica esas opciones en el Compose del despliegue y vuelve a desplegar recreando los
+servicios. Después ejecuta `check_build` otra vez. La comprobación de bubblewrap se guarda en
+memoria durante la vida de cada proceso, por lo que también necesita ese reinicio.
+
+Sin los permisos necesarios, `check_build` informa «bubblewrap no puede aislar procesos aquí» y
+el backend Java no se ejecuta; el resto de Forja funciona igual. En Kubernetes, seccomp y
+AppArmor deben permitir estos namespaces y la política del runtime también debe permitir el
+montaje de `/proc` anidado; desactivar solo seccomp/AppArmor no garantiza esto. El host necesita
 `kernel.unprivileged_userns_clone=1` (por defecto en Debian/Ubuntu recientes; en Ubuntu 24.04 con
 `kernel.apparmor_restrict_unprivileged_userns=1` hay que permitirlo para el contenedor).
 

@@ -1,7 +1,7 @@
-# Graph Report - porbeagle  (2026-11-10)
+# Graph Report - porbeagle  (2026-11-11)
 
 ## Corpus Check
-- 729 files · ~359,412 words
+- 729 files · ~359,632 words
 - Verdict: corpus is large enough that graph structure adds value.
 - Unclassified: 14 file(s) not represented in the graph (top: (none) 6, .css 6, .example 1)
 
@@ -11,7 +11,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `6180f8dd`
+- Built from commit: `61a743e8`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
