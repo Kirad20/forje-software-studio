@@ -26,7 +26,7 @@ const AUTHORED_SKILLS: Skill[] = [
     description: "Forms with several fields, validation and a submit state (react-hook-form with the contract's zod schema)",
     body: `Install once: add_dependency react-hook-form and @hookform/resolvers.
 - Validate with the same zod schema the endpoint parses (contract["POST x/y"].input from helpers/contract.ts): the form and the server can never disagree.
-- Use Input, Textarea and Select from @forja/ui with label and error; they forward refs, so register() works on them.
+- Use the project's field components from components/ui/ (designed variants built on Input, Textarea and Select from @forja/ui with label and error; those forward refs, so register() works through them). The sample below uses the primitives directly to stay short. Put the form in its feature folder (components/<feature>/NoteForm.tsx).
 - Disable the submit with loading while it runs, report success and failure with toast, reset the form after success.
 
   import { useForm } from "react-hook-form";
@@ -94,50 +94,63 @@ For several series use one token per series (--primary, --success, --danger) and
   },
   {
     name: "data-tables",
-    description: "Sortable, filterable, paginated tables (@tanstack/react-table v8) with loading and empty states",
+    description: "Sortable, filterable, always-paginated tables (@tanstack/react-table v8, server-side pages) with loading and empty states",
     body: `Install once: add_dependency @tanstack/react-table (version 8: useReactTable, flexRender).
-- Under about 200 rows sort and filter in the browser. Beyond that paginate in the endpoint (limit and offset validated with zod, a fixed allow-list for the sort column) and keep the table in manual mode.
+- Every table is paginated, always, also when it has few rows today. Paginate in the endpoint: limit (zod int 1-100, default 25) plus page/offset (when the screen shows "Página X de Y") or a keyset cursor (feeds and big, growing tables), a fixed allow-list for the sort column, and return { items, total } or { items, nextCursor }. The adapter's query always ends with limit; count(*) only when you show the total.
+- The table runs in manual mode (manualPagination, manualSorting, rowCount) and the page and sort live in the URL query, so reload and back keep the place. Fetch with the typed client: xApi.useGet("products/list", { page, limit, sort }).
+- Pagination controls: previous/next buttons (disabled at the ends), "Página X de Y", optionally a page size select; keep the previous rows visible while the next page loads.
 - Header cells are buttons, so sorting works from the keyboard. Show Skeleton rows while loading and EmptyState when there are no rows.
 
-  import { useState } from "react";
-  import { flexRender, getCoreRowModel, getSortedRowModel, useReactTable, type ColumnDef, type SortingState } from "@tanstack/react-table";
-
+  import { flexRender, getCoreRowModel, useReactTable, type ColumnDef, type OnChangeFn, type PaginationState, type SortingState } from "@tanstack/react-table";
   type Row = { id: number; name: string; stock: number };
   const columns: ColumnDef<Row>[] = [
     { accessorKey: "name", header: "Producto" },
     { accessorKey: "stock", header: "Stock" },
   ];
-
-  export function ProductsTable({ rows }: { rows: Row[] }) {
-    const [sorting, setSorting] = useState<SortingState>([]);
-    const table = useReactTable({ data: rows, columns, state: { sorting }, onSortingChange: setSorting, getCoreRowModel: getCoreRowModel(), getSortedRowModel: getSortedRowModel() });
+  type Props = {
+    rows: Row[]; total: number;
+    pagination: PaginationState; onPaginationChange: OnChangeFn<PaginationState>;
+    sorting: SortingState; onSortingChange: OnChangeFn<SortingState>;
+  };
+  export function ProductsTable({ rows, total, pagination, onPaginationChange, sorting, onSortingChange }: Props) {
+    const table = useReactTable({
+      data: rows, columns, rowCount: total, state: { pagination, sorting }, onPaginationChange, onSortingChange,
+      manualPagination: true, manualSorting: true, getCoreRowModel: getCoreRowModel(),
+    });
     return (
-      <table>
-        <thead>
-          {table.getHeaderGroups().map((g) => (
-            <tr key={g.id}>
-              {g.headers.map((h) => (
-                <th key={h.id} aria-sort={h.column.getIsSorted() === "asc" ? "ascending" : h.column.getIsSorted() === "desc" ? "descending" : "none"}>
-                  <button type="button" onClick={h.column.getToggleSortingHandler()}>{flexRender(h.column.columnDef.header, h.getContext())}</button>
-                </th>
-              ))}
-            </tr>
-          ))}
-        </thead>
-        <tbody>
-          {table.getRowModel().rows.map((r) => (
-            <tr key={r.id}>
-              {r.getVisibleCells().map((c) => (
-                <td key={c.id}>{flexRender(c.column.columnDef.cell, c.getContext())}</td>
-              ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <div>
+        <table>
+          <thead>
+            {table.getHeaderGroups().map((g) => (
+              <tr key={g.id}>
+                {g.headers.map((h) => (
+                  <th key={h.id} aria-sort={h.column.getIsSorted() === "asc" ? "ascending" : h.column.getIsSorted() === "desc" ? "descending" : "none"}>
+                    <button type="button" onClick={h.column.getToggleSortingHandler()}>{flexRender(h.column.columnDef.header, h.getContext())}</button>
+                  </th>
+                ))}
+              </tr>
+            ))}
+          </thead>
+          <tbody>
+            {table.getRowModel().rows.map((r) => (
+              <tr key={r.id}>
+                {r.getVisibleCells().map((c) => (
+                  <td key={c.id}>{flexRender(c.column.columnDef.cell, c.getContext())}</td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <nav aria-label="Paginación">
+          <button type="button" onClick={() => table.previousPage()} disabled={!table.getCanPreviousPage()}>Anterior</button>
+          <span>Página {pagination.pageIndex + 1} de {Math.max(table.getPageCount(), 1)}</span>
+          <button type="button" onClick={() => table.nextPage()} disabled={!table.getCanNextPage()}>Siguiente</button>
+        </nav>
+      </div>
     );
   }
 
-Style the table in a CSS Module with tokens; wrap it in an overflow-x: auto container so it works at 375 px.`,
+Use the project's components/ui/ buttons for the controls. Style the table in a CSS Module with tokens; wrap it in an overflow-x: auto container so it works at 375 px.`,
   },
   {
     name: "drag-and-drop",
@@ -188,11 +201,38 @@ Style the table in a CSS Module with tokens; wrap it in an overflow-x: auto cont
   },
   {
     name: "animations",
-    description: "Motion that helps (motion/react): entering and leaving lists, page transitions, reduced motion",
-    body: `motion and FadeIn come with Forja (no install). Rules: animate only opacity and transform, 150-300 ms, nothing decorative on data-heavy screens, and honor prefers-reduced-motion.
-- One-off entrance: <FadeIn> from @forja/ui.
-- Items that appear and disappear (a list, a toast-like banner): AnimatePresence plus motion elements with initial, animate and exit; give each a stable key.
-- Reorders: add the layout prop to the motion element.
+    description: "Striking, optimized motion (motion/react): orchestrated entrances, scroll reveals, shared layout, springs, lists, reduced motion",
+    body: `motion and FadeIn come with Forja (no install). The goal is motion that impresses and still runs at 60 fps on a mid-range phone.
+Make it striking:
+- Choreograph the first screen: the hero enters in sequence (headline, then supporting text, then the action, then the visual) with staggerChildren 0.06-0.1 and a spring. One memorable sequence beats a fade on every block.
+- Scroll reveals: sections and cards rise in with whileInView and viewport { once: true, amount: 0.3 }, staggered within each group.
+- Shared layout: layoutId to morph a card into its detail, an active tab indicator, or a selected chip; the layout prop for reorders and size changes; AnimatePresence with mode "popLayout" for lists, and mode "wait" for page or step transitions.
+- Micro-interactions: whileHover and whileTap with springs (scale 0.97-1.03, lift y -2), animated counters and progress, success checkmarks, and skeletons that cross-fade into content.
+- Depth with useScroll and useTransform (parallax, a progress bar, a sticky scene), driven by motion values, never by React state.
+Keep it optimized:
+- Animate only transform and opacity, plus filter or clip-path on a few elements. Never width, height, top, left, margin or box-shadow; fake shadows with an opacity pseudo-element. Never use transition: all.
+- Prefer springs (type "spring", stiffness 300-500, damping 25-35) and ease-out. Interaction feedback takes 120-250 ms, entrances up to about 600 ms, and exits are shorter than entrances.
+- Never block input and never keep content hidden waiting for an animation; staggered groups stay small (about 12 items), and long lists animate only rows that enter or leave.
+- Bundle: on pages with heavy motion wrap them in <LazyMotion features={domAnimation} strict> and use m.div instead of motion.div.
+- Reduced motion: wrap the app in <MotionConfig reducedMotion="user"> (in pages/_layout.tsx); it keeps opacity and drops movement. For custom values, check useReducedMotion().
+- Use will-change only while an element animates, and never on many elements. Pure CSS (@keyframes, transitions, animation-timeline: view()) is fine and costs no JavaScript.
+- Verify: walk the flow with browser_test on mobile, and confirm nothing jumps, overlaps or remains invisible.
+
+  import type { ReactNode } from "react";
+  import { LazyMotion, domAnimation, m } from "motion/react";
+  const group = { hidden: {}, show: { transition: { staggerChildren: 0.08, delayChildren: 0.05 } } };
+  const item = { hidden: { opacity: 0, y: 24 }, show: { opacity: 1, y: 0, transition: { type: "spring" as const, stiffness: 380, damping: 30 } } };
+  export function Hero({ title, text, action }: { title: string; text: string; action: ReactNode }) {
+    return (
+      <LazyMotion features={domAnimation} strict>
+        <m.section variants={group} initial="hidden" animate="show">
+          <m.h1 variants={item}>{title}</m.h1>
+          <m.p variants={item}>{text}</m.p>
+          <m.div variants={item} whileHover={{ y: -2 }} whileTap={{ scale: 0.97 }}>{action}</m.div>
+        </m.section>
+      </LazyMotion>
+    );
+  }
 
   import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 
@@ -329,7 +369,7 @@ Style the table in a CSS Module with tokens; wrap it in an overflow-x: auto cont
 - Decide first whether separate services are justified by independent ownership, deployment or scaling; keep the default monolith when they are not.
 - Model domain-driven design around bounded contexts, domain invariants and explicit contracts. Give each service a clear data owner; table ownership is a code convention because all services share one project database and its credentials.
 - Keep the domain pure: no ctx, SQL, SDK or runtime imports. Put use cases behind ports; define repository and queue interfaces next to the context. Implement adapters separately and inject them at the endpoint/job entrypoint.
-- Forja projects allow pages/, components/, helpers/, endpoints/, jobs/, static/ and root config files. A practical layout is helpers/<context>/domain.ts, application.ts, ports.ts and adapters/*.ts; endpoints/<context>_* and jobs/<name>.ts are inbound adapters and composition roots. Database adapters under helpers must be imported only by server entrypoints, never by pages or browser components.
+- Every Forja app already uses one bounded context per feature in helpers/<context>/ (domain.ts, ports.ts, application.ts, adapters.ts or adapters/*.ts; see the manual's "Backend"). Splitting into services moves entrypoints, not code: endpoints/<context>/<action>_<METHOD>.ts and jobs/<name>.ts stay inbound adapters and composition roots. Database adapters under helpers must be imported only by server entrypoints, never by pages or browser components.
 - Create entrypoint files before assigning them in forja.services.json. Assign exact endpoint/job paths once; workers cannot expose endpoints. Unassigned entrypoints remain in the monolith.
 - The native cross-service async mechanism is ctx.jobs.enqueue. It confirms durable acceptance, not completion; delivery is at least once, so handlers must be idempotent. Include only the data the receiver needs, validate payloads, and handle enqueue failure. A database write and enqueue are not atomic; use an outbox/reconciler when losing an event is unacceptable.
 - ctx.cache is shared across service replicas for the same project and environment. Include user/tenant IDs in keys for private data, never cache secrets, and invalidate after writes that change the cached result.
@@ -345,7 +385,7 @@ Style the table in a CSS Module with tokens; wrap it in an overflow-x: auto cont
     description: "Accounts: setup_auth, login, sign-up and forgot-password pages, guarding pages and endpoints",
     body: `When the app needs accounts:
 - Server: call setup_auth once (it creates the owner's admin account, with no password) and protect every private endpoint with ctx.requireUser() (ctx.requireUser("admin") for admin-only), checking that the row belongs to that user.
-- Pages: build pages/login.tsx with sign-in, sign-up and the full forgot-password flow (request a code with auth.requestPasswordReset(email), then auth.resetPassword({ email, code, password }) with the 8-digit code). Use auth.signIn, auth.signUp and auth.signOut from @forja/client, @forja/ui inputs with inline errors, and toast for failures.
+- Pages: build pages/login.tsx with sign-in, sign-up and the full forgot-password flow (request a code with auth.requestPasswordReset(email), then auth.resetPassword({ email, code, password }) with the 8-digit code). Use auth.signIn, auth.signUp and auth.signOut from @forja/client, the project's components/ui/ fields with inline errors, and toast for failures.
 - Guard private pages with useUser(): undefined means loading (show a Spinner), null means signed out (navigate to /login), an object is the user { id, email, name, role }.
 - Tell the owner to set their own admin password with "forgot password".
 - Hiding a button is not security: every check that matters is server-side.
@@ -411,7 +451,7 @@ Style the table in a CSS Module with tokens; wrap it in an overflow-x: auto cont
 3. One signature idea: a single memorable element (a big numeric readout, a distinctive color block, an unusual layout of the main list). Everything else stays quiet so that one thing is seen.
 4. Content first: write the real copy, the real labels and a few realistic sample rows before styling. A layout that only works with lorem ipsum does not work.
 5. Hierarchy: one primary action per screen, one h1, a clear second level. If two things shout, one of them is wrong.
-Then build with the kit: tokens in base.css, screens composed from @forja/ui, your own CSS Modules only for layout. Verify at 375 px and desktop, in light and dark, and run check_standards.
+Then build with the project's own kit: tokens in base.css, the components/ui/ variants that carry this tone (on @forja/ui and radix primitives, never their stock look), features composed in components/<feature>/, your own CSS Modules for layout. Verify at 375 px and desktop, in light and dark, and run check_standards.
 Before you finish, load the skill "impeccable" (part "reference/critique") and judge the result the way a reviewer would.`,
   },
   {
@@ -439,7 +479,8 @@ These four palettes already pass those ratios in light and dark. They are neutra
   light  --bg:#f4f5f6 --surface:#ffffff --text:#15171a --muted:#596068 --border:#dcdfe3 --primary:#0e7490 --primary-text:#ffffff
   dark   --bg:#0d0f11 --surface:#15181b --text:#eceff2 --muted:#a0a8b0 --border:#2a2f35 --primary:#67e8f9 --primary-text:#04222a
 
-Put the light values in :root and the dark ones in @media (prefers-color-scheme: dark) { :root { … } }. Keep --danger #b91c1c (light) and #f87171 (dark), --success #15803d and #4ade80.`,
+Put the light values in :root and the dark ones in @media (prefers-color-scheme: dark) { :root { … } }. Keep --danger #b91c1c (light) and #f87171 (dark), --success #15803d and #4ade80.
+Components: turn the tokens into the project's own components/ui/ (Button, Field, Card, Badge, Dialog, EmptyState, ErrorState, Skeleton…) before any screen. Each wraps an @forja/ui or radix-ui primitive for behaviour and accessibility, passes its own class from a .module.css, and exposes the variants this product needs (e.g. Button variant "accent" | "quiet" | "outline", shape "pill" | "square"; Card tone "raised" | "flat" | "inset"). Decide per tone: borders or shadows, radius, density, weight of headings, how the accent appears (fill, underline, outline). Features import only these components, so changing the design is one folder.`,
   },
 ];
 

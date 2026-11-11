@@ -99,6 +99,7 @@ export function Evals() {
   useEffect(() => {
     if (!anyActive && !(open && detail?.status === "running")) return;
     const t = setInterval(() => {
+      if (document.hidden) return;
       reload().catch((e) => setError(e.message));
       if (open) setDetailVersion(v => v + 1);
     }, 3000);

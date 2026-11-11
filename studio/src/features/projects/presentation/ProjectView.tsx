@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useRef, useState, type ComponentType } from "react";
+import { Fragment, lazy, Suspense, useCallback, useEffect, useRef, useState, type ComponentType } from "react";
 import { BarChart3, BookOpen, Clock, Code2, CreditCard, Database, FolderOpen, Globe, LayoutGrid, Mail, Plug, ScrollText, ShieldCheck, Sparkles, Star, UsersRound, type LucideIcon } from "lucide-react";
 import { api, projectsController } from "../application/controller.js";
 import type { ProjectLogLine } from "../application/contracts.js";
@@ -11,7 +11,7 @@ import { External, Refresh } from "../../../shared/Icons.js";
 import { AiPanel, CodePanel, EmailPanel, JobsPanel, LogsPanel, UsersPanel } from "../../files/index.js";
 import { AnalyticsPanel, DataPanel, DocsPanel, IntegrationsPanel, PaymentsPanel, SeoPanel, StoragePanel } from "../../app-services/index.js";
 import { ServiceControlPanel } from "../../service-control/index.js";
-import { ProjectKnowledge } from "../../project-knowledge/index.js";
+const ProjectKnowledge = lazy(() => import("../../project-knowledge/index.js").then((m) => ({ default: m.ProjectKnowledge })));
 import { Avatar, copyText, Menu, MenuItem, useDismiss } from "../../../shared/ui.js";
 import { servicePath, type ServiceEnvironment } from "../../../shared/application/service-environment.js";
 import { CheckpointPanel, Collaborators, DEVICES, PagePalette, PreviewCanvas, ProjectSettings, PublishPanel, type Device, type PreviewHandle, type TextEdit } from "./Workspace.js";
@@ -682,23 +682,29 @@ export function ProjectView({
                 {service === "payments" && <PaymentsPanel projectId={id} />}
                 {service === "logs" && <LogsPanel projectId={id} env={serviceEnv} lines={logLines} />}
                 {service === "security" && (
-                  <SecurityPanel
-                    projectId={id}
-                    reloadKey={filesKey}
-                    building={building}
-                    onFix={(text) => {
-                      setView("preview");
-                      showChat();
-                      setOutbox((o) => ({ nonce: (o?.nonce ?? 0) + 1, text }));
-                    }}
-                  />
+                  <Suspense fallback={<div className="empty" role="status">Cargando…</div>}>
+                    <SecurityPanel
+                      projectId={id}
+                      reloadKey={filesKey}
+                      building={building}
+                      onFix={(text) => {
+                        setView("preview");
+                        showChat();
+                        setOutbox((o) => ({ nonce: (o?.nonce ?? 0) + 1, text }));
+                      }}
+                    />
+                  </Suspense>
                 )}
                 {service === "code" && <CodePanel key={codeFile ?? ""} projectId={id} reloadKey={filesKey} initialPath={codeFile} />}
               </div>
               </div>
             </div>
           )}
-          {view === "knowledge" && <ProjectKnowledge projectId={id} reloadKey={filesKey} />}
+          {view === "knowledge" && (
+            <Suspense fallback={<div className="empty" role="status">Cargando…</div>}>
+              <ProjectKnowledge projectId={id} reloadKey={filesKey} />
+            </Suspense>
+          )}
           {view === "settings" && <ProjectSettings project={project} onChange={load} />}
           {view === "details" && detail && (
             <TurnDetails

@@ -35,7 +35,10 @@ const wrap = (p: pg.Pool | pg.PoolClient): Tx => ({
 export function platformDb(): Promise<PlatformDb> {
   ready ??= (async () => {
     if (!config.databaseUrl) throw new Error("Falta DATABASE_URL (postgres://usuario:clave@host:5432/forja): la plataforma guarda sus datos en Postgres.");
-    pool = new pg.Pool({ connectionString: config.databaseUrl, max: 10 });
+    const configuredMax = process.env.DATABASE_POOL_MAX;
+    const max = configuredMax === undefined ? 10 : Number(configuredMax);
+    if (!Number.isInteger(max) || max < 1 || max > 100) throw new Error(`DATABASE_POOL_MAX debe ser un entero entre 1 y 100; recibido: ${configuredMax}`);
+    pool = new pg.Pool({ connectionString: config.databaseUrl, max, connectionTimeoutMillis: 10_000 });
     // An idle client losing its connection (Postgres restart) must not crash the process.
     pool.on("error", (e) => console.warn("[forja] Postgres:", e.message));
     await migrate(pool);
