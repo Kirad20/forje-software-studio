@@ -61,8 +61,9 @@ export function createKnowledgeService(repository: KnowledgeFiles, engine: Knowl
   return {
     graph: (projectId: string, force = false) => exclusive(projectId, async () => index(projectId, prepareCorpus(await repository.readAllFiles(projectId), findSecret), force)),
     async question(projectId: string, query: string): Promise<KnowledgeAnswer> {
+      if (typeof query !== "string") throw new Error('El campo "query" es obligatorio y debe ser un texto de entre 1 y 1000 caracteres.');
       const text = query.trim();
-      if (!text || text.length > 1000) throw new Error("La pregunta debe tener entre 1 y 1000 caracteres.");
+      if (!text || text.length > 1000) throw new Error('El campo "query" debe tener entre 1 y 1000 caracteres.');
       return exclusive(projectId, async () => {
         const corpus = prepareCorpus(await repository.readAllFiles(projectId), findSecret);
         const current = await index(projectId, corpus);

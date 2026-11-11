@@ -43,6 +43,24 @@ describe("Projects File Use Cases (TDD)", () => {
       expect(fileRepo.writeFile).not.toHaveBeenCalled();
     });
 
+    it("persists Spring backend files written through MCP with their change history", async () => {
+      const useCase = new WriteFileUseCase(fileRepo);
+      const files = {
+        "pom.xml": "<project><artifactId>spring-boot-starter-parent</artifactId></project>",
+        "src/main/java/app/orders/domain/Order.java": "package app.orders.domain; public record Order(long id) {}",
+        "src/main/resources/application.properties": "spring.application.name=orders",
+      };
+
+      for (const [path, content] of Object.entries(files)) {
+        await useCase.execute("p1", path, content, "mcp");
+        expect(fileRepo.writeFile).toHaveBeenCalledWith("p1", path, content);
+        expect(fileRepo.logChange).toHaveBeenCalledWith("p1", {
+          kind: "create", paths: [path], author: "mcp", actor: undefined, before: { [path]: null },
+        });
+        expect(fileRepo.touch).toHaveBeenCalledWith("p1", [path]);
+      }
+    });
+
     it("does nothing when content is identical to before", async () => {
       vi.spyOn(fileRepo, "readFile").mockResolvedValue("same content");
       const useCase = new WriteFileUseCase(fileRepo);
