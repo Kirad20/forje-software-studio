@@ -104,6 +104,18 @@ export const config = {
   builderServiceToken: env.BUILDER_SERVICE_TOKEN ?? "",
   /** Optional public port for preview/published app hosts when the runtime has its own local port. */
   appRuntimePublicPort: env.APP_RUNTIME_PUBLIC_PORT ?? "",
+  /**
+   * Backends in other languages (Java/Spring Boot today). They run as separate processes under
+   * bubblewrap ("bwrap", the default); "unsafe" spawns them without isolation and is only for local
+   * development; "off" disables them. See docs/language-runtimes.md.
+   */
+  languages: {
+    sandbox: (["bwrap", "unsafe", "off"].includes(env.FORJA_LANG_SANDBOX ?? "") ? env.FORJA_LANG_SANDBOX : "bwrap") as "bwrap" | "unsafe" | "off",
+    javaMaxHeapMb: Math.max(64, Number(env.FORJA_JAVA_MAX_HEAP_MB ?? 256) || 256),
+    maxProcesses: Math.max(1, Number(env.FORJA_LANG_MAX_PROCESSES ?? 4) || 4),
+    idleMs: Math.max(60_000, Number(env.FORJA_LANG_IDLE_MS ?? 5 * 60_000) || 5 * 60_000),
+    buildTimeoutMs: Math.max(60_000, Number(env.FORJA_LANG_BUILD_TIMEOUT_MS ?? 10 * 60_000) || 10 * 60_000),
+  },
   secretsKey: env.SECRETS_KEY ?? "",
   /**
    * Reverse proxies in front of Forja (Traefik in Coolify, nginx…). With N > 0 the client IP is
@@ -207,6 +219,8 @@ export const paths = {
   projectDb: (projectId: string, env: "preview" | "published" = "published") =>
     path.join(config.dataDir, "projects", projectId, env === "preview" ? "preview-db" : "db"),
   projectStorage: (projectId: string) => path.join(config.dataDir, "projects", projectId, "storage"),
+  /** Workspaces, dependency caches and builds of backends in other languages, one folder per project. */
+  languageRuntimes: path.join(config.dataDir, "runtimes"),
   // Compiled endpoints import npm packages by name, so they must live where Node resolves
   // Forja's node_modules — not under DATA_DIR, which may be anywhere.
   bundleCache: path.join(ROOT_DIR, "node_modules", ".cache", "forja-endpoints"),

@@ -733,7 +733,7 @@ export const builderTools: BuilderTool[] = [
     input_schema: obj({}),
     output_schema: out({ ok: B, problems: arr(out({ file: S, line: I, column: I, text: S }, ["line", "column"])) }),
     async data(_i: Record<string, never>, ctx) {
-      return verifyBuild(await builderCoreModules().projects.readAllFiles(ctx.projectId));
+      return verifyBuild(await builderCoreModules().projects.readAllFiles(ctx.projectId), ctx.projectId);
     },
     format: (d) => (d.problems.length ? `${d.problems.length} problema(s):\n${d.problems.map(formatProblem).join("\n")}` : "Compila sin errores."),
   }),

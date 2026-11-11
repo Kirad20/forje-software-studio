@@ -27,7 +27,7 @@ export function createPublication(ports: PublicationPorts) {
       validateSlug(slug);
       if (await ports.isSlugTaken(slug, projectId)) throw new Error(`La dirección "${slug}" ya está en uso. Prueba otra.`);
       const files = await ports.readAllFiles(projectId);
-      assertPublishable(await ports.checkProject(files));
+      assertPublishable(await ports.checkProject(files, projectId));
       assertPublishable([], await ports.scan(projectId, files));
       await ports.applyMigrations(projectId, files);
       await ports.ensureOwner(projectId);

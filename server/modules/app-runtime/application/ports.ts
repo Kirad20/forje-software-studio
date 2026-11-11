@@ -4,7 +4,7 @@ export interface PublicationPorts {
   getProject(id: string): Promise<{ id: string; name: string; slug?: string | null }>;
   isSlugTaken(slug: string, projectId: string): Promise<boolean>;
   readAllFiles(id: string): Promise<FileMap>;
-  checkProject(files: FileMap): Promise<BuildProblem[]>;
+  checkProject(files: FileMap, projectId?: string): Promise<BuildProblem[]>;
   scan(id: string, files: FileMap): Promise<PublicationFinding[]>;
   applyMigrations(id: string, files: FileMap): Promise<{ applied: string[] }>;
   ensureOwner(id: string): Promise<unknown>;
@@ -25,7 +25,7 @@ export interface RuntimeProjectsPort {
 }
 
 export interface BuildPorts {
-  compile(files: FileMap): Promise<BuildProblem[]>;
+  compile(files: FileMap, projectId?: string): Promise<BuildProblem[]>;
   typecheck(files: FileMap): Promise<BuildProblem[]>;
 }
 

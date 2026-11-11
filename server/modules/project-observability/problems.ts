@@ -23,7 +23,7 @@ export function bindProblemPorts(ports: ProblemPorts): () => Promise<void> {
 function ports(): ProblemPorts { if (!bound) throw new Error("Problem ports not bound"); return bound; }
 const adapters = createProblemAdapters();
 export const { listProblems, clearProblems, recheckBuild, watchProblems, stopProblems } = createProblemService(adapters.repository, {
-  readAllFiles: (p) => ports().readAllFiles(p), checkProject: (files) => ports().checkProject(files), formatProblem: (problem) => ports().formatProblem(problem),
+  readAllFiles: (p) => ports().readAllFiles(p), checkProject: (files, projectId) => ports().checkProject(files, projectId), formatProblem: (problem) => ports().formatProblem(problem),
 }, {
   ...adapters, emit: emitProject,
   subscribe(projectId, listener) { projectEvents.on(projectId, listener); return () => { projectEvents.off(projectId, listener); }; },

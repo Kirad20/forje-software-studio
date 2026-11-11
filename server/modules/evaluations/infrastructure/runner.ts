@@ -212,7 +212,7 @@ async function runCase(
 
     // --- Measure ---
     const files = await evaluationResources().projects.readAllFiles(project.id);
-    const compileProblems = await checkProject(files).catch((e: Error) => [{ file: "", text: e.message }]);
+    const compileProblems = await checkProject(files, project.id).catch((e: Error) => [{ file: "", text: e.message }]);
     const typeProblems = compileProblems.length ? null : await typecheckProject(files);
     const preview = compileProblems.length ? { checks: [], shots: [], text: "" } : await checkPreview(project, evalAccount.email, c, files, !!judgeModel);
     const signals = designSignals(files);

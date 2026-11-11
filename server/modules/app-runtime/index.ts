@@ -54,6 +54,7 @@ export function configureRuntimeProjects(ports: RuntimeProjectsPort) { return co
 export async function stopAppRuntime() {
   server.stopLiveReloads();
   sandbox.stopAllSandboxes();
+  (await import("./infrastructure/languages.js")).stopLanguageRuntimes();
   await browser.closeBrowser();
 }
 

@@ -16,6 +16,7 @@ import { appHeaders, rateLimit, RateLimitError, uploadHeaders } from "../../../s
 import { recordPageView } from "../../app-services/analytics.js";
 import { appUrl, previewOrigin } from "./urls.js";
 import { resolveServiceExecution } from "../domain/services.js";
+import { detectSpringProject } from "../domain/spring.js";
 
 export interface AppTarget {
   project: Project;
@@ -361,6 +362,12 @@ async function callEndpoint(req: Request, t: AppTarget, routePath: string): Prom
   const files = await loadFiles(t);
   const method = req.method === "HEAD" ? "GET" : req.method;
   const ep = endpointRoutes(files).find((e) => e.route === routePath.replace(/\/$/, "") && e.method === method);
+  if (!ep && detectSpringProject(files)) {
+    // A Spring Boot backend owns every /_api/ route the project has no TypeScript endpoint for.
+    const user = await auth.userFromSession(t.project.id, parseCookies(req.headers.get("cookie"))[auth.sessionCookie(t.project.id)], t.env);
+    const { springRuntime } = await import("./languages.js");
+    return springRuntime.handle(req, { projectId: t.project.id, env: t.env, base: t.base, routePath, files, user });
+  }
   if (!ep) return json({ error: `No existe el endpoint ${method} /_api/${routePath}` }, 404);
 
   const url = new URL(req.url);
