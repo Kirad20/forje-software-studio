@@ -76,6 +76,9 @@ describe("MCP HTTP transport", () => {
     expect(initialization.instructions).toContain("PRIMERA llamada");
     expect(initialization.instructions.indexOf("PRIMERA llamada")).toBeLessThan(initialization.instructions.indexOf("Un proyecto SOLO"));
     expect(initialization.instructions).toContain("No preguntes al dueño por la estructura del proyecto");
+    expect(initialization.instructions).toContain("pom.xml");
+    expect(initialization.instructions).toContain("src/main/");
+    expect(initialization.instructions).toContain("jobs/ sigue usando TypeScript");
 
     const response = await handleMcp(request(4, "tools/list"));
     const { result } = await response.json();

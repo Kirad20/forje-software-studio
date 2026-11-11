@@ -32,6 +32,41 @@ describe("Projects Domain (DDD & TDD)", () => {
       expect(normalPath.isDevFile()).toBe(false);
     });
 
+    it.each([
+      "pom.xml",
+      "build.gradle",
+      "build.gradle.kts",
+      "settings.gradle",
+      "settings.gradle.kts",
+      "gradle.properties",
+      "src/main/java/app/orders/domain/Order.java",
+      "src/main/kotlin/app/Application.kt",
+      "src/main/resources/application.yml",
+      "src/main/resources/application.properties",
+      "src/test/java/app/orders/OrderTest.java",
+      "src/test/resources/orders.json",
+    ])("accepts JVM build and source files: %s", (path) => {
+      expect(new ProjectPath(path).value).toBe(path);
+      expect(() => ProjectPath.assertValid(path)).not.toThrow();
+    });
+
+    it.each([
+      "pom.xml.bak",
+      "mvnw",
+      "gradlew",
+      "target/app.jar",
+      "build/libs/app.jar",
+      "src/other/Application.java",
+      "src/main/",
+      "src/main/../../secrets.txt",
+      "src/main//Application.java",
+      "src\\main\\Application.java",
+      "/src/main/Application.java",
+    ])("rejects unsupported or unsafe JVM paths: %s", (path) => {
+      expect(ProjectPath.isValid(path)).toBe(false);
+      expect(() => ProjectPath.assertValid(path)).toThrow("Ruta no válida");
+    });
+
     it("allows only the exact root services manifest, not arbitrary JSON or traversal", () => {
       expect(new ProjectPath("forja.services.json").value).toBe("forja.services.json");
       expect(() => ProjectPath.assertValid("forja.services.json")).not.toThrow();

@@ -22,6 +22,22 @@ describe("project knowledge", () => {
     expect(() => prepareCorpus({ "large.ts": "x".repeat(1_000_001) })).toThrow("supera el límite");
   });
 
+  it.each([undefined, null, 42, {}, "", "   ", "x".repeat(1001)])("rejects invalid questions before reading or indexing the project (%#)", async (query) => {
+    const repository = { readAllFiles: vi.fn() };
+    const engine: KnowledgeEngine = {
+      fingerprint: vi.fn(),
+      read: vi.fn(),
+      build: vi.fn(),
+      query: vi.fn(),
+    };
+    const knowledge = createKnowledgeService(repository, engine);
+
+    await expect(Reflect.apply(knowledge.question, knowledge, ["project-a", query]))
+      .rejects.toThrow(/query.*1 y 1000 caracteres/);
+    expect(repository.readAllFiles).not.toHaveBeenCalled();
+    expect(engine.query).not.toHaveBeenCalled();
+  });
+
   it("rebuilds only when project files change and returns cited source excerpts", async () => {
     let files = { "src/main.ts": "first line\nexport const app = true;" };
     let cached: KnowledgeGraph | undefined;
