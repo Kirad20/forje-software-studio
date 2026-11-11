@@ -15,6 +15,7 @@ export { readProjectServices, resolveServiceExecution, SERVICES_MANIFEST } from 
 export type { ServiceExecution, ProjectService, ProjectServices } from "./domain/services.js";
 export { createServiceControl } from "./application/serviceControl.js";
 export { readServiceRuntime, restartServiceRuntime } from "./infrastructure/serviceControlRuntime.js";
+export { localMemoryReport, type MemoryReport } from "./infrastructure/memoryReport.js";
 export type { ServiceControlSnapshot, ServiceRuntimeSnapshot, ServiceQueueEntry } from "./domain/serviceControl.js";
 export type { ServiceControlPorts } from "./ports/serviceControl.js";
 import * as types from "./infrastructure/typecheck.js";

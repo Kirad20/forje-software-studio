@@ -1,7 +1,7 @@
 export type { ProjectDb } from "./ports/database.js";
 export {
   projectDb, execSql, dumpDatabase, closeProject, cloneDatabase, closeAll, isAwake, projectDbMetrics,
-  applyProjectMigrations,
+  applyProjectMigrations, projectDbStats,
 } from "./infrastructure/projectDb.js";
 export type { ProjectDbEnv, ProjectMigration, ProjectDbMetrics } from "./infrastructure/projectDb.js";
 import { schemaRows } from "./infrastructure/repositories.js";

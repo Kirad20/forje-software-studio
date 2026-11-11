@@ -167,3 +167,17 @@ it("reloads runtime configuration only through the authenticated internal API", 
   expect(response.status).toBe(200);
   expect(ports.reloadSettings).toHaveBeenCalledOnce();
 });
+
+it("serves the memory report only through the authenticated internal API", async () => {
+  const memoryReport = vi.fn(async () => ({ service: "app-runtime", projectDbs: { open: 3 } }));
+  const app = createAppRuntimeHttpApp({ ...runtimePorts(), memoryReport });
+  const denied = await app.request("http://app-runtime:4200/internal/runtime/memory", { method: "POST" });
+  expect(denied.status).toBe(401);
+  expect(memoryReport).not.toHaveBeenCalled();
+
+  const response = await app.request("http://app-runtime:4200/internal/runtime/memory", {
+    method: "POST",
+    headers: { authorization: "Bearer runtime-token" },
+  });
+  await expect(response.json()).resolves.toEqual({ service: "app-runtime", projectDbs: { open: 3 } });
+});

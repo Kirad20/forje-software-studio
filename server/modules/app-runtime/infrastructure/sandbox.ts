@@ -21,6 +21,32 @@ const WORKER = path.join(path.dirname(fileURLToPath(import.meta.url)), "sandboxW
 const IDLE_MS = 5 * 60_000;
 const TX_TIMEOUT_MS = 30_000;
 
+/** Every sandbox with a live process, across projects; bounded by config.sandbox.maxProcesses. */
+const alive = new Set<ProjectSandbox>();
+
+/**
+ * At the cap, the least recently used idle sandbox stops; its pool starts it again on its next
+ * request. Busy sandboxes are never stopped, so the cap is soft under a burst of real work.
+ */
+function makeRoomForSandbox(starting: ProjectSandbox) {
+  while (alive.size >= config.sandbox.maxProcesses) {
+    let oldest: ProjectSandbox | null = null;
+    for (const box of alive) if (box !== starting && !box.busy && (!oldest || box.lastUsed < oldest.lastUsed)) oldest = box;
+    if (!oldest) return;
+    oldest.stop();
+  }
+}
+
+/** Live sandbox processes in this process, for memory reports. */
+export function sandboxStats() {
+  return {
+    processes: alive.size,
+    maxProcesses: config.sandbox.maxProcesses,
+    maxHeapMb: config.sandbox.maxHeapMb,
+    items: [...alive].map((box) => ({ projectId: box.projectId, env: box.env, pid: box.pid, busy: box.busy })),
+  };
+}
+
 export interface RunInput {
   env_name: AppEnv;
   file: string;
@@ -70,13 +96,26 @@ class ProjectSandbox {
   private nextRun = 0;
   private idle: NodeJS.Timeout | null = null;
   private isReady = false;
+  /** Runs waiting for the process to start; they count as busy so the process is not evicted under them. */
+  private waiting = 0;
+  lastUsed = Date.now();
 
-  constructor(private projectId: string, private env: AppEnv) {}
+  constructor(readonly projectId: string, readonly env: AppEnv) {}
+
+  get busy() {
+    return this.runs.size > 0 || this.waiting > 0;
+  }
+
+  get pid() {
+    return this.child?.pid ?? null;
+  }
 
   private start() {
+    makeRoomForSandbox(this);
+    alive.add(this);
     const nodeModules = path.join(ROOT_DIR, "node_modules");
     const child = fork(WORKER, [], {
-      execArgv: ["--permission", `--allow-fs-read=${nodeModules}`, `--allow-fs-read=${WORKER}`, "--max-old-space-size=512"],
+      execArgv: ["--permission", `--allow-fs-read=${nodeModules}`, `--allow-fs-read=${WORKER}`, `--max-old-space-size=${config.sandbox.maxHeapMb}`],
       // No platform secrets: the child gets only what each run passes it.
       env: { NODE_ENV: "production", SYSTEMROOT: process.env.SYSTEMROOT ?? "" },
       serialization: "advanced",
@@ -108,6 +147,7 @@ class ProjectSandbox {
     });
     child.on("exit", () => {
       if (this.child !== child) return;
+      alive.delete(this);
       this.child = null;
       this.isReady = false;
       this.ready = null;
@@ -122,11 +162,17 @@ class ProjectSandbox {
   }
 
   async run(kind: "endpoint" | "job" | "test", input: RunInput, ctx: ServiceContext): Promise<unknown> {
-    if (!this.child) this.start();
-    await this.ready;
+    this.waiting++;
+    try {
+      if (!this.child) this.start();
+      await this.ready;
+    } finally {
+      this.waiting--;
+    }
     const child = this.child;
     if (!child?.connected) throw new Error("El entorno aislado se detuvo antes de ejecutar");
     if (this.idle) clearTimeout(this.idle);
+    this.lastUsed = Date.now();
     const id = ++this.nextRun;
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -161,6 +207,7 @@ class ProjectSandbox {
       run.reject(new SandboxRunError({ name: "Error", message: "El entorno aislado se detuvo." }));
     }
     this.runs.clear();
+    alive.delete(this);
     this.child?.kill();
     this.child = null;
     this.isReady = false;

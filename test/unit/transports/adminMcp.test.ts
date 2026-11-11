@@ -7,7 +7,7 @@ const model = {
   inPrice: 1, outPrice: 2, cacheReadPrice: 0, context: 128000, tools: true, vision: true,
   tier: 4, speed: 3, source: "custom" as const, enabled: true, available: true, allowed: true,
 };
-function setup() {
+function setup(extra: Record<string, unknown> = {}) {
   const identity = {
     accountFromAdminApiToken: vi.fn(async (token?: string) => token === "admin-token" ? admin : null),
     getAccount: vi.fn(async () => ({ ...admin, id: "owner" })),
@@ -40,7 +40,7 @@ function setup() {
     management: { routerStats: vi.fn(async () => ({ classes: [], decisions: [] })) },
   };
   // Each fake implements only the public methods used by this transport.
-  const handle = createAdminMcpHandler({ identity, settings, projects, models } as unknown as Parameters<typeof createAdminMcpHandler>[0]);
+  const handle = createAdminMcpHandler({ identity, settings, projects, models, ...extra } as unknown as Parameters<typeof createAdminMcpHandler>[0]);
   return { handle, identity, settings, projects, models };
 }
 function request(method: string, params: Record<string, unknown> = {}, token = "admin-token") {
@@ -87,6 +87,12 @@ describe("administrative MCP transport", () => {
     expect(data.serverInfo.name).toBe("forja-admin");
     expect(data.instructions).toContain("No construye aplicaciones");
     expect(data.capabilities).toMatchObject({ tools: {} });
+  });
+  it("adds each service's memory report to system_status when available", async () => {
+    const memory = vi.fn(async () => ({ forja: { process: { rssMb: 120 } }, appRuntime: { error: "HTTP 503" } }));
+    const status = JSON.parse((await call(setup({ memory }).handle, "system_status")).content[0].text);
+    expect(status.memory).toEqual({ forja: { process: { rssMb: 120 } }, appRuntime: { error: "HTTP 503" } });
+    expect(JSON.parse((await call(setup().handle, "system_status")).content[0].text)).not.toHaveProperty("memory");
   });
   it("never exposes secret hints, keys or header names", async () => {
     const { handle } = setup();

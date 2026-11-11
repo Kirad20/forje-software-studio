@@ -1,7 +1,8 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { readProjectServices, resolveServiceExecution } from "../../../../server/modules/app-runtime/domain/services.js";
 import { compileServerModule, checkProject } from "../../../../server/modules/app-runtime/infrastructure/bundler.js";
-import { runInSandbox, stopAllSandboxes, getSandboxServices, restartSandboxService } from "../../../../server/modules/app-runtime/infrastructure/sandbox.js";
+import { runInSandbox, stopAllSandboxes, getSandboxServices, restartSandboxService, sandboxStats } from "../../../../server/modules/app-runtime/infrastructure/sandbox.js";
+import { config } from "../../../../server/shared/config.js";
 import { bindRuntimeObservation } from "../../../../server/modules/app-runtime/infrastructure/observation.js";
 
 const enqueue = vi.hoisted(() => vi.fn(async (name: string, payload: unknown) => `${name}:${JSON.stringify(payload)}`));
@@ -166,5 +167,28 @@ describe("real independent service processes", () => {
     expect(getSandboxServices("services-test").map((entry) => entry.service)).toEqual(["billing"]);
     expect(await execute(probe, "billing", 1)).toEqual(billing);
     expect(await execute(probe, "orders", 1)).not.toEqual(orders);
+  }, 30_000);
+
+  it("caps live sandbox processes by stopping the least recently used idle one, never a busy one", async () => {
+    const previous = config.sandbox.maxProcesses;
+    config.sandbox.maxProcesses = 2;
+    try {
+      const probe = "export default () => process.pid";
+      const a = await execute(probe, "svc-a", 1);
+      await execute(probe, "svc-b", 1);
+      expect(await execute(probe, "svc-a", 1)).toEqual(a);
+      await execute(probe, "svc-c", 1);
+      expect(sandboxStats()).toMatchObject({ processes: 2, maxProcesses: 2 });
+      // b was the least recently used; a survived.
+      expect(await execute(probe, "svc-a", 1)).toEqual(a);
+
+      const busy = execute("export default async () => { await new Promise(r => setTimeout(r, 800)); return process.pid; }", "svc-busy", 1);
+      await expect.poll(() => sandboxStats().items.some((item) => item.busy && item.pid)).toBe(true);
+      await execute(probe, "svc-d", 1);
+      await execute(probe, "svc-e", 1);
+      await expect(busy).resolves.toMatchObject({ data: expect.any(Number) });
+    } finally {
+      config.sandbox.maxProcesses = previous;
+    }
   }, 30_000);
 });
