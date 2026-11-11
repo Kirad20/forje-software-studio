@@ -20,14 +20,12 @@ export const ANTHROPIC_MODELS = [
 ];
 
 export async function seedDefaults(db: Tx): Promise<void> {
-  for (const p of PROVIDERS) {
-    await db.query(`insert into providers (id, kind, label, base_url, builtin) values ($1, $2, $3, $4, true) on conflict (id) do nothing`, [p.id, p.kind, p.label, p.baseUrl]);
-  }
-  for (const m of ANTHROPIC_MODELS) {
-    await db.query(
+  await Promise.all(PROVIDERS.map((p) =>
+    db.query(`insert into providers (id, kind, label, base_url, builtin) values ($1, $2, $3, $4, true) on conflict (id) do nothing`, [p.id, p.kind, p.label, p.baseUrl])));
+  await Promise.all(ANTHROPIC_MODELS.map((m) =>
+    db.query(
       `insert into model_catalog (id, provider, model, label, in_price, out_price, cache_read_price, long_prompt, context, tools, vision, tier, speed, source)
        values ($1, 'anthropic', $2, $3, $4, $5, $6, $7, 1000000, true, true, $8, $9, 'builtin') on conflict (id) do nothing`,
       [`anthropic:${m.model}`, m.model, m.label, m.inPrice, m.outPrice, m.cacheReadPrice, m.longPrompt && JSON.stringify(m.longPrompt), m.tier, m.speed],
-    );
-  }
+    )));
 }

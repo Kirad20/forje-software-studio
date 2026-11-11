@@ -45,13 +45,19 @@ owner checks, quotas, and private status access. The fixed price is computed on
 the server, never trusted from a browser. Demo tables are created through the starter's SQL migration in preview and
 applied to production at publication; do not use it on an incompatible schema.
 
-The starter applies DDD and hexagonal boundaries within Forja's project layout:
+The starter applies DDD and hexagonal boundaries within Forja's project layout,
+the same layout the builder uses by default for every app:
 `helpers/<context>/domain.ts` holds pure domain types and rules,
 `application.ts` contains use cases, `ports.ts` defines repository/event
 interfaces, and `adapters.ts` implements persistence. Endpoints and jobs compose
 adapters with use cases. Server-only adapters are imported only by endpoints and
 jobs, never by pages. Each service owns its tables by convention; all services
-share the project's database.
+share the project's database. On the frontend the builder organizes code by
+feature (`components/<feature>/`, with thin `pages/`) and gives each app its own
+design system in `components/ui/`: designed variants on top of the `@forja/ui`
+and radix primitives instead of their stock look. `check_standards` flags SQL in
+endpoints/jobs, adapters imported by browser code and stock kit components used
+outside `components/ui/`.
 
 ## Topology contract
 

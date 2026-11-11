@@ -1,8 +1,9 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { Hono } from "hono";
+import { compress } from "hono/compress";
 import { WebSocketServer } from "ws";
 import { config, ROOT_DIR } from "../shared/config.js";
 import { createStudioApi } from "./http/studioApi.js";
@@ -89,6 +90,7 @@ const resolveApp = (host: string | undefined, url: URL, cookieHeader: string | n
   resolveRuntimeApp(host, url, cookieHeader, runtimeAccessPorts);
 
 const app = new Hono();
+app.use("*", compress());
 
 app.use("*", async (c, next) => {
   const socketIp = (c.env as { incoming?: { socket?: { remoteAddress?: string } } })?.incoming?.socket?.remoteAddress;
@@ -158,11 +160,18 @@ if (existsSync(STUDIO_DIST)) {
     if (file === "/sw.js") c.header("Service-Worker-Allowed", "/");
   });
   app.use("/*", serveStatic({ root: path.relative(process.cwd(), STUDIO_DIST) }));
-  // Read per request: a rebuild renames the hashed assets the page points at.
+  // Cached by mtime: a rebuild renames the hashed assets the page points at and bumps it.
+  let indexCache: { mtimeMs: number; html: string } | undefined;
+  const studioIndex = () => {
+    const file = path.join(STUDIO_DIST, "index.html");
+    const { mtimeMs } = statSync(file);
+    if (indexCache?.mtimeMs !== mtimeMs) indexCache = { mtimeMs, html: readFileSync(file, "utf8") };
+    return indexCache.html;
+  };
   app.get("*", (c) => {
     if (c.req.path.startsWith("/assets/") || c.req.path.startsWith("/icons/")
       || ["/sw.js", "/manifest.webmanifest", "/offline.html"].includes(c.req.path)) return c.notFound();
-    return c.html(readFileSync(path.join(STUDIO_DIST, "index.html"), "utf8"));
+    return c.html(studioIndex());
   });
 } else {
   app.get("/", (c) => c.html(page("Forja", "El studio corre con Vite en desarrollo: <code>npm run dev</code> y abre http://localhost:5173")));

@@ -12,7 +12,8 @@ describe("MCP guides", () => {
   });
 
   it("covers the whole manual without losing text", () => {
-    const sections = GUIDES.filter((g) => g.id !== "forja-overview" && !g.title.startsWith("Skill: "));
+    const headings = new Set([...BUILDER_SYSTEM_PROMPT.matchAll(/^# (.+)$/gm)].map((m) => m[1]!.trim()));
+    const sections = GUIDES.filter((g) => headings.has(g.title));
     for (const g of sections) expect(BUILDER_SYSTEM_PROMPT).toContain(g.body.split("\n").slice(1).join("\n").trim().slice(0, 200));
     expect(new Set(GUIDES.map((g) => g.id)).size).toBe(GUIDES.length);
   });
@@ -31,6 +32,18 @@ describe("MCP guides", () => {
     expect(r.unknown).toEqual(["nope"]);
     expect(r.text).toContain("# Design");
     expect(r.text).toContain("Guía desconocida: nope");
+  });
+
+  it("documents current platform, runtime, worker and MCP capabilities as focused topics", () => {
+    const topics = ["forja-platform", "project-environments", "service-topology", "durable-workers", "project-intelligence", "mcp-access"];
+    const result = readGuides(topics);
+    expect(result.unknown).toEqual([]);
+    expect(guideList()).toContain("- service-topology:");
+    expect(result.text.toLowerCase()).toContain("los cambios y registros de prueba en preview nunca se copian a producción");
+    expect(result.text).toContain("todos los servicios de un entorno comparten la misma base de datos");
+    expect(result.text).toContain("La entrega es al menos una vez");
+    expect(result.text).toContain("question es el punto de entrada");
+    expect(result.text).toContain("OAuth 2.1 con PKCE S256");
   });
 });
 

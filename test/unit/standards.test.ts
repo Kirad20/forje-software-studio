@@ -49,4 +49,43 @@ export default () => { api.get<Note[]>("${route}"); return null; };`;
     expect(standardsScan({ "helpers/cart.ts": logic, "helpers/cart.spec.ts": "describe('x', () => {});" })).toEqual([]);
     expect(standardsScan({ "helpers/contract.ts": CONTRACT, "helpers/slug.ts": "export function slug(s: string) { return s.toLowerCase(); }" })).toEqual([]);
   });
+
+  it("asks for specs on rules inside a bounded context, but not on its adapters or ports", () => {
+    const logic = "export function total(items: { price: number }[]) { return items.reduce((s, i) => s + i.price, 0); }";
+    expect(texts({ "helpers/orders/domain.ts": logic }).join()).toMatch(/helpers\/orders\/domain\.spec\.ts/);
+    expect(standardsScan({ "helpers/orders/domain.ts": logic, "helpers/orders/domain.spec.ts": "" })).toEqual([]);
+    expect(standardsScan({ "helpers/orders/adapters.ts": logic, "helpers/orders/adapters/pg.ts": logic, "helpers/orders/ports.ts": logic })).toEqual([]);
+  });
+
+  it("keeps server adapters out of pages and components", () => {
+    const found = texts({ "components/orders/useOrders.ts": 'import { postgresOrders } from "~/helpers/orders/adapters";' }).join();
+    expect(found).toMatch(/helpers\/orders\/adapters, un adaptador solo de servidor/);
+    expect(standardsScan({ "components/orders/List.tsx": 'import type { Order } from "~/helpers/orders/domain";' })).toEqual([]);
+  });
+
+  it("asks features to use the project's components/ui variants instead of the kit's stock look", () => {
+    const page = 'import { Button, toast, type ButtonProps } from "@forja/ui";\nexport default () => <Button />;';
+    expect(texts({ "components/orders/List.tsx": page }).join()).toMatch(/usa Button de @forja\/ui[\s\S]*components\/ui\//);
+    expect(standardsScan({ "components/ui/Button.tsx": page })).toEqual([]);
+    expect(standardsScan({ "pages/_layout.tsx": 'import { Toaster, cx, FadeIn, toast } from "@forja/ui";' })).toEqual([]);
+  });
+
+  it("asks endpoints and jobs to reach the database through an adapter", () => {
+    const endpoint = 'export default async (ctx) => ctx.db.query("select 1");';
+    expect(texts({ "endpoints/orders/list_GET.ts": endpoint, "jobs/sync.ts": endpoint }).join("\n")).toMatch(/list_GET\.ts: Estándar: accede a la base de datos[\s\S]*jobs\/sync\.ts: Estándar: accede a la base de datos/);
+    expect(standardsScan({ "endpoints/orders/list_GET.ts": 'import { listOrders } from "../../helpers/orders/application";\nexport default async (ctx) => listOrders({ orders: postgresOrders(ctx) });' })).toEqual([]);
+  });
+
+  it("asks every table to be paginated, in the UI and in the query", () => {
+    expect(texts({ "components/orders/OrdersTable.tsx": "export const T = ({ rows }) => <table><tbody /></table>;" }).join()).toMatch(/tabla sin paginación/);
+    expect(standardsScan({ "components/orders/OrdersTable.tsx": 'export const T = () => <div><table /><nav aria-label="Paginación" /></div>;' })).toEqual([]);
+    expect(standardsScan({ "components/orders/T.tsx": "useReactTable({ manualPagination: true }); <table />" })).toEqual([]);
+
+    const adapter = (sql: string) => ({ "helpers/orders/adapters.ts": `export const list = (db) => db.query<{ id: number }>(\`${sql}\`, []);` });
+    expect(texts(adapter("select id from orders where user_id = $1 order by created_at desc")).join()).toMatch(/consulta de lista sin LIMIT/);
+    expect(standardsScan(adapter("select id from orders where user_id = $1 order by created_at desc, id desc limit $2"))).toEqual([]);
+    expect(standardsScan(adapter("select count(*) from orders"))).toEqual([]);
+    expect(standardsScan(adapter("insert into orders (id) values ($1)"))).toEqual([]);
+    expect(standardsScan({ "helpers/orders/domain.ts": 'export const sql = (db) => db.query("select * from orders");' })).toEqual([]);
+  });
 });

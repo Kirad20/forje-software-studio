@@ -57,7 +57,7 @@ export function SecurityPanel({ projectId, reloadKey, building, onFix }: { proje
   const running = data?.deep?.status === "running";
   useEffect(() => {
     if (!running) return;
-    const t = setInterval(() => void api<Security>(`/projects/${projectId}/security`).then(setData).catch(() => {}), 3000);
+    const t = setInterval(() => !document.hidden && void api<Security>(`/projects/${projectId}/security`).then(setData).catch(() => {}), 3000);
     return () => clearInterval(t);
   }, [running, projectId]);
 
