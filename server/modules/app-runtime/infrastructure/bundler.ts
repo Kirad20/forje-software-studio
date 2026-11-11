@@ -8,6 +8,7 @@ import { formatProblem, type FileMap, type BuildProblem } from "../domain/public
 export { formatProblem, type BuildProblem } from "../domain/publication.js";
 import { createProjectCheck } from "../application/projectBuild.js";
 import { endpointRoutes, exampleFiles, jobFiles, pageRoutes } from "../domain/routes.js";
+import { detectSpringProject } from "../domain/spring.js";
 export { endpointRoutes, exampleFiles, jobFiles, pageRoutes, readJobSettings, type EndpointInfo, type JobInfo, type PageInfo } from "../domain/routes.js";
 import { BUILTIN_PACKAGES, ensureDeps, isNodeBuiltin, MANIFEST, packageName, readDeps, type Deps } from "./deps.js";
 
@@ -269,4 +270,6 @@ export async function compileServerModule(files: FileMap, entry: string): Promis
 export const checkProject = createProjectCheck({
   client: buildClient, server: compileServerModule, examples: buildExamples,
   problems: (error) => error instanceof BuildError ? error.problems : null,
+  backend: async (files, projectId) =>
+    detectSpringProject(files) ? (await import("./languages.js")).springRuntime.problems(files, projectId) : [],
 });

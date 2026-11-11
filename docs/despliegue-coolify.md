@@ -176,6 +176,10 @@ studio, porque su cookie exige `Secure`).
   la plantilla de Coolify y pon su URL en Administración → General → Observabilidad.
 - **Sin Chromium**: variable `FORJA_BROWSER=0` antes de construir. Imagen ~300 MB menor;
   `browser_test` y los evals visuales quedan desactivados.
+- **Backends Java (Spring Boot)**: la imagen trae JDK 17, Maven y bubblewrap. `forja`,
+  `app-runtime` y `builder` llevan `security_opt: seccomp=unconfined, apparmor=unconfined` para que
+  bubblewrap pueda aislar las compilaciones y las JVM. `FORJA_JAVA=0` antes de construir los quita
+  (~350 MB menos). Detalles, memoria y variables en [language-runtimes.md](language-runtimes.md).
 
 ## Local, sin Coolify
 

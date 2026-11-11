@@ -34,6 +34,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends python3 python3
  && python3 -m venv /opt/graphify && /opt/graphify/bin/pip install --no-cache-dir graphifyy==0.9.103 \
  && rm -rf /var/lib/apt/lists/*
 ENV GRAPHIFY_BIN=/opt/graphify/bin/graphify
+# Java/Spring Boot backends for generated apps (docs/language-runtimes.md). JAVA=0 leaves them out.
+# bubblewrap isolates each build/JVM; the slim image lacks the man dir the JDK postinst expects.
+ARG JAVA=1
+RUN if [ "$JAVA" = "1" ]; then mkdir -p /usr/share/man/man1 \
+ && apt-get update && apt-get install -y --no-install-recommends bubblewrap openjdk-17-jdk-headless maven \
+ && rm -rf /var/lib/apt/lists/*; fi
 USER node
 VOLUME /app/data
 EXPOSE 4100

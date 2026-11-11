@@ -10,10 +10,10 @@ export function createFinishGate(projectId: string, ctx: Ownership): Promise<{ c
   return new CreateFinishGateUseCase({
     now: () => Date.now(),
     watch: watchProblems,
-    verify: async id => (await verifyBuild(await readAllFiles(id))).problems,
+    verify: async id => (await verifyBuild(await readAllFiles(id), id)).problems,
     inspect: async id => {
       const files = await readAllFiles(id);
-      return { build: (await verifyBuild(files)).problems, standards: standardsScan(files) };
+      return { build: (await verifyBuild(files, id)).problems, standards: standardsScan(files) };
     },
     runtimeProblems: listProblems,
     formatBuild: formatProblem,

@@ -141,7 +141,7 @@ describe("skills", () => {
       "@tanstack/react-table": "8.21.3", "@dnd-kit/core": "6.3.1", "@dnd-kit/sortable": "10.0.0", "@dnd-kit/utilities": "3.2.2",
     } }) };
     const imports: string[] = [];
-    for (const skill of BUILTIN_SKILLS.filter((s) => !OPEN_SOURCE.includes(s.name))) {
+    for (const skill of BUILTIN_SKILLS.filter((s) => !OPEN_SOURCE.includes(s.name) && s.name !== "spring-boot")) {
       const blocks = skill.body.split(/\n\s*\n/).filter((b) => b.split("\n").every((l) => l.startsWith("  ") || !l.trim()) && /import /.test(b));
       blocks.forEach((b, i) => {
         const code = b.split("\n").map((l) => l.slice(2)).join("\n") + "\n";

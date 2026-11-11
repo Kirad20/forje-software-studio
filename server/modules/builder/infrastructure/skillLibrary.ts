@@ -381,6 +381,43 @@ Keep it optimized:
   return createOrder({ orders, jobs: ctx.jobs }, input);`,
   },
   {
+    name: "spring-boot",
+    description: "Backend in Java with Spring Boot (pom.xml + src/main/java): when the user asks for Java/Spring instead of TypeScript endpoints",
+    body: `Use only when the user asks for Java or Spring Boot; TypeScript endpoints stay the default. Forja builds the project with Maven inside an isolated sandbox (Java 17) and runs one JVM per environment, started on the first request and stopped when idle.
+- Layout: pom.xml at the project root with parent org.springframework.boot:spring-boot-starter-parent 3.x, <java.version>17</java.version>, spring-boot-starter-web and spring-boot-maven-plugin. Sources in src/main/java/<package>/, config in src/main/resources/application.properties. Frontend files (pages/, components/) are not part of the Maven build. Gradle is not available.
+- Keep the backend hexagonal with DDD: <package>/<context>/domain (entities, value objects, pure rules, no Spring), application (use cases + ports as interfaces), adapters/in/web (@RestController), adapters/out/data (port implementations). Wire them in a @Configuration class per context.
+- Routing: the browser calls /_api/<path>; Spring receives /<path> (no /_api prefix in @RequestMapping). TypeScript endpoints with the same route win, so do not mix both for one route. Do not set server.port or server.address: Forja passes SERVER_PORT and binds 127.0.0.1.
+- Security, required: every request from Forja carries X-Forja-Proxy-Token. Add the filter below so the JVM rejects anything else (other processes on the host can reach its port). The signed-in user arrives in X-Forja-User as base64url JSON {id,email,name,role} (absent when anonymous); never trust a user ID from the body. X-Forja-Env is preview or published.
+- Data: the project database is not reachable over JDBC, so do not add JPA, Hibernate, Flyway or a datasource. Call the data bridge: POST {FORJA_DATA_URL}/query with {"sql","params"} returns {"rows":[...]}; POST {FORJA_DATA_URL}/exec with {"sql"} returns {"ok":true}, both with Authorization: Bearer {FORJA_DATA_TOKEN}. /query runs reads and writes (INSERT ... RETURNING, UPDATE ... WHERE id = $1) with $1, $2 parameters (PostgreSQL); /exec takes no parameters, so use it only for fixed SQL without user input. Never concatenate values into SQL. Schema changes stay in migrations/*.sql like any Forja app. Every list endpoint is paginated (limit + offset or a cursor, with a maximum page size).
+- Secrets created with request_secret are environment variables (System.getenv). Logs go to stdout and appear in get_logs.
+- Verify with check_build (javac errors point at the .java file and line), then call_endpoint and get_logs. The first build downloads dependencies and can take minutes; later builds reuse the cache and only rerun when Java sources or pom.xml change.
+
+  // src/main/java/app/shared/ForjaProxyFilter.java
+  @Component
+  public class ForjaProxyFilter extends OncePerRequestFilter {
+    private final byte[] expected = System.getenv("FORJA_PROXY_TOKEN").getBytes(StandardCharsets.UTF_8);
+    @Override
+    protected void doFilterInternal(HttpServletRequest req, HttpServletResponse res, FilterChain chain) throws ServletException, IOException {
+      String got = req.getHeader("X-Forja-Proxy-Token");
+      if (got == null || !MessageDigest.isEqual(expected, got.getBytes(StandardCharsets.UTF_8))) { res.sendError(403); return; }
+      chain.doFilter(req, res);
+    }
+  }
+
+  // src/main/java/app/shared/ForjaData.java: the outbound data adapter used by every repository.
+  @Component
+  public class ForjaData {
+    private final RestClient http = RestClient.builder().baseUrl(System.getenv("FORJA_DATA_URL"))
+      .defaultHeader("Authorization", "Bearer " + System.getenv("FORJA_DATA_TOKEN")).build();
+    public List<Map<String, Object>> query(String sql, Object... params) {
+      Map<String, List<Map<String, Object>>> res = http.post().uri("/query").body(Map.of("sql", sql, "params", List.of(params)))
+        .retrieve().body(new ParameterizedTypeReference<>() {});
+      return res.get("rows");
+    }
+    public void exec(String sql) { http.post().uri("/exec").body(Map.of("sql", sql)).retrieve().toBodilessEntity(); }
+  }`,
+  },
+  {
     name: "auth",
     description: "Accounts: setup_auth, login, sign-up and forgot-password pages, guarding pages and endpoints",
     body: `When the app needs accounts:

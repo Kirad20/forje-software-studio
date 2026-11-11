@@ -7,9 +7,11 @@ export interface ProjectCompilerPort {
   server(files: FileMap, entry: string): Promise<{ exports: string[] }>;
   examples(files: FileMap, file: string): Promise<unknown>;
   problems(error: unknown): BuildProblem[] | null;
+  /** Backends in other languages (Spring Boot…); they build per project, so they need its id. */
+  backend?(files: FileMap, projectId?: string): Promise<BuildProblem[]>;
 }
 export function createProjectCheck(compiler: ProjectCompilerPort) {
-  return async (files: FileMap): Promise<BuildProblem[]> => {
+  return async (files: FileMap, projectId?: string): Promise<BuildProblem[]> => {
     const problems: BuildProblem[] = [];
     try { readProjectServices(files); } catch (error) {
       problems.push({ file: SERVICES_MANIFEST, text: (error as Error).message });
@@ -39,6 +41,7 @@ export function createProjectCheck(compiler: ProjectCompilerPort) {
         problems.push({ file: job.file, text: '`schedule` debe ser un texto literal, p. ej. export const schedule = "0 8 * * *".' });
       }
     }
+    if (compiler.backend) problems.push(...await compiler.backend(files, projectId));
     return problems;
   };
 }
