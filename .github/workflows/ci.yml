@@ -65,12 +65,15 @@ jobs:
           docker network create forja
           docker run -d --name pg --network forja -e POSTGRES_USER=forja -e POSTGRES_PASSWORD=forja -e POSTGRES_DB=forja postgres:17-alpine
           until docker exec pg pg_isready -U forja; do sleep 1; done
-          docker run -d --name forja --network forja -p 4100:4100 -e SECRETS_KEY=$(openssl rand -hex 32) -e DATABASE_URL=postgres://forja:forja@pg:5432/forja forja:ci
+          docker run -d --name forja --network forja --security-opt seccomp=unconfined --security-opt apparmor=unconfined --security-opt systempaths=unconfined -p 4100:4100 -e SECRETS_KEY=$(openssl rand -hex 32) -e DATABASE_URL=postgres://forja:forja@pg:5432/forja forja:ci
           for i in $(seq 1 30); do
             if curl -fsS http://localhost:4100/healthz; then echo; break; fi
             sleep 2
           done
           curl -fsS http://localhost:4100/healthz
           docker exec forja node -e "import('playwright-core').then(async ({ chromium }) => { const b = await chromium.launch(); await b.close(); console.log('chromium ok'); })"
+      - name: Comprobar el sandbox JVM sin privilegios
+        run: |
+          docker exec forja node --import tsx --input-type=module -e "import { bwrapUnavailable } from './server/modules/app-runtime/infrastructure/languageSandbox.js'; const error = await bwrapUnavailable(); if (error) throw new Error(error); console.log('bubblewrap ok');"
       - if: failure()
         run: docker logs forja

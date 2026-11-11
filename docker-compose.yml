@@ -24,11 +24,12 @@ services:
     # que npm, los sandboxes y demás procesos hijos no lo hereden.
     command: ["node", "--max-old-space-size=${FORJA_HEAP_MB:-1024}", "--import", "tsx", "server/bootstrap/server.ts"]
     restart: unless-stopped
-    # bubblewrap aísla las compilaciones y JVM de los backends Java; el perfil seccomp por
-    # defecto de Docker bloquea sus user namespaces (docs/language-runtimes.md).
+    # bubblewrap necesita namespaces y un /proc sin las máscaras de Docker para montar
+    # el /proc de su propio PID namespace (docs/language-runtimes.md).
     security_opt:
       - seccomp=unconfined
       - apparmor=unconfined
+      - systempaths=unconfined
     expose:
       - "4100"
     environment:
@@ -114,11 +115,12 @@ services:
         JAVA: ${FORJA_JAVA:-1}
     command: ["node", "--max-old-space-size=${FORJA_APP_RUNTIME_HEAP_MB:-1024}", "--import", "tsx", "server/bootstrap/appRuntimeServer.ts"]
     restart: unless-stopped
-    # bubblewrap aísla las compilaciones y JVM de los backends Java; el perfil seccomp por
-    # defecto de Docker bloquea sus user namespaces (docs/language-runtimes.md).
+    # bubblewrap necesita namespaces y un /proc sin las máscaras de Docker para montar
+    # el /proc de su propio PID namespace (docs/language-runtimes.md).
     security_opt:
       - seccomp=unconfined
       - apparmor=unconfined
+      - systempaths=unconfined
     expose:
       - "4200"
     environment:
@@ -232,11 +234,12 @@ services:
         JAVA: ${FORJA_JAVA:-1}
     command: ["node", "--max-old-space-size=${FORJA_BUILDER_HEAP_MB:-1536}", "--import", "tsx", "server/bootstrap/builderServer.ts"]
     restart: unless-stopped
-    # bubblewrap aísla las compilaciones y JVM de los backends Java; el perfil seccomp por
-    # defecto de Docker bloquea sus user namespaces (docs/language-runtimes.md).
+    # bubblewrap necesita namespaces y un /proc sin las máscaras de Docker para montar
+    # el /proc de su propio PID namespace (docs/language-runtimes.md).
     security_opt:
       - seccomp=unconfined
       - apparmor=unconfined
+      - systempaths=unconfined
     expose:
       - "4300"
     environment:
