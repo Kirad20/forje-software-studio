@@ -5,6 +5,7 @@ import type { Project } from "../../../shared/contracts/index.js";
 import { Refresh } from "../../../shared/Icons.js";
 import { Modal, Select } from "../../../shared/ui.js";
 import { servicePath, type ServiceEnvironment } from "../../../shared/application/service-environment.js";
+import { FileTree } from "./FileTree.js";
 
 export function useLoad<T>(path: string, deps: unknown[] = []) {
   const [data, setData] = useState<T | null>(null);
@@ -81,26 +82,7 @@ export function CodePanel({ projectId, reloadKey, initialPath = null }: { projec
           />
         </div>
         <div className="tool-file-list">
-          {visibleFiles.map((f) => {
-            const name = f.path.split("/").pop() ?? f.path;
-            const folder = f.path.slice(0, Math.max(0, f.path.length - name.length)).replace(/\/$/, "");
-            const extension = name.includes(".") ? name.slice(name.lastIndexOf(".") + 1).toUpperCase() : "FILE";
-            return (
-              <button
-                key={f.path}
-                className={`tool-file-button${f.path === path ? " active" : ""}`}
-                onClick={() => setPath(f.path)}
-                title={f.path}
-                aria-current={f.path === path ? "page" : undefined}
-              >
-                <span className="tool-file-extension">{extension}</span>
-                <span className="tool-file-label">
-                  <strong>{name}</strong>
-                  <small>{folder || "raíz"}</small>
-                </span>
-              </button>
-            );
-          })}
+          <FileTree files={visibleFiles} selectedPath={path} searching={Boolean(query.trim())} onSelect={setPath} />
           {visibleFiles.length === 0 && <div className="tool-file-list-empty">No se encontraron archivos.</div>}
         </div>
       </aside>
