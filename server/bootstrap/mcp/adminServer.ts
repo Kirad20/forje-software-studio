@@ -7,6 +7,7 @@ import type { SettingsModule } from "../../modules/settings/index.js";
 import type { ProjectsModule } from "../../modules/projects/index.js";
 import type { createPlatformModelManagement } from "../../modules/model-management/index.js";
 import { auditWindow, readExecutionAudit, type AuditFilter, type AuditReport } from "../../modules/execution-audit/index.js";
+import { readOperationalEvents } from "../../shared/operationalLog.js";
 
 interface AdminMcpModules {
   identity: IdentityModule;
@@ -14,6 +15,7 @@ interface AdminMcpModules {
   projects: ProjectsModule;
   models: ReturnType<typeof createPlatformModelManagement>;
   auditQuery?: (filter: AuditFilter) => Promise<AuditReport>;
+  logsQuery?: typeof readOperationalEvents;
   /** Memory of each platform service (heap, RSS, open databases, sandboxes, JVMs). */
   memory?: () => Promise<unknown>;
 }
@@ -58,6 +60,15 @@ const schemas = {
   set_account_models: z.object({ accountId: id, enabled: modelIds.nullable() }).strict(),
   set_project_models: z.object({ projectId: id, enabled: modelIds }).strict(),
   router_stats: z.object({}).strict(),
+  system_logs: z.object({
+    projectId: id.optional(), service: z.enum(["project", "project-db", "compiler"]).optional(),
+    env: z.enum(["preview", "published"]).optional(), level: z.enum(["info", "warn", "error"]).optional(),
+    source: z.enum(["request", "endpoint", "job", "email", "ai", "build", "client"]).optional(),
+    from: z.string().datetime({ offset: true }).optional(), to: z.string().datetime({ offset: true }).optional(),
+    limit: z.number().int().min(1).max(100).optional(), offset: z.number().int().min(0).max(10000).optional(),
+  }).strict().refine((value) => !value.from || !value.to || Date.parse(value.from) <= Date.parse(value.to), {
+    message: "from must not be after to",
+  }),
   execution_audit: z.object({
     projectId: id.optional(), from: z.string().max(40).optional(), to: z.string().max(40).optional(),
     limit: z.number().int().min(1).max(100).optional(), offset: z.number().int().min(0).max(10000).optional(),
@@ -78,6 +89,7 @@ const descriptions: Record<ToolName, string> = {
   set_project_models: "Configura modelos de un proyecto existente. enabled=[] elimina la restricción de proyecto, pero conserva permisos de su propietario.",
   router_stats: "Hasta 50 ejecuciones Fusion recientes con patrón, pasos, modelos, avisos y costes, más feedback histórico; nunca incluye borradores ni razonamiento privado.",
   execution_audit: "Auditoría de ejecución: uso/coste medidos, fases y modelos solicitados/servidos, contexto estimado, bytes de herramientas y compactación, y cambios administrativos sin valores. Filtra por projectId y ventana de hasta 31 días (7 por defecto); páginas de hasta 100 con offset. Datos ausentes se indican como no registrados; los deltas totales no prueban causas.",
+  system_logs: "Consulta metadatos de eventos de proyectos, bases y compilación, sin mensajes ni datos sensibles. Filtra por proyecto, servicio, entorno, nivel, fuente o fechas ISO; pagina hasta 100 registros. Los eventos antiguos se depuran tras 30 días cuando llegan eventos nuevos.",
 };
 const writes = new Set<ToolName>(["update_settings", "reset_setting", "update_provider", "update_model", "set_account_models", "set_project_models"]);
 
@@ -199,6 +211,11 @@ export function createAdminMcpHandler(modules: AdminMcpModules) {
         const filter = schemas[name].parse(input);
         if (filter.projectId) await projectExists(filter.projectId);
         return await (modules.auditQuery ?? readExecutionAudit)(auditWindow(filter));
+      }
+      case "system_logs": {
+        const filter = schemas[name].parse(input);
+        if (filter.projectId) await projectExists(filter.projectId);
+        return await (modules.logsQuery ?? readOperationalEvents)(filter);
       }
     }
   }

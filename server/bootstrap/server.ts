@@ -6,6 +6,7 @@ import { Hono } from "hono";
 import { compress } from "hono/compress";
 import { WebSocketServer } from "ws";
 import { config, ROOT_DIR } from "../shared/config.js";
+import { flushProjectLogsForShutdown } from "../shared/projectLogSink.js";
 import { createStudioApi } from "./http/studioApi.js";
 import { withDefaultHeaders } from "./http/responseHeaders.js";
 import { startJobRunner, stopJobRunner } from "../modules/app-services/jobs.js";
@@ -237,6 +238,7 @@ const lifecycle = new ApplicationLifecycle([
       throw error;
     }
   }, stop: closePlatformDb },
+  { name: "operational logs", start: async () => {}, stop: flushProjectLogsForShutdown },
   { name: "rate limiting", start: async () => { startRateLimitCleanup(); }, stop: async () => { stopRateLimitCleanup(); } },
   { name: "module bindings", start: monolith.startBindings, stop: monolith.stopBindings },
   { name: "application databases", start: async () => {}, stop: closeAll },

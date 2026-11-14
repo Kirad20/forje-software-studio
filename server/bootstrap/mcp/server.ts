@@ -159,6 +159,7 @@ export const TOOL_HINTS: Record<string, Hints> = {
   call_endpoint: DESTRUCTIVE,
   browser_test: DESTRUCTIVE,
   run_job: DESTRUCTIVE,
+  create_test_user: DESTRUCTIVE,
   set_user_password: DESTRUCTIVE,
   publish_app: { ...DESTRUCTIVE, openWorldHint: true },
 };

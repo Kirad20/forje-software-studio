@@ -69,6 +69,7 @@ describe("Projects hexagonal migration", () => {
     expect(store.create).toHaveBeenCalledWith(expect.objectContaining({ ownerId: "new-owner", name: "App (copia)" }), { "pages/home.tsx": "code" }, undefined);
     expect(store.updateProject).toHaveBeenCalledWith("0123456789abcdef", { systemPrompt: source.systemPrompt, designPrompt: source.designPrompt, seo: source.seo, profile: source.profile, folderId: source.folderId });
     expect(ports.clone).toHaveBeenCalledWith("source", "0123456789abcdef");
+    expect(ports.clone.mock.invocationCallOrder[0]).toBeLessThan(ports.warmup.mock.invocationCallOrder[0]!);
   });
   it("restores newest-first before images, records undo and emits only after persistence", async () => {
     const { app, store, ports } = fixture();

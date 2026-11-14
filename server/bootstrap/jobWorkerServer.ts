@@ -1,5 +1,6 @@
 import { createServer } from "node:http";
 import { config } from "../shared/config.js";
+import { flushProjectLogsForShutdown } from "../shared/projectLogSink.js";
 import { closePlatformDb, platformDb } from "../shared/database/index.js";
 import { startJobRunner, stopJobRunner, isJobRunnerStarted } from "../modules/app-services/jobs.js";
 import { stopAppRuntime, localMemoryReport } from "../modules/app-runtime/index.js";
@@ -43,6 +44,7 @@ const lifecycle = new ApplicationLifecycle([
     },
     stop: closePlatformDb,
   },
+  { name: "operational logs", start: async () => {}, stop: flushProjectLogsForShutdown },
   { name: "worker module bindings", start: monolith.startBindings, stop: monolith.stopBindings },
   { name: "worker settings", start: monolith.settings.start, stop: async () => { monolith.settings.stop(); } },
   { name: "worker models", start: monolith.models.start, stop: monolith.models.stop },

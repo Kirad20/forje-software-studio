@@ -22,6 +22,7 @@ function ports() {
     stopBuilding: vi.fn(),
     reloadSettings: vi.fn(async () => {}),
     startSecurityReview: vi.fn(async () => true),
+    compilerHealth: vi.fn(async () => {}),
     runTurn,
     runTool,
   };
@@ -36,6 +37,21 @@ it("protects the builder control API with its internal token", async () => {
   });
 
   expect(response.status).toBe(401);
+});
+
+it("reports compiler readiness separately from HTTP health", async () => {
+  const builder = ports();
+  const app = createBuilderService(builder, "builder-secret");
+  expect((await app.request("/healthz")).status).toBe(200);
+  expect((await app.request("/internal/builder/compiler-health", { method: "POST" })).status).toBe(401);
+  const options = { method: "POST", headers: { authorization: "Bearer builder-secret" } };
+  expect((await app.request("/internal/builder/compiler-health", options)).status).toBe(200);
+  builder.compilerHealth.mockRejectedValueOnce(new Error("compiler offline"));
+  const log = vi.spyOn(console, "error").mockImplementation(() => {});
+  try {
+    expect((await app.request("/internal/builder/compiler-health", options)).status).toBe(503);
+    expect((await app.request("/healthz")).status).toBe(200);
+  } finally { log.mockRestore(); }
 });
 
 it("streams builder events and forwards the complete turn request", async () => {

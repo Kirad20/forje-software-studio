@@ -140,6 +140,19 @@ describe("administrative MCP transport", () => {
       modelId: model.id, patch: { capabilities: { ...profile, coding: 5.1 } },
     })).isError).toBe(true);
   });
+  it("reads bounded operational events through the admin MCP", async () => {
+    const logsQuery = vi.fn(async () => [{ event: "open_failed" }]);
+    const { handle } = setup({ logsQuery });
+    const result = await call(handle, "system_logs", { limit: 10 });
+    expect(result.isError).toBe(false);
+    expect(JSON.parse(result.content[0].text)).toEqual([{ event: "open_failed" }]);
+    expect(logsQuery).toHaveBeenCalledWith({ limit: 10 });
+    expect((await call(handle, "system_logs", { limit: 101 })).isError).toBe(true);
+    expect((await call(handle, "system_logs", {
+      from: "2026-01-02T00:00:00Z", to: "2026-01-01T00:00:00Z",
+    })).isError).toBe(true);
+  });
+
   it("changes account/project allowlists only for existing entities and model IDs and records actor", async () => {
     const { handle, settings, models } = setup();
     expect((await call(handle, "set_account_models", { accountId: "owner", enabled: null })).isError).toBe(false);

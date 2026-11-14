@@ -1,8 +1,12 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { rm } from "node:fs/promises";
+import { existsSync, mkdirSync, renameSync, writeFileSync } from "node:fs";
+import path from "node:path";
 import { PGlite } from "@electric-sql/pglite";
 
 const pathsMock = vi.hoisted(() => ({ root: `${process.cwd()}\\node_modules\\.cache\\.test-project-db-${process.pid}` }));
+
+vi.mock("../../../../server/shared/operationalLog.js", () => ({ recordOperationalEvent: vi.fn() }));
 
 vi.mock("../../../../server/shared/config.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../../../server/shared/config.js")>();
@@ -19,6 +23,8 @@ vi.mock("../../../../server/shared/config.js", async (importOriginal) => {
 
 import {
   applyProjectMigrations,
+  cloneDatabase,
+  closeProject,
   closeAll,
   isAwake,
   projectDb,
@@ -52,6 +58,97 @@ it("preserves the legacy production database and lazily creates an isolated prev
   await expect(projectDb(id, "published").one("select value from notes where id = 1")).resolves.toEqual({ value: "production" });
   await preview.exec("truncate notes");
   await expect(projectDb(id, "published").one("select value from notes where id = 1")).resolves.toEqual({ value: "production" });
+}, 120_000);
+
+it("serializes concurrent first preview access", async () => {
+  const id = "concurrent-preview";
+  await projectDb(id, "published").query("select 1");
+  const results = await Promise.all(Array.from({ length: 8 }, () => projectDb(id, "preview").one("select 1 as value")));
+  expect(results).toEqual(Array.from({ length: 8 }, () => ({ value: 1 })));
+}, 120_000);
+
+it("preserves the destination when preparing a clone fails", async () => {
+  const source = "clone-failure-source";
+  const destination = "clone-failure-destination";
+  await projectDb(source, "published").query("select 1");
+  await projectDb(destination, "published").query("insert into _forja_users (id, email) values ('keep', 'keep@example.test')");
+  const create = vi.spyOn(PGlite, "create").mockRejectedValueOnce(new Error("copy failed"));
+  try {
+    await expect(cloneDatabase(source, destination)).rejects.toThrow("copy failed");
+  } finally {
+    create.mockRestore();
+  }
+  await expect(projectDb(destination, "published").one("select id from _forja_users where id = 'keep'")).resolves.toEqual({ id: "keep" });
+}, 120_000);
+
+it("waits for an in-progress clone before opening the destination", async () => {
+  const source = "clone-concurrent-source";
+  const destination = "clone-concurrent-destination";
+  await projectDb(source, "published").query("insert into _forja_users (id, email) values ('source', 'source@example.test')");
+  await projectDb(destination, "published").query("insert into _forja_users (id, email) values ('old', 'old@example.test')");
+  let release!: () => void;
+  let entered!: () => void;
+  const paused = new Promise<void>((resolve) => { release = resolve; });
+  const started = new Promise<void>((resolve) => { entered = resolve; });
+  const realCreate = PGlite.create.bind(PGlite);
+  const create = vi.spyOn(PGlite, "create").mockImplementationOnce(async (...args) => {
+    entered();
+    await paused;
+    return realCreate(...args);
+  });
+  try {
+    const clone = cloneDatabase(source, destination);
+    await started;
+    let finished = false;
+    const read = projectDb(destination, "published").query<{ id: string }>("select id from _forja_users").then((rows) => {
+      finished = true;
+      return rows;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    expect(finished).toBe(false);
+    release();
+    await clone;
+    await expect(read).resolves.toEqual([{ id: "source" }]);
+  } finally {
+    release();
+    create.mockRestore();
+  }
+}, 120_000);
+
+it("restores a database interrupted before the staged copy was installed", async () => {
+  const id = "interrupted-clone";
+  await projectDb(id, "published").query("insert into _forja_users (id, email) values ('old', 'old@example.test')");
+  await closeProject(id);
+  const dir = path.join(pathsMock.root, id, "db");
+  const parent = path.dirname(dir);
+  const suffix = ".backup-12345678-1234-1234-1234-123456789abc";
+  const staged = ".database-copy-abcdef";
+  mkdirSync(path.join(parent, staged));
+  writeFileSync(path.join(parent, ".clone-journal.json"), JSON.stringify({
+    suffix, staged, hadPublished: true, hadPreview: false,
+  }));
+  renameSync(dir, dir + suffix);
+  await expect(projectDb(id, "published").one("select id from _forja_users")).resolves.toEqual({ id: "old" });
+  expect(existsSync(path.join(parent, ".clone-journal.json"))).toBe(false);
+}, 120_000);
+
+it("keeps an installed clone when interrupted after the atomic rename", async () => {
+  const destination = "installed-clone";
+  const source = "installed-clone-source";
+  await projectDb(destination, "published").query("insert into _forja_users (id, email) values ('old', 'old@example.test')");
+  await projectDb(source, "published").query("insert into _forja_users (id, email) values ('new', 'new@example.test')");
+  await closeProject(destination);
+  await closeProject(source);
+  const dir = path.join(pathsMock.root, destination, "db");
+  const parent = path.dirname(dir);
+  const suffix = ".backup-12345678-1234-1234-1234-123456789abc";
+  writeFileSync(path.join(parent, ".clone-journal.json"), JSON.stringify({
+    suffix, staged: ".database-copy-abcdef", hadPublished: true, hadPreview: false,
+  }));
+  renameSync(dir, dir + suffix);
+  renameSync(path.join(pathsMock.root, source, "db"), dir);
+  await expect(projectDb(destination, "published").one("select id from _forja_users")).resolves.toEqual({ id: "new" });
+  expect(existsSync(dir + suffix)).toBe(true);
 }, 120_000);
 
 it("publishes only unapplied migrations without copying preview rows", async () => {

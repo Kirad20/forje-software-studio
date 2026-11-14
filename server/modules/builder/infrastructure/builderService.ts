@@ -28,6 +28,7 @@ export interface BuilderServicePorts {
   runTurn(input: BuilderTurnInput, emit: (event: AgentEvent) => void): Promise<void>;
   runTool(name: string, input: Record<string, unknown>, context: ToolContext, structured: boolean): Promise<BuilderToolResult>;
   memoryReport?(): Promise<unknown>;
+  compilerHealth?(): Promise<void>;
 }
 
 type BuilderStreamSubscriber = { send: (event: AgentEvent) => void; close: () => void };
@@ -52,6 +53,16 @@ export function createBuilderService(ports: BuilderServicePorts, token: string) 
   });
 
   app.get("/healthz", (c) => c.json({ ok: true }));
+  app.post("/internal/builder/compiler-health", async (c) => {
+    if (!ports.compilerHealth) return c.json({ ok: false }, 503);
+    try {
+      await ports.compilerHealth();
+      return c.json({ ok: true });
+    } catch (error) {
+      console.error("[builder] compiler health check failed:", error instanceof Error ? error.name : "unknown error");
+      return c.json({ ok: false }, 503);
+    }
+  });
   app.post("/internal/builder/memory", async (c) => {
     if (!ports.memoryReport) return c.json({ error: "Not available" }, 404);
     return c.json(await ports.memoryReport());

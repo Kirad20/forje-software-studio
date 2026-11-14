@@ -8,10 +8,16 @@ export interface LogEntry {
   source: "request" | "endpoint" | "job" | "email" | "ai" | "build" | "client"; message: string;
 }
 export interface LogRepository { get(projectId: string): LogEntry[]; set(projectId: string, entries: LogEntry[]): void }
-export function createLogService(repository: LogRepository, emit: (projectId: string, event: ProjectEvent) => unknown, now: () => string) {
+export function createLogService(
+  repository: LogRepository,
+  emit: (projectId: string, event: ProjectEvent) => unknown,
+  now: () => string,
+  recordMetadata?: (projectId: string, entry: Omit<LogEntry, "message">) => void,
+) {
   return {
     log(projectId: string, entry: Omit<LogEntry, "at">) {
       const full = { ...entry, at: now() };
+      recordMetadata?.(projectId, { at: full.at, env: full.env, level: full.level, source: full.source });
       const list = [...repository.get(projectId), full].slice(-500);
       repository.set(projectId, list);
       emit(projectId, { type: "log", entry: full });

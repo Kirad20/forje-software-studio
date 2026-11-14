@@ -1,10 +1,11 @@
 import { serve } from "@hono/node-server";
 import { config } from "../shared/config.js";
+import { flushProjectLogsForShutdown } from "../shared/projectLogSink.js";
 import { closePlatformDb, platformDb } from "../shared/database/index.js";
 import { createBuilderService } from "../modules/builder/index.js";
 import { builderTools, toolByName, isBuilding, stopBuilding, runBuilderTurn, startSecurityReview, stopBuilder, metricsIdle, langfuse, reloadLangfuse } from "../modules/builder/index.js";
 import { reloadProviders } from "../modules/model-management/providers.js";
-import { localMemoryReport } from "../modules/app-runtime/index.js";
+import { checkCompiler, localMemoryReport } from "../modules/app-runtime/index.js";
 import { createMonolith } from "./composition.js";
 import { ApplicationLifecycle } from "./ApplicationLifecycle.js";
 import { startAppRuntimeEventRelay } from "./appRuntimeEventRelay.js";
@@ -20,6 +21,7 @@ const app = createBuilderService({
   },
   startSecurityReview,
   memoryReport: () => localMemoryReport("builder"),
+  compilerHealth: checkCompiler,
   runTurn: (input, emit) => runBuilderTurn(
     input.account,
     input.projectId,
@@ -67,6 +69,7 @@ const lifecycle = new ApplicationLifecycle([
     },
     stop: closePlatformDb,
   },
+  { name: "operational logs", start: async () => {}, stop: flushProjectLogsForShutdown },
   { name: "builder module bindings", start: monolith.startBindings, stop: monolith.stopBindings },
   { name: "builder settings", start: async () => {
     await monolith.settings.start();
