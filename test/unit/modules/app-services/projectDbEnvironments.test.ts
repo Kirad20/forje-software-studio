@@ -4,19 +4,23 @@ import { existsSync, mkdirSync, renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { PGlite } from "@electric-sql/pglite";
 
-const pathsMock = vi.hoisted(() => ({ root: `${process.cwd()}\\node_modules\\.cache\\.test-project-db-${process.pid}` }));
+const pathsMock = await vi.hoisted(async () => {
+  const { join } = await import("node:path");
+  return { root: join(process.cwd(), "node_modules", ".cache", `.test-project-db-${process.pid}`) };
+});
 
 vi.mock("../../../../server/shared/operationalLog.js", () => ({ recordOperationalEvent: vi.fn() }));
 
 vi.mock("../../../../server/shared/config.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../../../server/shared/config.js")>();
+  const { join } = await import("node:path");
   return {
     ...actual,
     config: { ...actual.config, appDataServiceUrl: "", dbIdleMs: 60_000 },
     paths: {
       ...actual.paths,
       projectDb: (projectId: string, env: "preview" | "published" = "published") =>
-        `${pathsMock.root}\\${projectId}\\${env === "preview" ? "preview-db" : "db"}`,
+        join(pathsMock.root, projectId, env === "preview" ? "preview-db" : "db"),
     },
   };
 });
