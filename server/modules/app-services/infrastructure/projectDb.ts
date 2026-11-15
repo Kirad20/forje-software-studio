@@ -1,8 +1,9 @@
-import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, rmSync } from "node:fs";
+import { createHash, randomUUID } from "node:crypto";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { PGlite } from "@electric-sql/pglite";
 import { config, paths } from "../../../shared/config.js";
+import { recordOperationalEvent } from "../../../shared/operationalLog.js";
 import type { AppEnv } from "../domain/contracts.js";
 import type { ProjectDb } from "../ports/database.js";
 import { ProjectDbClient } from "./projectDbClient.js";
@@ -53,9 +54,52 @@ const closing = new Map<string, Promise<void>>();
 const metricSnapshots = new Map<string, Omit<ProjectDbMetrics, "active">>();
 const previewCopies = new Map<string, Promise<void>>();
 const migrationQueues = new Map<string, Promise<unknown>>();
+const projectLocks = new Map<string, Promise<unknown>>();
 
 const dbKey = (projectId: string, env: ProjectDbEnv) => `${projectId}\0${env}`;
 const databasePath = (projectId: string, env: ProjectDbEnv) => paths.projectDb(projectId, env);
+
+function recoverInterruptedClone(projectId: string) {
+  const dir = databasePath(projectId, "published");
+  const parent = path.dirname(dir);
+  const journal = path.join(parent, ".clone-journal.json");
+  if (!existsSync(journal)) return;
+  const data: unknown = JSON.parse(readFileSync(journal, "utf8"));
+  if (!data || typeof data !== "object" || !("suffix" in data) || !("staged" in data) ||
+      !("hadPublished" in data) || !("hadPreview" in data) ||
+      typeof data.suffix !== "string" || !/^\.backup-[0-9a-f-]{36}$/.test(data.suffix) ||
+      typeof data.staged !== "string" || !/^\.database-copy-[A-Za-z0-9]+$/.test(data.staged) ||
+      typeof data.hadPublished !== "boolean" || typeof data.hadPreview !== "boolean") {
+    throw new Error("Invalid project database clone journal");
+  }
+  const staged = path.join(parent, data.staged);
+  if (!existsSync(staged)) {
+    if (!existsSync(dir)) throw new Error("Interrupted clone has no staged or installed database");
+    unlinkSync(journal);
+    return;
+  }
+  for (const [original, existed] of [[dir, data.hadPublished], [databasePath(projectId, "preview"), data.hadPreview]] as const) {
+    const backup = original + data.suffix;
+    if (existsSync(backup)) {
+      if (existsSync(original)) throw new Error("Interrupted clone has conflicting database paths");
+      renameSync(backup, original);
+    } else if (existed && !existsSync(original)) {
+      throw new Error("Interrupted clone is missing a database backup");
+    }
+  }
+  rmSync(staged, { recursive: true, force: true });
+  unlinkSync(journal);
+}
+
+function withProjectLock<T>(projectId: string, operation: () => Promise<T>): Promise<T> {
+  const previous = projectLocks.get(projectId) ?? Promise.resolve();
+  const current = previous.catch(() => {}).then(operation);
+  projectLocks.set(projectId, current);
+  void current.finally(() => {
+    if (projectLocks.get(projectId) === current) projectLocks.delete(projectId);
+  }).catch(() => {});
+  return current;
+}
 
 function metricsFor(projectId: string) {
   let metrics = metricSnapshots.get(projectId);
@@ -111,9 +155,10 @@ async function openDb(projectId: string, env: ProjectDbEnv): Promise<Open> {
   const dir = databasePath(projectId, env);
   const key = dbKey(projectId, env);
   const metrics = metricsFor(key);
+  let db: PGlite | undefined;
   try {
     mkdirSync(dir, { recursive: true });
-    const db = await PGlite.create(dir, pgliteOptions());
+    db = await PGlite.create(dir, pgliteOptions());
     await db.exec(BAAS_SCHEMA);
     await db.exec(PROJECT_CACHE_SCHEMA);
     metrics.opens++;
@@ -124,6 +169,12 @@ async function openDb(projectId: string, env: ProjectDbEnv): Promise<Open> {
   } catch (error) {
     metrics.openFailures++;
     metrics.openMs += Date.now() - started;
+    await recordOperationalEvent({ service: "project-db", event: "open_failed", projectId, env, error });
+    if (db) {
+      try { await db.close(); } catch (closeError) {
+        throw new AggregateError([error, closeError], "Project database initialization and cleanup failed");
+      }
+    }
     throw error;
   }
 }
@@ -152,12 +203,13 @@ function closeEntry(key: string, entry: Open): Promise<void> {
       metricsFor(key).closes++;
     } catch (error) {
       console.warn(`[forja] no se pudo cerrar la base del proyecto ${key}:`, (error as Error).message);
+      throw error;
     }
   })();
   closing.set(key, done);
-  void done.finally(() => {
+  void done.then(() => {
     if (closing.get(key) === done) closing.delete(key);
-  });
+  }, () => {});
   return done;
 }
 
@@ -165,7 +217,7 @@ function scheduleSleep(key: string, entry: Open) {
   clearTimeout(entry.timer);
   entry.timer = setTimeout(() => {
     if (entry.active > 0) scheduleSleep(key, entry);
-    else void closeEntry(key, entry);
+    else void closeEntry(key, entry).catch(() => {});
   }, config.dbIdleMs);
   entry.timer.unref();
 }
@@ -177,25 +229,29 @@ function evictOverflow(keep: string) {
     if (excess <= 0) break;
     const entry = ready.get(key);
     if (key === keep || !entry || entry.active > 0) continue;
-    void closeEntry(key, entry);
+    void closeEntry(key, entry).catch(() => {});
     excess--;
   }
 }
 
 async function ensurePreviewCopy(projectId: string): Promise<void> {
   const dir = databasePath(projectId, "preview");
-  if (existsSync(dir)) return;
   let pending = previewCopies.get(projectId);
+  if (pending) return pending;
+  if (existsSync(dir)) return;
   if (!pending) {
     pending = (async () => {
       if (existsSync(dir)) return;
-      const dump = await run(projectId, "published", (db) => db.dumpDataDir("gzip"));
+      const dump = await runUnlocked(projectId, "published", (db) => db.dumpDataDir("gzip"));
       mkdirSync(path.dirname(dir), { recursive: true });
+      const temporaryDir = mkdtempSync(path.join(path.dirname(dir), ".preview-copy-"));
       try {
-        const copy = await PGlite.create(dir, { ...pgliteOptions(), loadDataDir: dump });
+        const copy = await PGlite.create(temporaryDir, { ...pgliteOptions(), loadDataDir: dump });
         await copy.close();
+        renameSync(temporaryDir, dir);
       } catch (error) {
-        rmSync(dir, { recursive: true, force: true });
+        rmSync(temporaryDir, { recursive: true, force: true });
+        await recordOperationalEvent({ service: "project-db", event: "preview_copy_failed", projectId, env: "preview", error });
         throw error;
       }
     })();
@@ -208,6 +264,7 @@ async function ensurePreviewCopy(projectId: string): Promise<void> {
 }
 
 async function get(projectId: string, env: ProjectDbEnv): Promise<Open> {
+  recoverInterruptedClone(projectId);
   if (env === "preview") await ensurePreviewCopy(projectId);
   const key = dbKey(projectId, env);
   for (;;) {
@@ -231,7 +288,7 @@ async function get(projectId: string, env: ProjectDbEnv): Promise<Open> {
 }
 
 /** PGlite is single-connection; queue work so a transaction never interleaves with other queries. */
-async function run<T>(projectId: string, env: ProjectDbEnv, fn: (db: PGlite) => Promise<T>): Promise<T> {
+async function runUnlocked<T>(projectId: string, env: ProjectDbEnv, fn: (db: PGlite) => Promise<T>): Promise<T> {
   const queuedAt = Date.now();
   const key = dbKey(projectId, env);
   const entry = await get(projectId, env);
@@ -246,6 +303,7 @@ async function run<T>(projectId: string, env: ProjectDbEnv, fn: (db: PGlite) => 
       return await fn(entry.db);
     } catch (error) {
       metrics.failedOperations++;
+      await recordOperationalEvent({ service: "project-db", event: "query_failed", projectId, env, error });
       throw error;
     } finally {
       metrics.operationMs += Date.now() - started;
@@ -254,6 +312,10 @@ async function run<T>(projectId: string, env: ProjectDbEnv, fn: (db: PGlite) => 
   });
   entry.queue = next.catch(() => {});
   return next;
+}
+
+function run<T>(projectId: string, env: ProjectDbEnv, fn: (db: PGlite) => Promise<T>): Promise<T> {
+  return withProjectLock(projectId, () => runUnlocked(projectId, env, fn));
 }
 
 function assertRuntimeSql(sql: string) {
@@ -395,16 +457,15 @@ async function applyProjectMigrationsLocal(projectId: string, input: Record<stri
   const migrations = orderedMigrations(input);
   const queueKey = dbKey(projectId, env);
   const previous = migrationQueues.get(queueKey) ?? Promise.resolve();
-  const current = previous.catch(() => {}).then(async () => {
-    await get(projectId, env);
-    await run(projectId, env, async (db) => {
+  const current = previous.catch(() => {}).then(() => withProjectLock(projectId, async () => {
+    await runUnlocked(projectId, env, async (db) => {
       await db.exec(`create table if not exists _forja_migrations (
         migration_name text primary key,
         checksum text not null,
         applied_at timestamptz not null default now()
       )`);
     });
-    const appliedRows = await run(projectId, env, async (db) =>
+    const appliedRows = await runUnlocked(projectId, env, async (db) =>
       (await db.query<{ migration_name: string; checksum: string }>(
         "select migration_name, checksum from _forja_migrations order by migration_name",
       )).rows,
@@ -428,7 +489,7 @@ async function applyProjectMigrationsLocal(projectId: string, input: Record<stri
         throw new Error(`No se puede aplicar ${migration.path}: su orden debe ser posterior a las migraciones ya aplicadas.`);
       }
       const hash = checksum(migration.sql);
-      await run(projectId, env, async (db) => {
+      await runUnlocked(projectId, env, async (db) => {
         await db.transaction(async (tx) => {
           await tx.exec(migration.sql);
           await tx.query("insert into _forja_migrations (migration_name, checksum) values ($1, $2)", [migration.path, hash]);
@@ -437,10 +498,13 @@ async function applyProjectMigrationsLocal(projectId: string, input: Record<stri
       latestApplied = version;
     }
     return { applied: migrations.filter(({ path }) => !applied.has(path)).map(({ path }) => path) };
-  });
+  }));
   migrationQueues.set(queueKey, current);
   try {
     return await current;
+  } catch (error) {
+    await recordOperationalEvent({ service: "project-db", event: "migration_failed", projectId, env, error });
+    throw error;
   } finally {
     if (migrationQueues.get(queueKey) === current) migrationQueues.delete(queueKey);
   }
@@ -462,6 +526,10 @@ export async function dumpDatabase(projectId: string, env: ProjectDbEnv = "previ
 /** Closes a project's database now (before deleting or replacing its files). */
 export async function closeProject(projectId: string, env?: ProjectDbEnv) {
   if (remote) return remote.closeProject(projectId, env);
+  return withProjectLock(projectId, () => closeProjectUnlocked(projectId, env));
+}
+
+async function closeProjectUnlocked(projectId: string, env?: ProjectDbEnv) {
   await previewCopies.get(projectId)?.catch(() => {});
   for (const currentEnv of env ? [env] : ["published", "preview"] as const) {
     const key = dbKey(projectId, currentEnv);
@@ -477,15 +545,47 @@ export async function closeProject(projectId: string, env?: ProjectDbEnv) {
 /** Duplicates production data only. The new project's preview is initialized from this copy on first access. */
 export async function cloneDatabase(fromProjectId: string, toProjectId: string) {
   if (remote) return remote.cloneDatabase(fromProjectId, toProjectId);
+  if (fromProjectId === toProjectId) throw new Error("Cannot clone a project database onto itself");
   const dump = await dumpDatabase(fromProjectId, "published");
-  await closeProject(toProjectId);
-  const dir = databasePath(toProjectId, "published");
-  const previewDir = databasePath(toProjectId, "preview");
-  rmSync(dir, { recursive: true, force: true });
-  rmSync(previewDir, { recursive: true, force: true });
-  mkdirSync(dir, { recursive: true });
-  const db = await PGlite.create(dir, { ...pgliteOptions(), loadDataDir: dump });
-  await db.close();
+  await withProjectLock(toProjectId, async () => {
+    recoverInterruptedClone(toProjectId);
+    const dir = databasePath(toProjectId, "published");
+    const previewDir = databasePath(toProjectId, "preview");
+    mkdirSync(path.dirname(dir), { recursive: true });
+    const temporaryDir = mkdtempSync(path.join(path.dirname(dir), ".database-copy-"));
+    const suffix = `.backup-${randomUUID()}`;
+    const journal = path.join(path.dirname(dir), ".clone-journal.json");
+    const backups: Array<{ original: string; backup: string }> = [];
+    try {
+      const db = await PGlite.create(temporaryDir, { ...pgliteOptions(), loadDataDir: dump });
+      await db.close();
+      await closeProjectUnlocked(toProjectId);
+      writeFileSync(journal, JSON.stringify({
+        suffix, staged: path.basename(temporaryDir),
+        hadPublished: existsSync(dir), hadPreview: existsSync(previewDir),
+      }), { flag: "wx" });
+      for (const original of [dir, previewDir]) {
+        if (existsSync(original)) {
+          const backup = original + suffix;
+          renameSync(original, backup);
+          backups.push({ original, backup });
+        }
+      }
+      renameSync(temporaryDir, dir);
+      unlinkSync(journal);
+    } catch (error) {
+      const rollbackErrors: unknown[] = [];
+      if (existsSync(journal)) {
+        try { recoverInterruptedClone(toProjectId); } catch (rollbackError) { rollbackErrors.push(rollbackError); }
+      } else {
+        try { rmSync(temporaryDir, { recursive: true, force: true }); } catch (cleanupError) { rollbackErrors.push(cleanupError); }
+      }
+      await recordOperationalEvent({ service: "project-db", event: "clone_failed", projectId: toProjectId, error });
+      if (rollbackErrors.length) throw new AggregateError([error, ...rollbackErrors], "Project database clone failed and rollback was incomplete");
+      throw error;
+    }
+    for (const { backup } of backups) rmSync(backup, { recursive: true, force: true });
+  });
 }
 
 export async function closeAll() {

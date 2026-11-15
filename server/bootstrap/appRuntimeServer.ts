@@ -2,6 +2,7 @@ import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { WebSocketServer } from "ws";
 import { config } from "../shared/config.js";
+import { flushProjectLogsForShutdown } from "../shared/projectLogSink.js";
 import { closePlatformDb, platformDb } from "../shared/database/index.js";
 import { createAppDataService } from "../modules/app-services/appDataService.js";
 import { applyProjectMigrations, closeAll, closeProject, cloneDatabase, dumpDatabase, execSql, isAwake, projectDb, projectDbMetrics } from "../modules/app-services/projectDb.js";
@@ -87,6 +88,7 @@ const lifecycle = new ApplicationLifecycle([
     },
     stop: closePlatformDb,
   },
+  { name: "operational logs", start: async () => {}, stop: flushProjectLogsForShutdown },
   { name: "runtime module bindings", start: monolith.startBindings, stop: monolith.stopBindings },
   { name: "runtime settings", start: monolith.settings.start, stop: async () => { monolith.settings.stop(); } },
   { name: "runtime model management", start: monolith.models.start, stop: monolith.models.stop },

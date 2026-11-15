@@ -1,5 +1,6 @@
 import { createEventAdapters } from "./infrastructure/events.js";
 import { createLogService, type ProjectEvent } from "./application/events.js";
+import { recordProjectLog } from "../../shared/projectLogSink.js";
 export * from "./application/events.js";
 const adapters = createEventAdapters();
 export const projectEvents = adapters.projectEvents;
@@ -12,4 +13,5 @@ export const emitProject = (projectId: string, event: ProjectEvent) => {
   projectEvents.emit(projectId, event);
   for (const listener of listeners) listener(projectId, event);
 };
-export const { log, readLogs } = createLogService(adapters.logRepository, emitProject, () => new Date().toISOString());
+export const { log, readLogs } = createLogService(adapters.logRepository, emitProject, () => new Date().toISOString(),
+  (projectId, entry) => recordProjectLog({ projectId, ...entry }));

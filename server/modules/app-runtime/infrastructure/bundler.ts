@@ -2,6 +2,7 @@ import { mkdirSync, writeFileSync, existsSync } from "node:fs";
 import path from "node:path";
 
 import * as esbuild from "esbuild";
+import { withCompilerRecovery } from "./compilerService.js";
 import { ROOT_DIR, paths } from "../../../shared/config.js";
 import { sha256 } from "../../../shared/crypto.js";
 import { formatProblem, type FileMap, type BuildProblem } from "../domain/publication.js";
@@ -149,7 +150,7 @@ export async function buildClient(files: FileMap, opts: { minify?: boolean } = {
 async function bundleBrowser(files: FileMap, entry: string, minify = false): Promise<{ js: string; css: string }> {
   const pkgs = await projectPackages(files);
   try {
-    const result = await esbuild.build({
+    const result = await withCompilerRecovery(() => esbuild.build({
       entryPoints: ["forja:entry"],
       bundle: true,
       write: false,
@@ -163,7 +164,7 @@ async function bundleBrowser(files: FileMap, entry: string, minify = false): Pro
       logLevel: "silent",
       define: { "process.env.NODE_ENV": JSON.stringify(minify ? "production" : "development") },
       plugins: [vfsPlugin(files, pkgs, { entry: { path: "__entry__.tsx", contents: entry } })],
-    });
+    }));
     const out = (ext: string) => result.outputFiles.find((f) => f.path.endsWith(ext))?.text ?? "";
     return { js: out(".js"), css: out(".css") };
   } catch (e) {
@@ -230,7 +231,7 @@ export async function compileServerModule(files: FileMap, entry: string): Promis
       let exports: string[] = [];
       const pkgs = await projectPackages(files);
       try {
-        const result = await esbuild.build({
+        const result = await withCompilerRecovery(() => esbuild.build({
           entryPoints: [`./${entry}`],
           bundle: true,
           write: false,
@@ -242,7 +243,7 @@ export async function compileServerModule(files: FileMap, entry: string): Promis
           metafile: true,
           plugins: [vfsPlugin(files, pkgs, { node: true })],
           absWorkingDir: ROOT_DIR,
-        });
+        }));
         code = result.outputFiles[0]!.text;
         exports = Object.values(result.metafile.outputs)[0]?.exports ?? [];
       } catch (e) {

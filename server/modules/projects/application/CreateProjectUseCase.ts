@@ -14,6 +14,7 @@ export interface CreateProjectInput {
   visibility?: Visibility;
   files?: Record<string, string>;
   template?: StarterTemplate;
+  warmup?: boolean;
 }
 
 export class CreateProjectUseCase {
@@ -39,7 +40,7 @@ export class CreateProjectUseCase {
       projectId: project.id, label: "Proyecto creado", author: "system",
     }));
     // Warmup is best effort and must not delay the first project response.
-    void Promise.resolve().then(() => this.services.warmup(project.id)).catch(() => {});
+    if (input.warmup !== false) void Promise.resolve().then(() => this.services.warmup(project.id)).catch(() => {});
     return (await this.store.getProject(project.id))!;
   }
 }
