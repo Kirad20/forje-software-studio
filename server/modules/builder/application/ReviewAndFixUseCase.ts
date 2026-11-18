@@ -13,7 +13,7 @@ export class ReviewAndFixUseCase<Result> {
       if (review) this.ports.emitReview(review);
       if (!review || review.ok || !review.issues.length || round === 3) break;
       assertRunning(this.ports.signal);
-      const fixTasks = reviewFixTasks(tasks, review, round);
+      const fixTasks = reviewFixTasks(tasks, review, round, this.ports.layout);
       const results = await this.ports.fix(fixTasks);
       for (const task of fixTasks) {
         const result = results.get(task.id);

@@ -1,11 +1,12 @@
 import { ProjectPath } from "../domain/ProjectPath.js";
+import { layoutForPath } from "./WriteFileUseCase.js";
 import type { Author, IProjectFileRepository } from "../ports/repositories.js";
 
 export class RenameFileUseCase {
   constructor(private readonly fileRepo: IProjectFileRepository) {}
 
   async execute(projectId: string, from: string, to: string, author: Author = "owner"): Promise<void> {
-    ProjectPath.assertValid(to);
+    ProjectPath.assertValid(to, await layoutForPath(this.fileRepo, projectId, to));
     const content = await this.fileRepo.readFile(projectId, from);
     if (content === undefined) {
       throw new Error(`No existe ${from}`);

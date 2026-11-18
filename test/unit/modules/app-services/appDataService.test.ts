@@ -107,3 +107,26 @@ it("exposes project database timing metrics through the internal service", async
   await expect(response.json()).resolves.toMatchObject({ active: true, opens: 1, operations: 2 });
   expect(ports.dbMetrics).toHaveBeenCalledWith("project-1", "preview");
 });
+
+it("forwards a component's database scope from the remote client to the owner of the data", async () => {
+  const ports = databasePorts();
+  const scopes: (string | undefined)[] = [];
+  const projectDb = ports.projectDb;
+  const app = createAppDataService({ ...ports, projectDb: (_id: string, _env?: string, scope?: string) => { scopes.push(scope); return projectDb(); } } as never, "runtime-secret");
+  const { ProjectDbClient } = await import("../../../../server/modules/app-services/infrastructure/projectDbClient.js");
+  const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+    const url = new URL(String(input));
+    return app.request(url.pathname, init as RequestInit);
+  });
+  try {
+    const client = new ProjectDbClient("http://runtime.internal", "runtime-secret");
+    await client.forProject("project-1", "preview", "orders").query("select 1");
+    await client.forProject("project-1", "preview", "orders").transaction((tx) => tx.query("select 2"));
+    await client.forProject("project-1", "preview").query("select 3");
+    expect(scopes).toEqual(["orders", "orders", undefined]);
+    await client.execSql("project-1", "select 4", "preview", "orders");
+    expect(ports.execSql).toHaveBeenLastCalledWith("project-1", "select 4", "preview", "orders");
+  } finally {
+    fetchMock.mockRestore();
+  }
+});

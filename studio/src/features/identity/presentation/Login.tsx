@@ -19,11 +19,22 @@ export function Login({ onDone }: { onDone: () => void }) {
   const [error, setError] = useState("");
   const [hint, setHint] = useState("");
   const [busy, setBusy] = useState(false);
+  const [providers, setProviders] = useState<{ id: string; name: string }[]>([]);
 
   useEffect(() => {
     identityController.authStatus()
       .then((s) => setMode(s.needsSetup ? "setup" : "password"))
       .catch(() => setMode("password"));
+    identityController.oauthProviders().then((r) => setProviders(r.providers)).catch(() => setProviders([]));
+    // A provider sign-in that failed comes back with the reason in ?auth_error=.
+    const params = new URLSearchParams(location.search);
+    const oauthError = params.get("auth_error");
+    if (oauthError) {
+      setError(oauthError);
+      params.delete("auth_error");
+      const rest = params.toString();
+      history.replaceState(history.state, "", `${location.pathname}${rest ? `?${rest}` : ""}${location.hash}`);
+    }
   }, []);
   if (!mode) return <div className="empty">Cargando…</div>;
 
@@ -155,6 +166,16 @@ export function Login({ onDone }: { onDone: () => void }) {
           {busy ? <span className="spinner" /> : mode === "setup" ? "Crear administración" : mode === "code" && step === "email" ? "Enviar código" : mode === "forgot" ? "Enviar código" : mode === "reset" ? "Cambiar contraseña" : "Entrar"}
         </button>
 
+        {mode === "password" && providers.length > 0 && (
+          <div className="stack login-providers">
+            <div className="small muted login-divider">o continúa con</div>
+            {providers.map((p) => (
+              <a key={p.id} className="btn login-provider" href={identityController.oauthStartUrl(p.id, `${location.pathname}${location.search}`)}>
+                {p.name}
+              </a>
+            ))}
+          </div>
+        )}
         {mode === "password" && (
           <div className="row small login-actions">
             <button type="button" className="ghost sm" onClick={() => go("code")}>

@@ -27,6 +27,12 @@ const statements: Record<string, string> = {
   authCreateAdmin: `insert into _forja_users (id, email, role) values ($1, $2, 'admin') on conflict (email) do nothing returning id`,
   authProjectOwner: `select a.email from projects p join accounts a on a.id = p.owner_id where p.id = $1`,
   authFindUser: `select id, email, name, role from _forja_users where email = $1`,
+  authUserById: `select id, email, name, role from _forja_users where id = $1`,
+  authOAuthUser: `select u.id, u.email, u.name, u.role from _forja_oauth_accounts a join _forja_users u on u.id = a.user_id where a.provider = $1 and a.account_id = $2`,
+  authLinkOAuthAccount: `insert into _forja_oauth_accounts (provider, account_id, user_id, email) values ($1, $2, $3, $4) on conflict (provider, account_id) do nothing`,
+  authCreateOAuthTicket: `insert into _forja_oauth_tickets (key_hash, user_id, expires_at) values ($1, $2, now() + interval '5 minutes') on conflict (key_hash) do nothing`,
+  authTakeOAuthTicket: `delete from _forja_oauth_tickets where key_hash = $1 and expires_at > now() returning user_id`,
+  authPurgeOAuthTickets: `delete from _forja_oauth_tickets where expires_at <= now()`,
   authCreateTestSession: `insert into _forja_sessions (token_hash, user_id, expires_at) values ($1, $2, now() + interval '5 minutes')`,
   authTemporaryPassword: `update _forja_users set password_hash = $2, failed_logins = 0, locked_until = null where email = $1 returning id`,
   aiProject: `select p.owner_id, p.ai_enabled, a.credits from projects p join accounts a on a.id = p.owner_id where p.id = $1`,
@@ -136,7 +142,8 @@ const statements: Record<string, string> = {
     (select count(distinct visitor)::int from page_views where project_id = $1 and created_at::date = d) as visitors,
     (select count(*)::int from page_views where project_id = $1 and created_at::date = d) as views
     from generate_series(current_date - ($2::int - 1), current_date, interval '1 day') as d`,
-  projectSchema: `select table_name, column_name, data_type, is_nullable, column_default from information_schema.columns where table_schema = 'public' order by table_name, ordinal_position`,
+  // Public tables keep their bare name; tables of forja.json component schemas appear as schema.table.
+  projectSchema: `select case when table_schema = 'public' then table_name else table_schema || '.' || table_name end as table_name, column_name, data_type, is_nullable, column_default from information_schema.columns where table_schema not in ('pg_catalog', 'information_schema') and table_schema not like 'pg\\_%' order by table_schema <> 'public', table_schema, table_name, ordinal_position`,
 };
 function statement(operation: string) {
   if (operation.startsWith("analyticsTop:")) {

@@ -166,6 +166,17 @@ export const config = {
       max: { maxCalls: 8, timeoutMs: 180_000, maxUsd: 1 },
     },
   },
+  /**
+   * Studio sign-in with social and OAuth providers (Better Auth). Google and Facebook have
+   * their own fields; any other provider (GitHub, Microsoft, an OIDC or OAuth 2.0 service)
+   * goes in `providers`, the forja.auth.json shape with the credentials written inline.
+   * FORJA_OAUTH_PROVIDERS seeds `providers` before an admin changes it in the studio.
+   */
+  auth: {
+    google: { clientId: "", clientSecret: "" },
+    facebook: { clientId: "", clientSecret: "" },
+    providers: env.FORJA_OAUTH_PROVIDERS ?? "",
+  },
   github: {
     /** REST API base (GitHub Enterprise: https://host/api/v3). */
     apiUrl: "https://api.github.com",

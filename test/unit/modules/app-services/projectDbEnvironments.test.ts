@@ -11,6 +11,8 @@ const pathsMock = await vi.hoisted(async () => {
 
 vi.mock("../../../../server/shared/operationalLog.js", () => ({ recordOperationalEvent: vi.fn() }));
 
+vi.mock("../../../../server/shared/operationalLog.js", () => ({ recordOperationalEvent: vi.fn() }));
+
 vi.mock("../../../../server/shared/config.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../../../server/shared/config.js")>();
   const { join } = await import("node:path");

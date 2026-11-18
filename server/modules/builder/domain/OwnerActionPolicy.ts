@@ -30,3 +30,14 @@ export function assertOwnerRequestedAuthSetup(ownerMessage: string | undefined):
     throw new Error("Configurar autenticación requiere una petición del dueño sobre inicio de sesión o registro en este turno.");
   }
 }
+
+/** Social and OAuth sign-in: the owner names a provider, social networks, SSO or OAuth. */
+export function assertOwnerRequestedOAuthSetup(ownerMessage: string | undefined): void {
+  const request = (ownerMessage ?? "").normalize("NFKC");
+  const words = String.raw`(?:oauth2?|openid|oidc|sso|single sign[\s-]?on|redes? sociales?|social (?:login|sign[\s-]?in)|inicio de sesi[oó]n|inicia(?:r)? sesi[oó]n|login|log[\s-]?in|sign[\s-]?in|google|facebook|github|apple|microsoft|twitter|linkedin|discord|keycloak|auth0|okta|cognito|entra)`;
+  const asks = new RegExp(String.raw`\b${words}\b`, "i").test(request);
+  const declines = new RegExp(String.raw`\b(?:no|nunca|don't|do not|never|no quiero|sin)\b[^.!?\n]{0,60}\b${words}\b`, "i").test(request);
+  if (!asks || declines) {
+    throw new Error("Configurar el acceso con redes sociales u OAuth requiere que el dueño lo pida (un proveedor, redes sociales, SSO u OAuth) en este turno.");
+  }
+}

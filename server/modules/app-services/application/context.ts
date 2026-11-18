@@ -70,7 +70,8 @@ const needJobs = () => {
   return jobsApi;
 };
 
-async function serviceContext(projectId: string, env: AppEnv, base: string, source: "endpoint" | "job"): Promise<ServiceContext> {
+/** `scope`: schema of the forja.json component running the code, when it owns a database; ctx.db is confined to it. */
+async function serviceContext(projectId: string, env: AppEnv, base: string, source: "endpoint" | "job", scope?: string): Promise<ServiceContext> {
   const secrets = await secretEnv(projectId);
   const write = (level: "info" | "error", args: unknown[]) =>
     log(projectId, {
@@ -79,10 +80,12 @@ async function serviceContext(projectId: string, env: AppEnv, base: string, sour
       source,
       message: args.map((a) => (typeof a === "string" ? a : JSON.stringify(a))).join(" "),
     });
-  const db = projectDb(projectId, env);
+  const projectWide = projectDb(projectId, env);
+  const db = scope ? projectDb(projectId, env, scope) : projectWide;
   return {
     db,
-    cache: createProjectCache(cacheRepository(db), env),
+    // The shared cache lives in the project's own tables, outside any component schema.
+    cache: createProjectCache(cacheRepository(projectWide), env),
     storage: {
       put: (data, opts) => putObject(projectId, typeof data === "string" ? new TextEncoder().encode(data) : data, opts),
       get: (key) => getObject(projectId, key),

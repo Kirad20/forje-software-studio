@@ -1,3 +1,4 @@
+import { COMPONENTS_MANIFEST, componentOf, NATIVE_LAYOUT, under, type ProjectLayout } from "../../../../contracts/projectLayout.js";
 /**
  * The planner's output: what submit_plan accepts and how it is checked.
  *
@@ -60,6 +61,24 @@ export const ROLE_FOLDERS: Record<SpecialistRole, RegExp> = {
   ui: /^(pages\/|components\/|base\.css$|static\/|helpers\/)/,
 };
 
+/**
+ * What a role may write: its native folders and, with forja.json, the component roots of
+ * its kind (web → ui; api, worker and library → backend). forja.json itself is backend's.
+ */
+export function roleCanWrite(role: SpecialistRole, file: string, layout: ProjectLayout = NATIVE_LAYOUT): boolean {
+  if (ROLE_FOLDERS[role].test(file)) return true;
+  // Both manifests (components and the legacy service topology) are architecture: backend's.
+  if (file === COMPONENTS_MANIFEST || file === "forja.services.json" || file === "forja.auth.json") return role === "backend";
+  const owner = layout.manifest ? componentOf(file, layout) : null;
+  if (!owner || owner.component.kind === "app") return false;
+  // The data role owns schema changes, including those of components with their own database.
+  if (role === "data") {
+    const folder = owner.component.paths.migrations;
+    return !!owner.component.database && (owner.local === `${folder}/` || under(owner.local, folder) !== null);
+  }
+  return owner.component.kind === "web" ? role === "ui" : role === "backend";
+}
+
 export const MAX_TASKS = 6;
 export const MAX_GOAL = 4000;
 export const MAX_CONTRACT = 12_000;
@@ -89,7 +108,7 @@ function order(tasks: PlanTask[]): string[] | null {
   return out;
 }
 
-export function validatePlan(raw: unknown): { plan: Plan | null; errors: string[] } {
+export function validatePlan(raw: unknown, layout: ProjectLayout = NATIVE_LAYOUT): { plan: Plan | null; errors: string[] } {
   const p = raw as { summary?: unknown; contract?: unknown; tasks?: unknown; later?: unknown } | null;
   const errors: string[] = [];
   if (!p || !Array.isArray(p.tasks) || !p.tasks.length) return { plan: null, errors: ["tasks está vacío: hace falta al menos una tarea."] };
@@ -117,7 +136,7 @@ export function validatePlan(raw: unknown): { plan: Plan | null; errors: string[
     if (!files.length) errors.push(`${at}: files está vacío; una tarea sin archivos no puede escribir nada.`);
     for (const f of files) {
       if (!/^[\w$@./-]+$/.test(f) || f.startsWith("/") || f.includes("..")) errors.push(`${at}: "${f}" no es una ruta válida (usa rutas relativas exactas o carpetas terminadas en "/").`);
-      else if (!ROLE_FOLDERS[role].test(f)) errors.push(`${at}: "${f}" queda fuera de lo que puede escribir el rol ${role}.`);
+      else if (!roleCanWrite(role, f, layout)) errors.push(`${at}: "${f}" queda fuera de lo que puede escribir el rol ${role}.`);
       else if (covers(f, CONTRACT_FILE)) errors.push(`${at}: "${f}" incluye ${CONTRACT_FILE}, que escribe solo el planeador (campo contract).`);
     }
 

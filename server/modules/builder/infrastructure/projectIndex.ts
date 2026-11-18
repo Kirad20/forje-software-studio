@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import path from "node:path";
 import type { FileMap } from "../../projects/index.js";
 import { endpointRoutes, pageRoutes, readProjectServices, SERVICES_MANIFEST } from "../../app-runtime/index.js";
+import { COMPONENTS_MANIFEST, fileKind, layoutOf, safeLayout, type ProjectLayout } from "../../../../contracts/projectLayout.js";
 
 /**
  * A graphify-style index of a project: per-file facts (exports, imports, routes, tables,
@@ -35,18 +36,8 @@ function declaredDeps(files: FileMap): Record<string, string> {
   }
 }
 
-function kindOf(p: string): FileFacts["kind"] {
-  if (p.startsWith("static/__dev/")) return "note";
-  if (p.startsWith("pages/")) return p.includes(".example.") ? "example" : p.endsWith(".css") ? "style" : "page";
-  if (p.startsWith("components/")) return p.includes(".example.") ? "example" : p.endsWith(".css") ? "style" : "component";
-  if (p.startsWith("endpoints/")) return "endpoint";
-  if (p.startsWith("jobs/")) return "job";
-  if (/\.spec\.tsx?$/.test(p)) return "test";
-  if (p.startsWith("helpers/")) return "helper";
-  if (p.endsWith(".css")) return "style";
-  if (p.startsWith("static/")) return "static";
-  return "other";
-}
+/** What a file is, from the project layout (native prefixes, or the component kinds of forja.json). */
+const kindOf = (p: string, layout: ProjectLayout): FileFacts["kind"] => fileKind(p, layout);
 
 export function resolveImport(from: string, spec: string, files: FileMap): string | null {
   let target: string;
@@ -56,12 +47,13 @@ export function resolveImport(from: string, spec: string, files: FileMap): strin
   return RESOLVE.map((e) => target + e).find((c) => c in files) ?? null;
 }
 
-function factsOf(p: string, content: string, files: FileMap): FileFacts {
-  const key = createHash("sha1").update(p).update("\0").update(content).digest("hex");
+function factsOf(p: string, content: string, files: FileMap, layout: ProjectLayout = layoutOf(files)): FileFacts {
+  // A file's kind depends on forja.json too: key by the manifest when there is one.
+  const key = createHash("sha1").update(p).update("\0").update(content).update(layout.manifest ? `\0${files[COMPONENTS_MANIFEST]}` : "").digest("hex");
   const hit = cache.get(key);
   // Imports depend on which files exist, so only reuse when they still resolve the same.
   if (hit && hit.imports.every((i) => i in files)) return hit;
-  const kind = kindOf(p);
+  const kind = kindOf(p, layout);
   const code = /\.(tsx?|css)$/.test(p);
   const exports = code
     ? [
@@ -107,7 +99,8 @@ export interface ProjectIndex {
 }
 
 export function buildIndex(files: FileMap): ProjectIndex {
-  const facts = new Map(Object.entries(files).map(([p, c]) => [p, factsOf(p, c, files)]));
+  const layout = layoutOf(files);
+  const facts = new Map(Object.entries(files).map(([p, c]) => [p, factsOf(p, c, files, layout)]));
   const importers = new Map<string, Set<string>>();
   for (const f of facts.values()) for (const i of f.imports) (importers.get(i) ?? importers.set(i, new Set()).get(i)!).add(f.path);
   const endpoints = new Map(endpointRoutes(files).map((e) => [e.route, e.file]));
@@ -128,6 +121,15 @@ export function projectMap(files: FileMap, schema: Record<string, { name: string
   const lines = [`# Mapa del proyecto — ${all.length} archivos, ${all.reduce((n, f) => n + f.lines, 0)} líneas`];
   const routes = new Map(pageRoutes(files).map((r) => [r.file, r.pattern]));
   const section = (title: string, items: string[]) => items.length && lines.push(`\n## ${title}`, ...items);
+  if (COMPONENTS_MANIFEST in files) {
+    const { layout, error } = safeLayout(files);
+    section("Componentes (forja.json)", error ? [error] : layout.components.map((c) => {
+      const where = c.kind === "app" ? "raíz (pages/, endpoints/, jobs/, helpers/)" : c.root;
+      const exposed = c.kind === "web" || c.kind === "app" ? ` · páginas en ${c.mount}` : c.kind === "api" ? ` · /_api/${c.route}/…` : "";
+      const pool = c.replicas || c.maxConcurrency ? ` · proceso propio (replicas ${c.replicas ?? 1}, maxConcurrency ${c.maxConcurrency ?? (c.kind === "worker" ? 1 : 8)})` : "";
+      return `${c.name} · ${c.kind} · ${where}${exposed}${pool}`;
+    }));
+  }
   if (SERVICES_MANIFEST in files) {
     try {
       const topology = readProjectServices(files)!;

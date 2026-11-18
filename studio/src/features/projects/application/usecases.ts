@@ -4,7 +4,7 @@ import type { EventStreamPort } from "../../../shared/infrastructure/browser.js"
 import type { ProjectEvent, ProjectLogLine } from "./contracts.js";
 
 export interface CreateProjectOptions {
-  template?: "monolith" | "orders-invoices";
+  template?: "monolith" | "orders-invoices" | "components";
 }
 
 export function subscribeToProjectEvents(

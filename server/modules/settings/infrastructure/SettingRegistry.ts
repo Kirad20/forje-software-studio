@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { CONFIG_DEFAULTS } from "../../../shared/config.js";
+import { parseOAuthConfig } from "../../../../contracts/oauthProviders.js";
 
 /**
  * Every platform setting an admin can change from the studio. The key is also the setting's
@@ -11,6 +12,7 @@ export type { SettingDef, SettingGroup, PlatformSettingType as SettingType } fro
 
 export const GROUPS: Record<SettingGroup, string> = {
   accounts: "Cuentas",
+  auth: "Acceso con redes sociales",
   credits: "Créditos",
   models: "Modelos",
   email: "Correo",
@@ -36,6 +38,17 @@ export function setPath(obj: object, key: string, value: unknown) {
 type Def = Omit<SettingDef, "default">;
 const defs: Def[] = [
   { key: "signup", group: "accounts", label: "Quién puede crear cuenta", type: "enum", options: ["open", "invite", "closed"], help: "open: cualquiera con un código por correo · invite: solo correos invitados · closed: solo los administradores crean cuentas." },
+  { key: "auth.google.clientId", group: "auth", label: "Google: Client ID", type: "string", help: "Google Cloud → Credenciales → ID de cliente de OAuth (aplicación web). URI de redirección: <URL pública>/api/auth/oauth/callback/google" },
+  { key: "auth.google.clientSecret", group: "auth", label: "Google: Client secret", type: "secret" },
+  { key: "auth.facebook.clientId", group: "auth", label: "Facebook: App ID", type: "string", help: "Meta for Developers → Inicio de sesión con Facebook. URI de redirección: <URL pública>/api/auth/oauth/callback/facebook" },
+  { key: "auth.facebook.clientSecret", group: "auth", label: "Facebook: App secret", type: "secret" },
+  {
+    key: "auth.providers",
+    group: "auth",
+    label: "Otros proveedores (JSON)",
+    type: "secret",
+    help: 'Cualquier otra red o servicio OAuth/OIDC, con el formato de forja.auth.json y las credenciales dentro: {"providers":{"github":{"clientId":"…","clientSecret":"…"},"empresa":{"type":"oidc","discoveryUrl":"https://…/.well-known/openid-configuration","clientId":"…","clientSecret":"…"}}}. Redirección: <URL pública>/api/auth/oauth/callback/<id>',
+  },
   { key: "freeCredits", group: "credits", label: "Créditos iniciales por cuenta", type: "number", min: 0, max: 10_000_000, integer: true },
   { key: "creditsPerUsd", group: "credits", label: "Créditos por dólar de coste del modelo", type: "number", min: 1, max: 1_000_000, integer: true },
   {
@@ -83,8 +96,18 @@ export function schemaOf(def: SettingDef): z.ZodType {
       return z.string().trim().max(500);
     case "url":
       return z.string().trim().max(500).url("Debe ser una URL (https://…)").transform((u) => u.replace(/\/$/, ""));
-    case "secret":
-      return z.string().trim().min(1, "Vacío: usa «Quitar» para borrarlo").max(4000).nullable();
+    case "secret": {
+      const secret = z.string().trim().min(1, "Vacío: usa «Quitar» para borrarlo").max(def.key === "auth.providers" ? 20_000 : 4000).nullable();
+      if (def.key !== "auth.providers") return secret;
+      return secret.superRefine((value, ctx) => {
+        if (!value) return;
+        try {
+          parseOAuthConfig(value, { inlineCredentials: true, file: "auth.providers" });
+        } catch (error) {
+          ctx.addIssue({ code: "custom", message: (error as Error).message });
+        }
+      });
+    }
     case "number": {
       let n = z.number({ error: "Debe ser un número" }).finite();
       if (def.integer) n = n.int("Debe ser un número entero");

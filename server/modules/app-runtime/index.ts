@@ -63,6 +63,7 @@ export async function stopAppRuntime() {
 export type { AppTarget } from "./infrastructure/appServer.js";
 export type { BrowserStep, BrowserTestInput, BrowserTestResult, PageInspection } from "./infrastructure/browser.js";
 export type { BuildProblem, PageInfo, EndpointInfo, JobInfo, CompiledModule } from "./infrastructure/bundler.js";
+export { exportStandalone, type StandaloneExportInput, type ExportTree } from "./infrastructure/standaloneExport.js";
 export type { RunInput, SandboxError } from "./infrastructure/sandbox.js";
 export type { Deps, PackageInfo } from "./domain/dependencies.js";
 export type { KitEntry } from "./domain/catalog.js";

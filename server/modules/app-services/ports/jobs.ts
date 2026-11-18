@@ -3,12 +3,14 @@ import type { ObserverPorts } from "./observer.js";
 import type { JobsApi } from "./context.js";
 export interface JobRuntimePorts {
   resolveExecution?(files: Record<string, string>, file: string): { service: string; replicas: number; maxConcurrency: number } | undefined;
+  /** Schema of the forja.json component that owns the job, when it has its own database. */
+  resolveDataScope?(files: Record<string, string>, file: string): string | undefined;
   publishedFiles(projectId: string): Promise<Record<string, string> | null | undefined>;
   readAllFiles(projectId: string): Promise<Record<string, string>>;
   jobFiles(files: Record<string, string>): { name: string; file: string }[];
   readJobSettings(code: string): { schedule?: string | null; timezone?: string | null };
   compileServerModule(files: Record<string, string>, file: string): Promise<{ file: string }>;
-  runInSandbox(projectId: string, kind: "job", input: { env_name: "preview" | "published"; file: string; base: string; payload: unknown; job: string; execution?: { service: string; replicas: number; maxConcurrency: number } }, source: "job"): Promise<unknown>;
+  runInSandbox(projectId: string, kind: "job", input: { env_name: "preview" | "published"; file: string; base: string; payload: unknown; job: string; execution?: { service: string; replicas: number; maxConcurrency: number }; scope?: string }, source: "job"): Promise<unknown>;
   appUrl(slug: string): string;
   previewOrigin(projectId: string): string;
 }

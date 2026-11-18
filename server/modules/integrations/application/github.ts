@@ -1,3 +1,6 @@
+/** Project components manifest: its folders sync with GitHub too. */
+export const COMPONENTS_MANIFEST = "forja.json";
+
 export class GithubError extends Error {
   constructor(message: string, readonly status: number) { super(message); }
 }
@@ -19,7 +22,8 @@ export interface GithubProjectPorts {
   readAllFiles(projectId: string): Promise<Record<string, string>>;
   writeFile(projectId: string, path: string, content: string, actor: "github", author: string): Promise<unknown>;
   deleteFile(projectId: string, path: string, actor: "github"): Promise<unknown>;
-  assertValidPath(path: string): unknown;
+  /** Throws when the project cannot hold the path; `manifest` is the source of forja.json (its component folders become valid). */
+  assertValidPath(path: string, manifest?: string): unknown;
   recheckBuild(projectId: string): Promise<{ title: string }[]>;
   emitProject(projectId: string, event: { type: "github"; status: string; message?: string }): unknown;
   subscribe(projectId: string, listener: (event: { type: string }) => void): () => void;
@@ -51,11 +55,19 @@ export function createGithubSyncService(repository: GithubRepository, gateway: G
     const tree = await gateway.request<{ truncated?: boolean; tree: { path: string; type: string; sha: string; size?: number }[] }>(token, "GET", `${base}/git/trees/${headTree}?recursive=1`);
     if (tree.truncated) throw new GithubError("GitHub truncó el árbol del repositorio; no se puede sincronizar sin perder archivos.", 422);
     const present = new Set(tree.tree.map((e) => e.path));
+    const local = await project.readAllFiles(projectId), changed: string[] = [];
+    // Component folders are valid when forja.json declares them: the remote one wins, else the local one.
+    const manifestEntry = tree.tree.find((e) => e.path === COMPONENTS_MANIFEST && e.type === "blob");
+    let manifest: string | undefined = local[COMPONENTS_MANIFEST];
+    if (manifestEntry && link.synced[COMPONENTS_MANIFEST] !== manifestEntry.sha) {
+      const blob = await gateway.request<{ content: string; encoding: string }>(token, "GET", `${base}/git/blobs/${manifestEntry.sha}`);
+      manifest = gateway.decodeBlob(COMPONENTS_MANIFEST, blob.content, blob.encoding);
+    }
+    try { if (manifest !== undefined) project.assertValidPath(COMPONENTS_MANIFEST, manifest); } catch { manifest = undefined; }
     const remote = new Map(tree.tree.filter((e) => {
       if (e.type !== "blob" || (e.size ?? 0) > 1024 * 1024) return false;
-      try { project.assertValidPath(e.path); return true; } catch { return false; }
-    }).map((e) => [e.path, e.sha]));
-    const local = await project.readAllFiles(projectId), changed: string[] = [];
+      try { project.assertValidPath(e.path, manifest); return true; } catch { return false; }
+    }).sort((a, b) => Number(b.path === COMPONENTS_MANIFEST) - Number(a.path === COMPONENTS_MANIFEST)).map((e) => [e.path, e.sha]));
     pulling.add(projectId);
     try {
       for (const [path, sha] of remote) {

@@ -14,9 +14,11 @@ import { BuildError, buildClient, buildExamples, compileServerModule, endpointRo
 import { runInSandbox, SandboxRunError, type SandboxError } from "./sandbox.js";
 import { appHeaders, rateLimit, RateLimitError, uploadHeaders } from "../../../shared/security.js";
 import { recordPageView } from "../../app-services/analytics.js";
-import { appUrl, previewOrigin } from "./urls.js";
+import { appUrl, previewOrigin, shareToken } from "./urls.js";
+import { isOAuthCallback, oauthRoute } from "./appOAuth.js";
 import { resolveServiceExecution } from "../domain/services.js";
 import { detectSpringProject } from "../domain/spring.js";
+import { componentForUrl, dataScopeOf, IMPLICIT_COMPONENT, layoutOf } from "../../../../contracts/projectLayout.js";
 
 export interface AppTarget {
   project: Project;
@@ -38,11 +40,11 @@ function filesHash(files: FileMap) {
   );
 }
 
-async function clientBundle(files: FileMap, minify: boolean) {
-  const key = filesHash(files) + (minify ? ":min" : "");
+async function clientBundle(files: FileMap, minify: boolean, component = IMPLICIT_COMPONENT) {
+  const key = filesHash(files) + (minify ? ":min" : "") + (component === IMPLICIT_COMPONENT ? "" : `:${component}`);
   let p = clientCache.get(key);
   if (!p) {
-    p = buildClient(files, { minify });
+    p = buildClient(files, { minify, component });
     clientCache.set(key, p);
     p.catch(() => clientCache.delete(key));
     if (clientCache.size > 50) clientCache.delete(clientCache.keys().next().value!);
@@ -141,6 +143,20 @@ async function route(req: Request, t: AppTarget, rest: string): Promise<Response
       headers: { "content-type": "application/xml" },
     });
   }
+  const layout = layoutOf(files);
+  // A web component's static files live under its mount: /admin/static/x → apps/admin/static/x.
+  const web = layout.manifest ? componentForUrl(rest, layout) : null;
+  if (web && web.kind === "web") {
+    const prefix = web.mount === "/" ? "/static/" : `${web.mount}/static/`;
+    if (rest.startsWith(prefix)) {
+      // The URL is always <mount>/static/…; the folder may be mapped (forja.json paths.static, e.g. "public").
+      const rel = rest.slice(prefix.length);
+      const content = rel.startsWith("__dev/") ? undefined : files[`${web.root}${web.paths.static}/${rel}`];
+      if (content !== undefined) return staticFile(rest, content);
+      // A component mounted at "/" shares /static/ with the app: fall back to the app's files.
+      if (web.mount !== "/") return new Response("Not found", { status: 404 });
+    }
+  }
   if (rest.startsWith("/static/")) {
     if (isDevFile(rest.slice(1))) return new Response("Not found", { status: 404 });
     const content = files[rest.slice(1)];
@@ -148,7 +164,8 @@ async function route(req: Request, t: AppTarget, rest: string): Promise<Response
     return staticFile(rest, content);
   }
   if (rest === "/_forja/app.js" || rest === "/_forja/app.css") {
-    const b = await clientBundle(files, t.env === "published");
+    const requested = new URL(req.url).searchParams.get("c") ?? IMPLICIT_COMPONENT;
+    const b = await clientBundle(files, t.env === "published", requested);
     return rest.endsWith(".js")
       ? new Response(b.js, { headers: { "content-type": "text/javascript; charset=utf-8", "cache-control": "no-cache" } })
       : new Response(b.css, { headers: { "content-type": "text/css; charset=utf-8", "cache-control": "no-cache" } });
@@ -164,7 +181,7 @@ async function route(req: Request, t: AppTarget, rest: string): Promise<Response
   }
   if (t.env === "preview" && rest.startsWith("/__examples/")) return examplesHtml(t, files, decodeURIComponent(rest.slice("/__examples/".length)) + ".tsx");
   if (req.method !== "GET") return new Response("Method not allowed", { status: 405 });
-  return html(t, files);
+  return html(t, files, componentForUrl(rest, layout).name);
 }
 
 const MIME: Record<string, string> = {
@@ -193,10 +210,11 @@ function staticFile(p: string, content: string) {
   return new Response(body, { headers });
 }
 
-async function html(t: AppTarget, files: FileMap): Promise<Response> {
+async function html(t: AppTarget, files: FileMap, component = IMPLICIT_COMPONENT): Promise<Response> {
   let problem = "";
+  const query = component === IMPLICIT_COMPONENT ? "" : `?c=${encodeURIComponent(component)}`;
   try {
-    await clientBundle(files, t.env === "published");
+    await clientBundle(files, t.env === "published", component);
   } catch (e) {
     problem = e instanceof BuildError ? e.problems.map(formatProblem).join("\n") : (e as Error).message;
     log(t.project.id, { env: t.env, level: "error", source: "build", message: problem });
@@ -212,11 +230,11 @@ async function html(t: AppTarget, files: FileMap): Promise<Response> {
           ? `<button data-forja-fix style="margin:0 24px;padding:8px 14px;border:0;border-radius:8px;background:#4f46e5;color:#fff;font:600 13px system-ui;cursor:pointer">Intentar arreglar</button>`
           : ""
       }`
-    : `<div id="root"></div><script type="module" src="${t.base}/_forja/app.js"></script>`;
+    : `<div id="root"></div><script type="module" src="${t.base}/_forja/app.js${query}"></script>`;
   const doc = `<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${title}</title><meta name="description" content="${description}"><meta property="og:title" content="${title}"><meta property="og:description" content="${description}">
 ${iconLinks(t, files)}
-<link rel="stylesheet" href="${t.base}/_forja/app.css"><script>window.__FORJA__=${runtime}</script>${reporter}</head>
+<link rel="stylesheet" href="${t.base}/_forja/app.css${query}"><script>window.__FORJA__=${runtime}</script>${reporter}</head>
 <body>${body}${t.env === "published" ? badge() : ""}</body></html>`;
   return new Response(doc, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-cache" } });
 }
@@ -394,6 +412,7 @@ async function callEndpoint(req: Request, t: AppTarget, routePath: string): Prom
         query: Object.fromEntries(url.searchParams),
         user,
         execution: resolveServiceExecution(files, ep.file),
+        ...(dataScopeOf(ep.file, layoutOf(files)) ? { scope: dataScopeOf(ep.file, layoutOf(files))! } : {}),
       },
       "endpoint",
     )) as SandboxResult;
@@ -455,8 +474,24 @@ async function baasRoute(req: Request, t: AppTarget, p: string): Promise<Respons
     const key = `${req.method} ${p}`;
     if (limits[key]) await rateLimit(`app:${pid}:${key}:${ip}`, ...limits[key]!);
     // Auth and AI calls must be JSON: a cross-site form cannot send that without a preflight.
-    if ((p.startsWith("auth/") || p === "ai/chat") && req.method === "POST" && !(req.headers.get("content-type") ?? "").includes("application/json")) {
+    if ((p.startsWith("auth/") || p === "ai/chat") && req.method === "POST" && !isOAuthCallback(p) && !(req.headers.get("content-type") ?? "").includes("application/json")) {
       return json({ error: "Se espera JSON" }, 415);
+    }
+
+    if (p === "auth/providers" || p.startsWith("auth/oauth/")) {
+      const handled = await oauthRoute(req, {
+        projectId: pid,
+        projectName: t.project.name,
+        env: t.env,
+        base: t.base,
+        origin: t.base ? new URL(req.url).origin : appOrigin(t),
+        clientIp: ip,
+        loadFiles: () => loadFiles(t),
+        shareToken: t.env === "preview" ? () => shareToken(t.project, 1) : undefined,
+        sessionCookie: (value, maxAge) => cookie(cookieName, value, t.base || "/", maxAge, t.env),
+        log: (level, message) => log(pid, { env: t.env, level, source: "request", message }),
+      }, p);
+      if (handled) return handled;
     }
 
     switch (key) {

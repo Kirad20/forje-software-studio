@@ -1,9 +1,9 @@
-export type StarterTemplate = "monolith" | "orders-invoices";
+export type StarterTemplate = "monolith" | "orders-invoices" | "components";
 
 export function parseStarterTemplate(value: unknown): StarterTemplate | undefined {
   if (value === undefined) return undefined;
-  if (value === "monolith" || value === "orders-invoices") return value;
-  throw new Error("Template no válido: usa monolith u orders-invoices");
+  if (value === "monolith" || value === "orders-invoices" || value === "components") return value;
+  throw new Error("Template no válido: usa monolith, orders-invoices o components");
 }
 
 /** Existing projects and creation without a selector retain the monolith starter. */

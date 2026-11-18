@@ -41,7 +41,18 @@ describe("Projects Management Use Cases (TDD)", () => {
     it("rejects invalid target path before checking source existence", async () => {
       const useCase = new RenameFileUseCase(fileRepo);
       await expect(useCase.execute("p1", "pages/old.tsx", "invalid/target.txt", "owner")).rejects.toThrow("Ruta no válida");
-      expect(fileRepo.readFile).not.toHaveBeenCalled();
+      // Only the project's forja.json may be read to decide; the source file is never touched.
+      expect(fileRepo.readFile).not.toHaveBeenCalledWith("p1", "pages/old.tsx");
+      expect(fileRepo.renameFile).not.toHaveBeenCalled();
+    });
+
+    it("accepts a target inside a component root declared in forja.json", async () => {
+      const manifest = JSON.stringify({ version: 1, components: { orders: { kind: "api", root: "services/orders" } } });
+      vi.spyOn(fileRepo, "readFile").mockImplementation(async (_p, path) => (path === "forja.json" ? manifest : path === "helpers/order.ts" ? "x" : undefined));
+      const useCase = new RenameFileUseCase(fileRepo);
+      await useCase.execute("p1", "helpers/order.ts", "services/orders/domain/order.ts", "owner");
+      expect(fileRepo.renameFile).toHaveBeenCalledWith("p1", "helpers/order.ts", "services/orders/domain/order.ts");
+      await expect(useCase.execute("p1", "helpers/order.ts", "services/billing/x.ts", "owner")).rejects.toThrow("services/orders/");
     });
 
     it("throws error if source file does not exist", async () => {

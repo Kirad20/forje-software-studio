@@ -7,9 +7,9 @@ import type { SqlExecutionResult } from "./projectDbClient.js";
 import type { ProjectMigration } from "./projectDb.js";
 
 interface AppDataPorts {
-  projectDb(projectId: string, env?: AppEnv): ProjectDb;
-  execSql(projectId: string, sql: string, env?: AppEnv): Promise<SqlExecutionResult[]>;
-  applyProjectMigrations(projectId: string, migrations: ProjectMigration[], env?: AppEnv): Promise<{ applied: string[] }>;
+  projectDb(projectId: string, env?: AppEnv, scope?: string): ProjectDb;
+  execSql(projectId: string, sql: string, env?: AppEnv, scope?: string): Promise<SqlExecutionResult[]>;
+  applyProjectMigrations(projectId: string, migrations: ProjectMigration[], env?: AppEnv, schemas?: string[]): Promise<{ applied: string[]; retired?: string[] }>;
   dumpDatabase(projectId: string, env?: AppEnv): Promise<Blob>;
   closeProject(projectId: string, env?: AppEnv): Promise<void>;
   cloneDatabase(fromProjectId: string, toProjectId: string): Promise<void>;
@@ -46,21 +46,21 @@ export function createAppDataService(ports: AppDataPorts, token: string) {
     return c.json({ ok: true });
   });
   app.post("/internal/data/:projectId/query", async (c) => {
-    const { sql, params = [], env = "published" } = await c.req.json<{ sql: string; params?: unknown[]; env?: AppEnv }>();
-    return c.json(await ports.projectDb(c.req.param("projectId"), env).query(sql, params));
+    const { sql, params = [], env = "published", scope } = await c.req.json<{ sql: string; params?: unknown[]; env?: AppEnv; scope?: string }>();
+    return c.json(await ports.projectDb(c.req.param("projectId"), env, scope).query(sql, params));
   });
   app.post("/internal/data/:projectId/exec", async (c) => {
-    const { sql, env = "published" } = await c.req.json<{ sql: string; env?: AppEnv }>();
-    await ports.projectDb(c.req.param("projectId"), env).exec(sql);
+    const { sql, env = "published", scope } = await c.req.json<{ sql: string; env?: AppEnv; scope?: string }>();
+    await ports.projectDb(c.req.param("projectId"), env, scope).exec(sql);
     return c.json({ ok: true });
   });
   app.post("/internal/data/:projectId/exec-sql", async (c) => {
-    const { sql, env = "preview" } = await c.req.json<{ sql: string; env?: AppEnv }>();
-    return c.json(await ports.execSql(c.req.param("projectId"), sql, env));
+    const { sql, env = "preview", scope } = await c.req.json<{ sql: string; env?: AppEnv; scope?: string }>();
+    return c.json(await ports.execSql(c.req.param("projectId"), sql, env, scope));
   });
   app.post("/internal/data/:projectId/migrations/apply", async (c) => {
-    const { migrations, env = "preview" } = await c.req.json<{ migrations: ProjectMigration[]; env?: AppEnv }>();
-    return c.json(await ports.applyProjectMigrations(c.req.param("projectId"), migrations, env));
+    const { migrations, env = "preview", schemas } = await c.req.json<{ migrations: ProjectMigration[]; env?: AppEnv; schemas?: string[] }>();
+    return c.json(await ports.applyProjectMigrations(c.req.param("projectId"), migrations, env, schemas));
   });
   app.post("/internal/data/:projectId/dump", async (c) => {
     const { env = "preview" } = await c.req.json<{ env?: AppEnv }>();
@@ -87,7 +87,7 @@ export function createAppDataService(ports: AppDataPorts, token: string) {
   });
   app.post("/internal/data/:projectId/transaction/begin", async (c) => {
     const projectId = c.req.param("projectId");
-    const { env = "published" } = await c.req.json<{ env?: AppEnv }>();
+    const { env = "published", scope } = await c.req.json<{ env?: AppEnv; scope?: string }>();
     const transactionId = randomUUID();
     let resolveReady!: (tx: Pick<ProjectDb, "query" | "one">) => void;
     let rejectReady!: (error: unknown) => void;
@@ -101,7 +101,7 @@ export function createAppDataService(ports: AppDataPorts, token: string) {
       finish = resolve;
       abort = reject;
     });
-    const running = ports.projectDb(projectId, env).transaction(async (tx) => {
+    const running = ports.projectDb(projectId, env, scope).transaction(async (tx) => {
       resolveReady(tx);
       await completion;
     });

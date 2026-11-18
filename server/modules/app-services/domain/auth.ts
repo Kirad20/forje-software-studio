@@ -1,5 +1,5 @@
 export class AuthError extends Error {
-  constructor(message: string, public status: 400 | 401 | 404 | 409 | 429 = 400) { super(message); }
+  constructor(message: string, public status: 400 | 401 | 403 | 404 | 409 | 429 = 400) { super(message); }
 }
 export const AUTH_POLICY = { sessionDays: 30, maxFailed: 5, lockMinutes: 15, resetLimitPerHour: 3 };
 export function validatePassword(password: unknown): asserts password is string {

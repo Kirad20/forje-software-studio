@@ -37,6 +37,8 @@ import { startSecurityReview, metricsReport } from "../../modules/builder/index.
 import { addMemory, deleteMemory, listMemories, setMemoryEnabled, updateMemory } from "../../modules/memory/memory.js";
 import * as github from "../../modules/integrations/github.js";
 import { createAdminApi } from "./adminApi.js";
+import { STUDIO_OAUTH_BASE, studioOAuth } from "./studioOAuth.js";
+import { OAuthStartError, safeReturnPath } from "../../shared/oauth.js";
 import { evalsApi } from "../../modules/evaluations/api.js";
 import {
   removeProjectData,
@@ -51,6 +53,9 @@ import {
   readServiceRuntime,
   restartServiceRuntime,
   SERVICES_MANIFEST,
+  jobFiles,
+  exportStandalone,
+  BuildError,
   withManifestLock,
   type ServiceQueueEntry,
 } from "../../modules/app-runtime/index.js";
@@ -71,6 +76,7 @@ import {
 import { usageSummary } from "../../modules/usage/usage.js";
 import { createPlatformModelManagement, type ModelInfo } from "../../modules/model-management/index.js";
 import { TOOL_HINTS } from "../mcp/server.js";
+import { COMPONENTS_MANIFEST } from "../../../contracts/projectLayout.js";
 import { clientIp, isHttps, rateLimit, RateLimitError, RateLimitStoreError, requestOrigin, studioOrigins } from "../../shared/security.js";
 
 type Env = { Variables: { account: PublicAccount; project: Project; access: Access; orgRole: OrgRole } };
@@ -136,7 +142,8 @@ const ipOf = (c: Context) =>
  * cross-site form or beacon cannot send without a CORS preflight that we never grant.
  */
 studioApi.use("*", async (c, next) => {
-  if (["POST", "PUT", "PATCH", "DELETE"].includes(c.req.method)) {
+  // A provider may come back with a form post (response_mode=form_post); the OAuth state, not the origin, protects it.
+  if (["POST", "PUT", "PATCH", "DELETE"].includes(c.req.method) && !c.req.path.includes("/auth/oauth/callback/")) {
     const origin = c.req.header("origin");
     const sameOrigin = origin === requestOrigin({ host: c.req.header("host"), forwardedHost: c.req.header("x-forwarded-host"), forwardedProto: c.req.header("x-forwarded-proto") });
     if (origin && !sameOrigin && !studioOrigins().includes(origin)) return c.json({ error: "Origen no permitido" }, 403);
@@ -214,6 +221,66 @@ publicRoutes.post("/auth/logout", async (c) => {
   if (token) await accounts.endSession(token);
   deleteCookie(c, SESSION_COOKIE, { path: "/" });
   return c.json({ ok: true });
+});
+
+// --- Social and OAuth sign-in (Better Auth) ---------------------------------------------
+// Better Auth runs the provider flow; the person ends up with an ordinary studio session.
+
+publicRoutes.get("/auth/oauth/providers", (c) => c.json({ providers: studioOAuth().ready.map((p) => ({ id: p.spec.id, name: p.spec.name })) }));
+
+const oauthBack = (c: Context<Env>, back: string, error?: string, clear: string[] = []) => {
+  const url = new URL(back, "http://x");
+  if (error) url.searchParams.set("auth_error", error);
+  for (const cookie of clear) c.header("set-cookie", cookie, { append: true });
+  return c.redirect(url.pathname + url.search, 302);
+};
+
+publicRoutes.get("/auth/oauth/:provider/start", async (c) => {
+  await rateLimit(`oauth-ip:${ipOf(c)}`, 30, 15 * 60_000);
+  const back = safeReturnPath(c.req.query("redirect"), "");
+  const complete = `${STUDIO_OAUTH_BASE}/complete?r=${encodeURIComponent(back)}`;
+  try {
+    const started = await studioOAuth().engine.start(c.req.param("provider"), { callbackURL: complete, errorCallbackURL: complete });
+    for (const cookie of started.cookies) c.header("set-cookie", cookie, { append: true });
+    return c.redirect(started.location, 302);
+  } catch (error) {
+    if (!(error instanceof OAuthStartError)) throw error;
+    return oauthBack(c, back, error.message);
+  }
+});
+
+const studioOAuthCallback = async (c: Context<Env>) => {
+  const url = new URL(c.req.url);
+  const req = c.req.raw;
+  const inner = new Request(`${new URL(config.publicUrl).origin}${url.pathname}${url.search}`, {
+    method: req.method,
+    headers: req.headers,
+    body: req.method === "POST" ? await req.arrayBuffer() : undefined,
+  });
+  return studioOAuth().engine.handle(inner);
+};
+publicRoutes.get("/auth/oauth/callback/:provider", studioOAuthCallback);
+publicRoutes.post("/auth/oauth/callback/:provider", studioOAuthCallback);
+
+publicRoutes.get("/auth/oauth/complete", async (c) => {
+  const back = safeReturnPath(c.req.query("r"), "");
+  const { oauth, engine } = studioOAuth();
+  const { profile, clearCookies } = await engine.finish(c.req.header("cookie") ?? null);
+  const failed = c.req.query("error");
+  if (failed || !profile) return oauthBack(c, back, failed === "access_denied" ? "Cancelaste el acceso." : "No se pudo iniciar sesión con ese proveedor.", clearCookies);
+  const spec = oauth.providers.find((p) => p.id === profile.provider);
+  const result = await accounts.loginWithOAuth({
+    provider: profile.provider,
+    subject: profile.accountId,
+    email: profile.email,
+    emailVerified: profile.emailVerified,
+    name: profile.name,
+    trustEmail: spec?.trustEmail ?? false,
+  });
+  if ("error" in result) return oauthBack(c, back, result.error, clearCookies);
+  for (const cookie of clearCookies) c.header("set-cookie", cookie, { append: true });
+  startSession(c, result.token);
+  return c.redirect(back, 302);
 });
 
 // GitHub push webhook: signed with GITHUB_WEBHOOK_SECRET, no session.
@@ -576,6 +643,7 @@ const serviceControl = (c: Context<Env>) => createServiceControl({
     return files;
   },
   writeManifest: (id, content) => projects.writeFile(id, SERVICES_MANIFEST, content, "owner", c.get("account").email),
+  writeComponents: (id, content) => projects.writeFile(id, COMPONENTS_MANIFEST, content, "owner", c.get("account").email),
   listQueue: async (id) => (await listJobs(id)).queue as unknown as ServiceQueueEntry[],
   runtime: readServiceRuntime,
   restart: restartServiceRuntime,
@@ -631,6 +699,22 @@ projectRoutes.get("/projects/:id/export-code", async (c) => {
   });
 });
 
+/** "Exportar para producción": a stack that runs without Forja (docker compose), from forja.json. */
+projectRoutes.get("/projects/:id/export-standalone", async (c) => {
+  const id = pid(c);
+  const files = Object.fromEntries(Object.entries(await projects.readAllFiles(id)).filter(([p]) => !projects.isDevFile(p)));
+  const slug = suggestSlug(c.get("project").name);
+  try {
+    const tree = await exportStandalone({ name: c.get("project").name, slug, files, secrets: (await listSecrets(id)).map((s) => s.name) });
+    return new Response(new Uint8Array(zip(tree)), {
+      headers: { "content-type": "application/zip", "content-disposition": `attachment; filename="${slug}-produccion.zip"` },
+    });
+  } catch (error) {
+    if (error instanceof BuildError) return c.json({ error: `La app tiene errores; corrígelos antes de exportar:\n${error.message}` }, 422);
+    throw error;
+  }
+});
+
 projectRoutes.get("/projects/:id/stats", async (c) => {
   const id = pid(c);
   const files = await projects.readAllFiles(id);
@@ -647,7 +731,8 @@ projectRoutes.get("/projects/:id/stats", async (c) => {
 projectRoutes.get("/projects/:id/services", async (c) => {
   const id = pid(c);
   const env = serviceEnv(c);
-  const files = Object.keys(env === "published" ? (await projects.publishedFiles(id)) ?? {} : await projects.readAllFiles(id));
+  const fileMap = env === "published" ? (await projects.publishedFiles(id)) ?? {} : await projects.readAllFiles(id);
+  const files = Object.keys(fileMap);
   const tables = Object.keys(await describeSchema(id, false, env));
   const counts = await projectServiceCounts(id, env);
   const secrets = await listSecrets(id);
@@ -658,7 +743,7 @@ projectRoutes.get("/projects/:id/services", async (c) => {
     integrations: secrets.length > 0 || (await projectIntegrationIds(id)).length > 0,
     analytics: !!c.get("project").slug,
     docs: files.some(projects.isDevFile),
-    jobs: files.some((f) => f.startsWith("jobs/")),
+    jobs: files.some((f) => f.startsWith("jobs/")) || jobFiles(fileMap).length > 0,
     storage: counts.storage > 0,
     email: counts.email > 0,
     payments: secrets.some((s) => s.name === "STRIPE_SECRET_KEY" && s.isSet),

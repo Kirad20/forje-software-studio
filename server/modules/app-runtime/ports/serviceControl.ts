@@ -4,6 +4,8 @@ import type { ServiceQueueEntry, ServiceRuntimeSnapshot } from "../domain/servic
 export interface ServiceControlPorts {
   readFiles(projectId: string, env?: "preview" | "published"): Promise<FileMap>;
   writeManifest(projectId: string, content: string): Promise<unknown>;
+  /** Writes forja.json, where component services keep their replicas and concurrency. */
+  writeComponents?(projectId: string, content: string): Promise<unknown>;
   listQueue(projectId: string): Promise<ServiceQueueEntry[]>;
   runtime(projectId: string): Promise<ServiceRuntimeSnapshot>;
   restart(projectId: string, service: string, env?: "preview" | "published"): Promise<unknown>;

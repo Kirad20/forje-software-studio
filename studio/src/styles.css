@@ -180,6 +180,10 @@ table.grid td { max-width: 320px; overflow: hidden; text-overflow: ellipsis; whi
 .login-form { width: min(380px, 100%); padding: 28px; overflow-wrap: anywhere; }
 .login-form .row > svg { flex: none; }
 .login-actions { justify-content: space-between; flex-wrap: wrap; }
+.login-providers { gap: 8px; }
+.login-divider { text-align: center; }
+.login-provider { display: flex; text-decoration: none; }
+.login-provider:hover { background: var(--surface-2); }
 .login-actions button { white-space: normal; height: auto; padding-block: 6px; }
 .plan-overview { padding: 16px; display: grid; grid-template-columns: minmax(220px, 300px) minmax(0, 1fr); gap: 18px; }
 .plan-overview > * { min-width: 0; }

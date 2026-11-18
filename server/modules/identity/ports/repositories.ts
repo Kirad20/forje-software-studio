@@ -18,6 +18,11 @@ export interface ISessionRepository {
   countActiveSessions(accountId: string): Promise<number>;
 }
 
+export interface IOAuthIdentityRepository {
+  findAccountId(provider: string, subject: string): Promise<string | null>;
+  link(provider: string, subject: string, accountId: string, email: string): Promise<void>;
+}
+
 export interface ILoginCodeRepository {
   saveCode(email: string, code: string, expiresMinutes?: number): Promise<void>;
   findCode(email: string): Promise<{ codeHash: string; attempts: number; expired: boolean } | null>;

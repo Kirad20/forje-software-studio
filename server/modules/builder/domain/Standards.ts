@@ -1,5 +1,6 @@
 import type { BuildProblem } from "./FinishGatePolicy.js";
 import { contractRoutes } from "./Plan.js";
+import { componentOf, layoutOf, roleIn, type ProjectLayout } from "../../../../contracts/projectLayout.js";
 
 /**
  * The house standards, checked deterministically over a project's source: what the manual
@@ -93,7 +94,84 @@ export function standardsScan(files: FileMap): BuildProblem[] {
       add(file, `la ruta ${endpoint[2]} ${endpoint[1]} está en helpers/contract.ts pero el endpoint no lo usa; valida con el esquema de entrada del contrato y tipa la salida con el de salida`);
     }
   }
+  const layout = layoutOf(files);
+  if (layout.manifest) componentStandards(files, layout, add);
   return out;
+}
+
+/** `~/x` and relative specifiers to a project path (without extension), or null for packages. */
+function importTarget(from: string, spec: string): string | null {
+  if (/^(~|@)\//.test(spec)) return spec.slice(2);
+  if (!spec.startsWith(".")) return null;
+  const parts = from.split("/").slice(0, -1);
+  for (const part of spec.split("/")) {
+    if (part === "..") parts.pop();
+    else if (part !== "." && part) parts.push(part);
+  }
+  return parts.join("/");
+}
+
+const IMPORT_SPEC = /(?:import|from)\s*["']([^"']+)["']/g;
+
+/**
+ * Standards of forja.json components: the same UI and entrypoint rules inside each component's
+ * root, plus the boundaries between components and between hexagonal layers.
+ */
+function componentStandards(files: FileMap, layout: ProjectLayout, add: (file: string, text: string, line?: number) => void) {
+  for (const [file, text] of Object.entries(files)) {
+    if (text.startsWith("base64:")) continue;
+    const owner = componentOf(file, layout);
+    if (!owner || owner.component.kind === "app") continue;
+    const { component, local } = owner;
+    const code = /\.tsx?$/.test(local) && !/\.(spec|example)\.tsx?$/.test(local);
+
+    const role = roleIn(component, local);
+    if (component.kind === "web" && /\.(tsx|css)$/.test(local) && role !== "example" && role !== "static" && role !== "note") {
+      const color = COLOR.exec(text);
+      if (color && role !== "styles") add(file, `color escrito a mano (${color[0]}); usa un token del base.css del componente`, lineOf(text, color.index));
+      if (local.endsWith(".tsx")) {
+        const anchor = INTERNAL_ANCHOR.exec(text);
+        if (anchor) add(file, 'enlace interno con <a href="/…">; usa <Link to="/…"> de @forja/client (dentro del mismo componente web)', lineOf(text, anchor.index));
+        const table = UI_TABLE.exec(text);
+        if (table && !UI_PAGINATED.test(text)) add(file, "tabla sin paginación; pide la página al endpoint y muestra controles Anterior/Siguiente (skill data-tables)", lineOf(text, table.index));
+      }
+    }
+
+    if ((component.kind === "api" || component.kind === "worker") && (role === "endpoint" || role === "job")) {
+      const db = DIRECT_DB.exec(text);
+      if (db) add(file, `accede a la base de datos desde el punto de entrada; mueve el SQL a un adaptador en ${component.root}infrastructure/ que implemente un puerto y llama a un caso de uso de ${component.root}application/`, lineOf(text, db.index));
+    }
+    if ((component.kind === "api" || component.kind === "worker") && (role === "endpoint" || /^infrastructure\/.+\.ts$/.test(local)) && !local.endsWith(".spec.ts")) {
+      const list = [...text.matchAll(QUERY_SQL)].find((m) => isListSelect(m[2]!));
+      if (list) add(file, "consulta de lista sin LIMIT; toda lista se pagina: recibe limit (máx. 100) y cursor u offset", lineOf(text, list.index!));
+    }
+    if (!code) continue;
+
+    const layer = /^(domain|application)\//.exec(local)?.[1];
+    if (layer === "domain" && /\bctx\b/.test(text) && /\bctx\.(db|jobs|email|storage|ai|realtime|payments)\b/.test(text)) {
+      add(file, "el dominio usa ctx; el dominio es puro: recibe datos y devuelve decisiones, y el acceso a servicios va en infrastructure/ detrás de un puerto");
+    }
+    for (const m of text.matchAll(IMPORT_SPEC)) {
+      const target = importTarget(file, m[1]!);
+      if (!target) continue;
+      const line = lineOf(text, m.index!);
+      const to = componentOf(target, layout);
+      if (to && to.component.name !== component.name) {
+        if (component.kind === "web" && (to.component.kind === "api" || to.component.kind === "worker")) {
+          add(file, `importa código del servicio ${to.component.name} (${m[1]}); un frontend llama a su API por /_api/${to.component.route || "…"} y comparte tipos a través de una library`, line);
+        }
+        if (component.kind === "library" && to.component.kind !== "library") {
+          add(file, `la librería importa del componente ${to.component.name} (${m[1]}); una library no depende de apps ni servicios`, line);
+        }
+        if ((component.kind === "api" || component.kind === "worker") && to.component.kind !== "library") {
+          add(file, `importa del componente ${to.component.name} (${m[1]}); los servicios se comunican por HTTP (/_api) o eventos (ctx.jobs.enqueue) y comparten código solo a través de una library`, line);
+        }
+      }
+      if (layer && to?.component.name === component.name && /^infrastructure\//.test(to.local)) {
+        add(file, `la capa ${layer} importa infrastructure (${m[1]}); depende de un puerto y deja que el punto de entrada inyecte el adaptador`, line);
+      }
+    }
+  }
 }
 
 export const formatStandard = (p: BuildProblem) => `${p.file}${p.line ? `:${p.line}` : ""} — ${p.text}`;

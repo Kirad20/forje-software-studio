@@ -1,6 +1,7 @@
 import type { AgentExecutionResult } from "./AgentExecution.js";
-import { ROLE_FOLDERS, CONTRACT_FILE, covers, type PlanTask, type SpecialistRole } from "./Plan.js";
-export { ROLE_FOLDERS, PLAN_DOC, checkPlanDoc, validatePlan, type Plan, type PlanTask, type SpecialistRole } from "./Plan.js";
+import { ROLE_FOLDERS, CONTRACT_FILE, covers, roleCanWrite, type PlanTask, type SpecialistRole } from "./Plan.js";
+import { NATIVE_LAYOUT, type ProjectLayout } from "../../../../contracts/projectLayout.js";
+export { ROLE_FOLDERS, PLAN_DOC, checkPlanDoc, roleCanWrite, validatePlan, type Plan, type PlanTask, type SpecialistRole } from "./Plan.js";
 
 export interface Review {
   ok: boolean;
@@ -18,7 +19,7 @@ export function rewardOf(r: Pick<AgentExecutionResult, "buildOk" | "testsOk" | "
   return Math.max(0, Math.min(1, reward));
 }
 
-export function reviewFixTasks(tasks: PlanTask[], review: Review, round: number): PlanTask[] {
+export function reviewFixTasks(tasks: PlanTask[], review: Review, round: number, layout: ProjectLayout = NATIVE_LAYOUT): PlanTask[] {
   const claimed = new Set<string>();
   const fixes: PlanTask[] = [];
   for (const role of ["data", "backend", "ui"] as const) {
@@ -26,7 +27,7 @@ export function reviewFixTasks(tasks: PlanTask[], review: Review, round: number)
     if (!issues.length) continue;
     const original = tasks.filter(task => task.role === role).flatMap(task => task.files);
     const files = [...new Set([...issues.flatMap(issue => issue.files), ...original])]
-      .filter(file => ROLE_FOLDERS[role].test(file) && !covers(file, CONTRACT_FILE) && ![...claimed].some(owner => covers(owner, file) || covers(file, owner)));
+      .filter(file => roleCanWrite(role, file, layout) && !covers(file, CONTRACT_FILE) && ![...claimed].some(owner => covers(owner, file) || covers(file, owner)));
     files.forEach(file => claimed.add(file));
     fixes.push({
       id: `${role}-fix${round}`,

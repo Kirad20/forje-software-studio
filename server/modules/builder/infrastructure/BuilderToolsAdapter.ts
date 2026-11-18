@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { endSession as endTestSession, ensureOwnerAdmin, sessionCookie, setTemporaryPassword, testSession } from "../../app-services/auth.js";
+import { createTestUser, endSession as endTestSession, ensureOwnerAdmin, sessionCookie, setTemporaryPassword, testSession } from "../../app-services/auth.js";
 import { fetchPublicText } from "../../../shared/safeFetch.js";
 import { callRuntimeEndpoint, serveApp } from "../../app-runtime/index.js";
 import { config } from "../../../shared/config.js";
@@ -11,7 +11,7 @@ import { readLogs } from "../../project-observability/events.js";
 import { builderCoreModules, enabledOrgSkills } from "./CoreModulesAdapter.js";
 import { formatProblems, listProblems, recheckBuild, watchProblems } from "../../project-observability/problems.js";
 import { ensureDeps, MANIFEST, readDeps, resolvePackage, withManifestLock, writeDeps } from "../../app-runtime/index.js";
-import { compileServerModule, endpointRoutes, formatProblem, jobFiles, pageRoutes } from "../../app-runtime/index.js";
+import { checkProject, compileServerModule, endpointRoutes, formatProblem, jobFiles, pageRoutes, SERVICES_MANIFEST } from "../../app-runtime/index.js";
 import { verifyBuild } from "../../app-runtime/index.js";
 import { runBrowserTest, type BrowserStep } from "../../app-runtime/index.js";
 import { runQuickScan } from "../../project-observability/security.js";
@@ -19,16 +19,20 @@ import { formatFinding } from "../../app-runtime/index.js";
 import { addMemory, deleteMemory, memorySettings, updateMemory, MEMORY_KINDS } from "../../memory/memory.js";
 import { runInSandbox } from "../../app-runtime/index.js";
 import { publishProject } from "../../app-runtime/index.js";
-import { previewOrigin, previewUrl } from "../../app-runtime/index.js";
+import { appUrl, previewOrigin, previewUrl } from "../../app-runtime/index.js";
+import { AUTH_MANIFEST, BUILTIN_OAUTH_PROVIDERS, isBuiltinOAuthProvider, oauthCallbackPath, oauthSecretNames, parseOAuthConfig } from "../../../../contracts/oauthProviders.js";
 import { findSymbol, projectMap, relatedFiles } from "./projectIndex.js";
 import { rewriteImports } from "./rename.js";
 import { isMigrationPath, isSafeProjectPath, ownsFile } from "../domain/FinishGatePolicy.js";
+import { COMPONENTS_MANIFEST, componentOf, dataScopeOf, isComponentMigrationPath, isLayoutMigrationPath, isNativeProjectPath, layoutOf } from "../../../../contracts/projectLayout.js";
+import { extractComponent, formatMigrationPlan, planComponentMigration } from "./componentMigration.js";
+import { checkManifests } from "./manifestCheck.js";
 import { allSkills, findSkill, renderSkill } from "./skills.js";
 import { standardsScan } from "../domain/Standards.js";
 import { normalizeProjectProfile } from "../../projects/index.js";
 import { assertSafePreviewSql, containsDataChange, containsSchemaChange } from "../domain/AgentSqlPolicy.js";
 import { assertOwnerRequestedForget, assertOwnerSourcedMemory } from "../domain/MemoryProvenance.js";
-import { assertOwnerRequestedAuthSetup, assertOwnerRequestedPublish, assertOwnerRequestedSecret } from "../domain/OwnerActionPolicy.js";
+import { assertOwnerRequestedAuthSetup, assertOwnerRequestedOAuthSetup, assertOwnerRequestedPublish, assertOwnerRequestedSecret } from "../domain/OwnerActionPolicy.js";
 
 export { previewUrl };
 
@@ -68,24 +72,36 @@ function assertOwned(ctx: ToolContext, p: string) {
 }
 
 function assertNotMigrationFile(p: string) {
-  if (isMigrationPath(p)) {
+  if (isMigrationPath(p) || isComponentMigrationPath(p)) {
     throw new Error("Los archivos de migrations/ se crean únicamente con execute_sql; no los escribas, edites, renombres ni borres directamente.");
   }
 }
 
-function nextMigrationPath(files: Record<string, string>) {
+/** Also guards the migrations folder a component maps in forja.json (paths.migrations, e.g. "db/sql"). */
+async function assertNotAnyMigrationFile(p: string, ctx: ToolContext) {
+  assertNotMigrationFile(p);
+  if (isNativeProjectPath(p)) return;
+  const layout = layoutOf(await builderCoreModules().projects.readAllFiles(ctx.projectId));
+  if (isLayoutMigrationPath(p, layout)) {
+    throw new Error(`${p} es una migración de su componente: se crea únicamente con execute_sql (component), no se escribe, edita, renombra ni borra a mano.`);
+  }
+}
+
+/** Next migration of the app (`migrations/`) or of a component with its own database (its migrations folder, maybe mapped). */
+function nextMigrationPath(files: Record<string, string>, dir = "migrations/") {
   const timestamp = BigInt(new Date().toISOString().replace(/\D/g, "").slice(0, 17));
   const lastId = Object.keys(files).reduce((max, path) => {
-    const match = /^migrations\/(\d+)_.*\.sql$/.exec(path);
+    if (!path.startsWith(dir)) return max;
+    const match = /^(\d+)_[^/]*\.sql$/.exec(path.slice(dir.length));
     if (!match) return max;
     const id = BigInt(match[1]!);
     return id > max ? id : max;
   }, 0n);
   let id = timestamp > lastId ? timestamp : lastId + 1n;
-  let path = `migrations/${id.toString().padStart(17, "0")}_builder.sql`;
+  let path = `${dir}${id.toString().padStart(17, "0")}_builder.sql`;
   while (Object.hasOwn(files, path)) {
     id++;
-    path = `migrations/${id.toString().padStart(17, "0")}_builder.sql`;
+    path = `${dir}${id.toString().padStart(17, "0")}_builder.sql`;
   }
   return path;
 }
@@ -313,7 +329,7 @@ export const builderTools: BuilderTool[] = [
     description: "Crea o reemplaza un archivo completo, excepto migrations/*.sql, que se generan únicamente con execute_sql. Para cambios en un archivo existente usa edit_file (gasta muchos menos tokens).",
     input_schema: obj({ path: str("Ruta, p. ej. pages/_index.tsx"), content: str("Contenido completo") }, ["path", "content"]),
     async run(i: { path: string; content: string }, ctx) {
-      assertNotMigrationFile(i.path);
+      await assertNotAnyMigrationFile(i.path, ctx);
       assertOwned(ctx, i.path);
       await builderCoreModules().projects.writeFile(ctx.projectId, i.path, i.content, ctx.author, ctx.actor);
       noteWrite(ctx, i.path);
@@ -339,7 +355,7 @@ export const builderTools: BuilderTool[] = [
       ["path"],
     ),
     async run(i: { path: string; old_text?: string; new_text?: string; replace_all?: boolean; edits?: { old_text: string; new_text: string; replace_all?: boolean }[] }, ctx) {
-      assertNotMigrationFile(i.path);
+      await assertNotAnyMigrationFile(i.path, ctx);
       assertOwned(ctx, i.path);
       const edits = i.edits?.length ? i.edits : i.old_text !== undefined && i.new_text !== undefined ? [{ old_text: i.old_text, new_text: i.new_text, replace_all: i.replace_all }] : [];
       if (!edits.length) throw new Error("Hace falta old_text y new_text, o una lista edits.");
@@ -365,7 +381,10 @@ export const builderTools: BuilderTool[] = [
       "Borra un archivo. Antes revisa con related_files o find_symbol quién lo importa y quita esos imports, o la compilación fallará. Queda en el registro de cambios y se puede restaurar.",
     input_schema: obj({ path: str("Ruta") }, ["path"]),
     async run(i: { path: string }, ctx) {
-      assertNotMigrationFile(i.path);
+      // Retiring a component's database: its migrations may go once forja.json no longer declares it (its data stays).
+      const current = layoutOf(await builderCoreModules().projects.readAllFiles(ctx.projectId));
+      const retiring = (isComponentMigrationPath(i.path) || isLayoutMigrationPath(i.path, current)) && !dataScopeOf(i.path, current);
+      if (!retiring) await assertNotAnyMigrationFile(i.path, ctx);
       assertOwned(ctx, i.path);
       await builderCoreModules().projects.deleteFile(ctx.projectId, i.path, ctx.author);
       noteWrite(ctx, i.path);
@@ -378,8 +397,18 @@ export const builderTools: BuilderTool[] = [
       "Mueve o renombra un archivo y reescribe los imports que apuntan a él (y los imports relativos del propio archivo si cambia de carpeta). No mueve archivos hermanos como <Nombre>.module.css o <Nombre>.example.tsx: renómbralos con otra llamada si hace falta. Falla si la ruta nueva ya existe. Después corre check_build.",
     input_schema: obj({ from: str("Ruta actual"), to: str("Ruta nueva") }, ["from", "to"]),
     async run(i: { from: string; to: string }, ctx) {
-      assertNotMigrationFile(i.from);
-      assertNotMigrationFile(i.to);
+      // A component's migrations may move with its folder: the history is keyed by schema and file name.
+      let moving = false;
+      const current = layoutOf(await builderCoreModules().projects.readAllFiles(ctx.projectId));
+      const isMigration = (p: string) => isComponentMigrationPath(p) || isLayoutMigrationPath(p, current);
+      if (isMigration(i.from) && i.to.split("/").pop() === i.from.split("/").pop()) {
+        const target = componentOf(i.to, current);
+        moving = !!target?.component.database && target.local === `${target.component.paths.migrations}/${i.to.split("/").pop()}`;
+      }
+      if (!moving) {
+        await assertNotAnyMigrationFile(i.from, ctx);
+        await assertNotAnyMigrationFile(i.to, ctx);
+      }
       assertOwned(ctx, i.from);
       assertOwned(ctx, i.to);
       if (i.from === i.to) return "La ruta nueva es igual a la actual; no se cambió nada.";
@@ -603,6 +632,92 @@ export const builderTools: BuilderTool[] = [
       return renderSkill(skill, i.part);
     },
   },
+  {
+    name: "check_manifest",
+    description:
+      "Lectura: prueba un forja.json y/o un forja.services.json propuestos sobre los archivos actuales sin escribir nada, y muestra cómo queda mapeado el proyecto: cada componente con sus paths y conventions, las páginas, endpoints, tareas y migraciones que sirve, los servicios con sus patrones expandidos, los problemas y los archivos que quedan fuera. Úsalo para mapear proyectos con otra estructura (por ejemplo páginas en src/routes con conventions.pages \"folders\", endpoints create.post.ts con conventions.endpoints \"dot\") antes de guardar el manifiesto con write_file. Sin argumentos, revisa los manifiestos actuales.",
+    input_schema: obj({
+      forja_json: str("Opcional: contenido completo propuesto de forja.json"),
+      forja_services_json: str("Opcional: contenido completo propuesto de forja.services.json"),
+    }),
+    async run(i: { forja_json?: string; forja_services_json?: string }, ctx) {
+      const files = await builderCoreModules().projects.readAllFiles(ctx.projectId);
+      return clip(checkManifests(files, { components: i.forja_json, services: i.forja_services_json }));
+    },
+  },
+  {
+    name: "architecture_migration_plan",
+    description:
+      "Lectura: analiza un proyecto legacy (sin forja.json, o con partes aún en pages/, endpoints/, helpers/, jobs/) y propone cómo migrarlo a componentes de forja.json por contextos: qué archivos van a services/<contexto>/ o a una library, qué rutas se conservan, qué tareas y tablas afecta, la escala heredada de forja.services.json y los avisos. El proyecto legacy sigue funcionando sin migrar; úsalo cuando el dueño pida separar servicios, un monorepo o microservicios, antes de extract_component.",
+    input_schema: obj({}),
+    async run(_i: Record<string, never>, ctx) {
+      return clip(formatMigrationPlan(planComponentMigration(await builderCoreModules().projects.readAllFiles(ctx.projectId))));
+    },
+  },
+  {
+    name: "extract_component",
+    description:
+      "Migra UN contexto legacy a un componente de forja.json: mueve endpoints/<contexto>/, helpers/<contexto>/ y sus tareas a services/<contexto>/ (lo que usan las páginas va a una library), reescribe los imports, declara el componente y quita esos archivos de forja.services.json heredando su escala. Las rutas /_api y los nombres de las tareas no cambian. Compila el resultado antes de escribir nada y lo deshace todo si algo falla. Con database: true el componente tiene su propio esquema; move_tables mueve a él tablas que solo usa ese contexto (mira architecture_migration_plan). Extrae de uno en uno y verifica con check_build y call_endpoint.",
+    input_schema: obj({
+      context: str("Contexto a extraer (carpeta de endpoints/ o helpers/, o servicio de forja.services.json)"),
+      name: str("Opcional: nombre del componente (por defecto el del plan)"),
+      database: { type: "boolean", description: "Darle su propio esquema de Postgres (base de datos por servicio)" },
+      move_tables: arr({ type: "string", description: "Tabla exclusiva del contexto que pasa a su esquema" }),
+    }, ["context"]),
+    async run(i: { context: string; name?: string; database?: boolean; move_tables?: string[] }, ctx) {
+      const projects = builderCoreModules().projects;
+      const files = await projects.readAllFiles(ctx.projectId);
+      const ex = extractComponent(files, { context: i.context, name: i.name, database: i.database, moveTables: i.move_tables });
+      for (const r of ex.renames) assertOwned(ctx, r.from);
+      const renamedTo = new Set(ex.renames.map((r) => r.to));
+      for (const p of Object.keys(ex.writes)) {
+        if (!renamedTo.has(p) && p !== COMPONENTS_MANIFEST && p !== SERVICES_MANIFEST && p !== ex.migration) assertOwned(ctx, p);
+      }
+      const problems = await checkProject(ex.files, ctx.projectId);
+      if (problems.length) {
+        throw new Error(`No se extrajo nada: el resultado no compilaría.\n${problems.slice(0, 12).map((p) => formatProblem(p)).join("\n")}`);
+      }
+      const undo: (() => Promise<unknown>)[] = [];
+      const restore = (p: string, original: string | undefined) => () =>
+        original === undefined ? projects.deleteFile(ctx.projectId, p, ctx.author) : projects.writeFile(ctx.projectId, p, original, ctx.author, ctx.actor);
+      try {
+        // forja.json first: the new folders are valid only once it declares them.
+        await projects.writeFile(ctx.projectId, COMPONENTS_MANIFEST, ex.writes[COMPONENTS_MANIFEST]!, ctx.author, ctx.actor);
+        undo.push(restore(COMPONENTS_MANIFEST, files[COMPONENTS_MANIFEST]));
+        for (const r of ex.renames) {
+          await projects.renameFile(ctx.projectId, r.from, r.to, ctx.author);
+          undo.push(() => projects.renameFile(ctx.projectId, r.to, r.from, ctx.author));
+        }
+        for (const [p, content] of Object.entries(ex.writes)) {
+          if (p === COMPONENTS_MANIFEST) continue;
+          const original = renamedTo.has(p) ? undefined : files[p];
+          await projects.writeFile(ctx.projectId, p, content, ctx.author, ctx.actor);
+          if (!renamedTo.has(p)) undo.push(restore(p, original));
+        }
+        for (const p of ex.deletes) {
+          await projects.deleteFile(ctx.projectId, p, ctx.author);
+          undo.push(restore(p, files[p]));
+        }
+        if (ex.migration) await applyProjectMigrations(ctx.projectId, await projects.readAllFiles(ctx.projectId), "preview");
+      } catch (error) {
+        for (const step of undo.reverse()) await step().catch(() => {});
+        throw new Error(`Se deshizo la extracción: ${(error as Error).message}`);
+      }
+      if (ctx.owned) ctx.owned.push(ex.plan.root, ...(ex.plan.library ? [ex.plan.library.root] : []));
+      noteWrite(ctx, ...ex.renames.flatMap((r) => [r.from, r.to]), ...Object.keys(ex.writes), ...ex.deletes);
+      const c = ex.plan;
+      return [
+        `Extraído "${c.context}" → ${c.kind} "${c.component}" en ${c.root}${c.library ? ` y library "${c.library.component}" en ${c.library.root}` : ""}.`,
+        `${ex.renames.length} archivos movidos; imports reescritos en ${Object.keys(ex.writes).filter((p) => !renamedTo.has(p) && p !== COMPONENTS_MANIFEST).length} archivos.`,
+        c.routes.length ? `Rutas: ${c.routes.join(", ")}${c.routeChanges.length ? " (CAMBIARON: actualiza a quien las llame)" : " (sin cambios)"}.` : "",
+        c.jobs.length ? `Tareas con su mismo nombre (legacyJobNames): ${c.jobs.join(", ")}.` : "",
+        ex.deletes.includes(SERVICES_MANIFEST) ? "forja.services.json quedó vacío y se eliminó; la escala vive ahora en forja.json." : files[SERVICES_MANIFEST] ? "forja.services.json actualizado." : "",
+        ex.migration ? `Tablas movidas a su esquema con ${ex.migration} (aplicada en vista previa; se aplica en producción al publicar).` : "",
+        ...c.warnings.map((w) => `Aviso: ${w}`),
+        "Siguiente: check_build, call_endpoint de sus rutas y get_problems.",
+      ].filter(Boolean).join("\n");
+    },
+  },
   typed({
     name: "check_standards",
     description: "Comprueba los estándares de Forja en el código actual: colores escritos a mano en vez de tokens de base.css, estilos visuales en línea, enlaces internos con <a href>, llamadas a la API con tipo escrito a mano cuando hay contrato, endpoints que no usan helpers/contract.ts y helpers con lógica de negocio sin pruebas. No bloquea nada, pero la comprobación automática antes de terminar te lo pedirá: úsalo tras una tanda de cambios y arregla lo que encuentre.",
@@ -680,18 +795,25 @@ export const builderTools: BuilderTool[] = [
   {
     name: "execute_sql",
     description:
-      "Ejecuta SQL de Postgres 18 únicamente en la vista previa. El DDL se guarda primero como una migración nueva e inmutable en migrations/*.sql y luego se aplica a la vista previa; no edites ese archivo directamente. El DML de datos solamente cambia la vista previa y no se copia al publicar. Incluye la opción migration=true solo para un backfill intencional que también deba ejecutarse en producción al publicar.",
-    input_schema: obj({ sql: str("SQL a ejecutar"), migration: { type: "boolean", description: "Usar solo para un backfill de datos intencional que deba publicarse en producción; crea una migración" } }, ["sql"]),
-    async run(i: { sql: string; migration?: boolean }, ctx) {
+      "Ejecuta SQL de Postgres 18 únicamente en la vista previa. El DDL se guarda primero como una migración nueva e inmutable en migrations/*.sql y luego se aplica a la vista previa; no edites ese archivo directamente. El DML de datos solamente cambia la vista previa y no se copia al publicar. Incluye la opción migration=true solo para un backfill intencional que también deba ejecutarse en producción al publicar. Con component (un componente de forja.json con \"database\"), la migración se guarda en <root>migrations/ y todo se ejecuta dentro del esquema de ese componente (sin prefijo de esquema en las tablas).",
+    input_schema: obj({ sql: str("SQL a ejecutar"), migration: { type: "boolean", description: "Usar solo para un backfill de datos intencional que deba publicarse en producción; crea una migración" }, component: str("Opcional: nombre de un componente de forja.json con base de datos propia") }, ["sql"]),
+    async run(i: { sql: string; migration?: boolean; component?: string }, ctx) {
       assertSafePreviewSql(i.sql);
       if (containsSchemaChange(i.sql) && containsDataChange(i.sql) && !i.migration) {
         throw new Error("Separa el DDL del SQL de datos, o marca migration=true si esos datos son un backfill intencional que debe aplicarse también en producción.");
       }
       let migrationPath: string | undefined;
+      let target: { root: string; schema: string } | undefined;
+      if (i.component) {
+        const layout = layoutOf(await builderCoreModules().projects.readAllFiles(ctx.projectId));
+        const component = layout.components.find((c) => c.name === i.component);
+        if (!component?.database) throw new Error(`${i.component} no es un componente de forja.json con "database"; decláralo primero ("database": true).`);
+        target = { root: `${component.root}${component.paths.migrations}/`, schema: component.database };
+      }
       if (containsSchemaChange(i.sql) || i.migration) {
         const projects = builderCoreModules().projects;
         const files = await projects.readAllFiles(ctx.projectId);
-        migrationPath = nextMigrationPath(files);
+        migrationPath = nextMigrationPath(files, target?.root);
         assertOwned(ctx, migrationPath);
         await projects.writeFile(ctx.projectId, migrationPath, i.sql, ctx.author, ctx.actor);
       }
@@ -701,7 +823,7 @@ export const builderTools: BuilderTool[] = [
           const migrations = await builderCoreModules().projects.readAllFiles(ctx.projectId);
           await applyProjectMigrations(ctx.projectId, migrations, "preview");
         } else {
-          results = await execSql(ctx.projectId, i.sql, "preview");
+          results = target ? await execSql(ctx.projectId, i.sql, "preview", target.schema) : await execSql(ctx.projectId, i.sql, "preview");
         }
       } catch (error) {
         if (migrationPath) await builderCoreModules().projects.deleteFile(ctx.projectId, migrationPath, ctx.author);
@@ -863,6 +985,74 @@ export const builderTools: BuilderTool[] = [
     },
   },
   {
+    name: "setup_oauth",
+    description:
+      `Activa el inicio de sesión con redes sociales y cualquier servicio OAuth 2.0 / OpenID Connect (motor: Better Auth). Escribe forja.auth.json, crea la cuenta admin del dueño, pide los secretos de cada proveedor (NOMBRE_CLIENT_ID y NOMBRE_CLIENT_SECRET) y devuelve las URLs de redirección que el dueño debe registrar en cada proveedor. Proveedores integrados por nombre: ${BUILTIN_OAUTH_PROVIDERS.join(", ")}. Otros: en providers_json, { "id": { "type": "oidc", "discoveryUrl": "https://…/.well-known/openid-configuration" } } o { "id": { "type": "oauth2", "authorizationUrl", "tokenUrl", "userInfoUrl", "scopes", "profile": { "id", "email", "name", "image" } } }. Después construye los botones con auth.providers() y auth.signInWith(id) de @forja/client.`,
+    input_schema: obj({
+      providers: { type: "array", items: { type: "string" }, description: "Proveedores integrados que añadir, p. ej. [\"google\", \"facebook\"]" },
+      providers_json: str("Opcional: objeto JSON con proveedores a añadir o reemplazar (mismo formato que providers de forja.auth.json), para OIDC/OAuth 2.0 u opciones de los integrados"),
+      sign_up: { type: "boolean", description: "Opcional: false para que el primer acceso social no cree cuentas nuevas" },
+    }),
+    async run(i: { providers?: string[]; providers_json?: string; sign_up?: boolean }, ctx) {
+      if (ctx.author !== "mcp") assertOwnerRequestedOAuthSetup(ctx.ownerMessage);
+      const projects = builderCoreModules().projects;
+      const files = await projects.readAllFiles(ctx.projectId);
+      let current: { version?: number; providers?: Record<string, unknown>; signUp?: boolean } = {};
+      if (files[AUTH_MANIFEST]?.trim()) {
+        parseOAuthConfig(files[AUTH_MANIFEST]);
+        current = JSON.parse(files[AUTH_MANIFEST]!);
+      }
+      const providers: Record<string, unknown> = { ...(current.providers ?? {}) };
+      for (const id of i.providers ?? []) {
+        if (!isBuiltinOAuthProvider(id)) throw new Error(`"${id}" no es un proveedor integrado. Decláralo en providers_json con "type": "oidc" u "oauth2".`);
+        providers[id] ??= {};
+      }
+      if (i.providers_json) {
+        let extra: unknown;
+        try { extra = JSON.parse(i.providers_json); } catch { throw new Error("providers_json no es JSON válido."); }
+        if (!extra || typeof extra !== "object" || Array.isArray(extra)) throw new Error("providers_json debe ser un objeto { id: {…} }.");
+        Object.assign(providers, extra);
+      }
+      if (!Object.keys(providers).length) throw new Error("Indica al menos un proveedor (providers o providers_json).");
+      const content = JSON.stringify({ version: 1, providers, ...(i.sign_up === false || current.signUp === false ? { signUp: i.sign_up ?? current.signUp } : {}) }, null, 2) + "\n";
+      const config = parseOAuthConfig(content);
+      await projects.writeFile(ctx.projectId, AUTH_MANIFEST, content, ctx.author, ctx.actor);
+      ctx.wrote = true;
+      await ensureOwnerAdmin(ctx.projectId, ctx.account.email, "preview");
+      const project = await projects.getProject(ctx.projectId);
+      const origins = [previewOrigin(ctx.projectId), ...(project?.slug ? [appUrl(project.slug)] : [])];
+      const set = new Set((await listSecrets(ctx.projectId)).filter((s) => s.isSet).map((s) => s.name));
+      const consoles: Record<string, string> = {
+        google: "Google Cloud Console → APIs y servicios → Credenciales → ID de cliente de OAuth (aplicación web)",
+        facebook: "Meta for Developers → tu app → Inicio de sesión con Facebook → Configuración",
+        github: "GitHub → Settings → Developer settings → OAuth Apps",
+        microsoft: "Microsoft Entra → Registros de aplicaciones",
+        apple: "Apple Developer → Certificates, IDs & Profiles → Services ID",
+      };
+      const lines: string[] = [`${AUTH_MANIFEST} guardado con: ${config.providers.map((p) => `${p.name} (${p.id})`).join(", ")}.`];
+      for (const p of config.providers) {
+        const redirects = origins.map((o) => `${o}${oauthCallbackPath(p.id)}`);
+        const where = consoles[p.id] ?? (p.type === "builtin" ? `la consola de desarrolladores de ${p.name}` : "la consola del proveedor");
+        const pending = oauthSecretNames(p).filter((name) => !set.has(name));
+        for (const name of pending) {
+          await requestSecret(ctx.projectId, name, `${p.name}: ${name.endsWith("_SECRET") ? "client secret" : name.endsWith("_ID") ? "client ID" : name}. Créalo en ${where}; URL de redirección: ${redirects.join(" y ")}`);
+        }
+        lines.push(`- ${p.name}: URL de redirección para registrar → ${redirects.join(" · ")}. ${pending.length ? `Secretos pendientes (pestaña Secretos): ${pending.join(", ")}.` : "Secretos configurados."}`);
+      }
+      lines.push("Cuenta admin del dueño lista. En la página de login: const providers = await auth.providers(); un botón por proveedor con auth.signInWith(p.id); muestra auth.oauthError() si vuelve con error. Mientras falten secretos, auth.providers() no lista ese proveedor.");
+      return lines.join("\n");
+    },
+  },
+  {
+    name: "create_test_user",
+    description: "Crea un usuario de prueba de la app (sin contraseña) en entornos no productivos. En producción está deshabilitado. Después úsalo con as_user_email en browser_test o call_endpoint para probar rutas protegidas.",
+    input_schema: obj({ email: str("Correo de prueba único"), name: str("Nombre opcional") }, ["email"]),
+    async run(i: { email: string; name?: string }, ctx) {
+      const user = await createTestUser(ctx.projectId, i);
+      return `Usuario de prueba creado: ${user.email} (${user.id}). Úsalo con as_user_email; no tiene contraseña.`;
+    },
+  },
+  {
     name: "set_user_password",
     description: "Pone una contraseña temporal a un usuario de la app (solo si el dueño lo pide).",
     input_schema: obj({ email: str("Correo del usuario"), password: str("Contraseña temporal") }, ["email", "password"]),
@@ -898,7 +1088,7 @@ export const builderTools: BuilderTool[] = [
     async run(i: { slug?: string }, ctx) {
       if (ctx.author !== "mcp") assertOwnerRequestedPublish(ctx.ownerMessage);
       const r = await publishProject(ctx.projectId, i.slug, ctx.author);
-      return `Publicada en ${r.url}`;
+      return `Publicada en ${r.url}${"warnings" in r && r.warnings?.length ? `\nAvisos:\n${r.warnings.map((w) => `- ${w}`).join("\n")}` : ""}`;
     },
   },
   typed({

@@ -1,6 +1,7 @@
 import type { ControlledService, ServiceControlSnapshot, ServiceRuntimeSnapshot } from "../domain/serviceControl.js";
 import { endpointRoutes, jobFiles } from "../domain/routes.js";
-import { readProjectServices, SERVICES_MANIFEST } from "../domain/services.js";
+import { componentServiceNames, readProjectServices, SERVICES_MANIFEST } from "../domain/services.js";
+import { COMPONENTS_MANIFEST, parseLayout } from "../../../../contracts/projectLayout.js";
 import type { ServiceControlPorts } from "../ports/serviceControl.js";
 
 export function createServiceControl(ports: ServiceControlPorts) {
@@ -46,6 +47,17 @@ export function createServiceControl(ports: ServiceControlPorts) {
     const manifest = readProjectServices(files);
     if (service === "monolith") throw new Error("monolith conserva la configuración de compatibilidad");
     if (!manifest || !Object.hasOwn(manifest.services, service)) throw new Error("Servicio no encontrado");
+    // Services that come from forja.json components are scaled in their component.
+    if (componentServiceNames(files).includes(service)) {
+      if (!ports.writeComponents) throw new Error(`Escala ${service} en ${COMPONENTS_MANIFEST}`);
+      const components = JSON.parse(files[COMPONENTS_MANIFEST]!);
+      Object.assign(components.components[service], patch);
+      const content = JSON.stringify(components, null, 2) + "\n";
+      parseLayout(content);
+      readProjectServices({ ...files, [COMPONENTS_MANIFEST]: content });
+      await ports.writeComponents(projectId, content);
+      return { ok: true };
+    }
     const source = JSON.parse(files[SERVICES_MANIFEST]!);
     Object.assign(source.services[service], patch);
     const content = JSON.stringify(source, null, 2) + "\n";

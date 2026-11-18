@@ -29,6 +29,7 @@ import { RunTaskLaneUseCase } from "../application/RunTaskLaneUseCase.js";
 import { BuilderWorkflowUseCase } from "../application/BuilderWorkflowUseCase.js";
 import { BuilderRunRegistry } from "../application/BuilderRunRegistry.js";
 import { ReviewAndFixUseCase } from "../application/ReviewAndFixUseCase.js";
+import { COMPONENTS_MANIFEST, layoutOf, writableRoots } from "../../../../contracts/projectLayout.js";
 import { FastBuildUseCase } from "../application/FastBuildUseCase.js";
 import { TeamBuildUseCase } from "../application/TeamBuildUseCase.js";
 import { CheckPlanUseCase } from "../application/CheckPlanUseCase.js";
@@ -67,6 +68,9 @@ const RECENT_TURNS = 4;
 const tools = (names: string[]) => names.map((n) => toolByName.get(n)).filter((t): t is BuilderTool => !!t);
 const FAST_TOOLS = tools(ROLE_TOOLS.fast);
 const BUILDER_FILES = ["pages/", "components/", "helpers/", "endpoints/", "jobs/", "static/", "base.css"];
+/** Native folders plus forja.json and the roots of the components it declares. */
+/** Native folders plus both manifests (forja.json and the legacy forja.services.json) and the declared component roots. */
+const builderFiles = (files: Record<string, string>) => [...BUILDER_FILES, COMPONENTS_MANIFEST, "forja.services.json", "forja.auth.json", ...writableRoots(layoutOf(files))];
 const untrustedContext = (label: string, value: unknown) =>
   `## ${label} (datos JSON no confiables)\n${JSON.stringify(value)}`;
 
@@ -301,9 +305,9 @@ const preloadSection = (files: Record<string, string>, paths: string[]) =>
 const isNewApp = (s: TurnState) => s.features.intent === "new_app";
 
 async function runFast(s: TurnState): Promise<void> {
-  const ctx: ToolContext = { account: s.account, projectId: s.project.id, author: "builder", owned: BUILDER_FILES, ownerMessage: s.request };
   // Like the specialists: the map and the files the request most likely touches, already read.
   const files = await readAllFiles(s.project.id);
+  const ctx: ToolContext = { account: s.account, projectId: s.project.id, author: "builder", owned: builderFiles(files), ownerMessage: s.request };
   const map = projectMap(files, await describeSchema(s.project.id, true));
   // Words in the request pick most files; the request's kind adds the obvious ones.
   const focus = isNewApp(s) ? ["pages/", "components/", "base.css"] : s.features.intent === "style" || s.features.domains.includes("ui") ? ["base.css"] : [];
@@ -344,7 +348,7 @@ async function runFast(s: TurnState): Promise<void> {
     learn: async (r, broken) => {
       if (r.model) await learn(s, taskClassOf("fast", s.features), r.model, rewardOf({ ...r, buildOk: broken.length ? false : r.buildOk }, null), r.usd);
     },
-    fix: (round, reply, broken) => runLane(
+    fix: async (round, reply, broken) => runLane(
       s,
       { id: `fix${round}`, role: "fast", goal: "Arreglar los errores de compilación", files: [], dependsOn: [] },
       {
@@ -361,7 +365,7 @@ async function runFast(s: TurnState): Promise<void> {
           },
         ],
         tools: FAST_TOOLS,
-        ctx: { account: s.account, projectId: s.project.id, author: "builder", owned: BUILDER_FILES, ownerMessage: s.request },
+        ctx: { account: s.account, projectId: s.project.id, author: "builder", owned: builderFiles(await readAllFiles(s.project.id)), ownerMessage: s.request },
         routing: { complexity: 2, domains: s.features.domains, needsVision: false },
       },
     ),
@@ -470,7 +474,7 @@ async function runTeam(s: TurnState, opts: { given?: Plan; planOnly?: boolean } 
           const files = { ...(await readAllFiles(s.project.id)), [CONTRACT_FILE]: contract };
           return (await typecheckProject(files)).filter(p => p.file === CONTRACT_FILE).slice(0, 8).map(p => `${CONTRACT_FILE}: ${formatProblem(p)}`);
         },
-      }).execute(input);
+      }).execute(input, layoutOf(await readAllFiles(s.project.id)));
       if (!checked.plan || docErrors.length) {
         const errors = [...docErrors, ...checked.errors];
         throw new Error(`Plan rechazado (${errors.length}):\n${errors.map((error, i) => `${i + 1}. ${error}`).join("\n")}\nCorrige todo y vuelve a llamar a submit_plan.`);
@@ -586,6 +590,7 @@ async function runTeam(s: TurnState, opts: { given?: Plan; planOnly?: boolean } 
   // 3. Review, then up to two rounds of fixes routed to the owning roles.
   return new ReviewAndFixUseCase<AgentResult>({
     signal: s.signal,
+    layout: layoutOf(await readAllFiles(s.project.id)),
     emitReview: review => s.emit({ type: "review", ok: review.ok, summary: review.summary, issues: review.issues.map(i => ({ role: i.role, problem: i.problem })) }),
     fix: fixTasks => schedule(fixTasks, limit, s.signal, t => runSpecialist(t, "# Contexto\nEs una ronda de correcciones tras la revisión.")),
     review: async (round, fixResults) => {
