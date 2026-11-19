@@ -360,6 +360,7 @@ export function PublishPanel({ project, onDone, onClose }: { project: Project; o
   const [slug, setSlug] = useState(project.slug ?? project.suggestedSlug);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const host = new URL(project.previewOrigin).host.replace(/^pv-[^.]+\./, "");
   const state = !project.slug ? "draft" : project.hasUnpublishedChanges ? "behind" : "live";
 
@@ -410,6 +411,7 @@ export function PublishPanel({ project, onDone, onClose }: { project: Project; o
       </div>
       <div className="small muted">Se publica el código actual. La base de datos es la misma que en la vista previa; las tareas programadas corren con esta versión.</div>
       {error && <div className="error-box" style={{ maxHeight: 180, overflow: "auto" }}>{error}</div>}
+      {notice && <div className="small muted" role="status" style={{ whiteSpace: "pre-wrap" }}>{notice}</div>}
       <div className="row">
         {project.slug && (
           <button
@@ -430,8 +432,10 @@ export function PublishPanel({ project, onDone, onClose }: { project: Project; o
           onClick={async () => {
             setBusy(true);
             setError("");
+            setNotice("");
             try {
-              await api(`/projects/${project.id}/publish`, { body: { slug } });
+              const published = await api<{ warnings?: string[] }>(`/projects/${project.id}/publish`, { body: { slug } });
+              if (published.warnings?.length) setNotice(published.warnings.join("\n"));
               onDone();
             } catch (e) {
               setError((e as Error).message);
@@ -719,6 +723,9 @@ export function ProjectSettings({ project, onChange }: { project: Project; onCha
               </button>
               <a className="btn" href={`/api/projects/${project.id}/export-code`}>
                 ⇩ Descargar código
+              </a>
+              <a className="btn" href={`/api/projects/${project.id}/export-standalone`} title="Docker Compose con un contenedor por servicio, gateway y Postgres; funciona sin Forja">
+                ⇩ Exportar para producción
               </a>
             </div>
           </div>

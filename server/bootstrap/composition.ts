@@ -1,3 +1,4 @@
+import { dataScopeOf, layoutOf } from "../../contracts/projectLayout.js";
 import { randomBytes } from "node:crypto";
 import { newId } from "../shared/crypto.js";
 import { createCoreModules } from "./coreModules.js";
@@ -85,6 +86,7 @@ export function createMonolith() {
           },
           jobFiles: runtime.jobFiles,
           resolveExecution: runtime.resolveServiceExecution,
+          resolveDataScope: (files, file) => dataScopeOf(file, layoutOf(files)) ?? undefined,
           readJobSettings: runtime.readJobSettings,
           compileServerModule: runtime.compileServerModule,
           runInSandbox: runtime.runInSandbox,

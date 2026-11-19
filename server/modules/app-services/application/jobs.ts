@@ -52,7 +52,8 @@ export function createJobs(ports: JobPorts) {
         base = project?.slug ? rt.appUrl(project.slug) : "";
       }
       const execution = rt.resolveExecution?.(files, job.file);
-      await rt.runInSandbox(projectId, "job", { env_name: env, file: mod.file, base, payload, job: name, ...(execution ? { execution } : {}) }, "job");
+      const scope = rt.resolveDataScope?.(files, job.file);
+      await rt.runInSandbox(projectId, "job", { env_name: env, file: mod.file, base, payload, job: name, ...(execution ? { execution } : {}), ...(scope ? { scope } : {}) }, "job");
       await q("jobCompleteRun", [run!.id]);
       log(projectId, { env, level: "info", source: "job", message: `Tarea ${name} (${trigger}) terminada` });
     } catch (error) {
@@ -151,10 +152,11 @@ export function createJobs(ports: JobPorts) {
         await queue.start();
         return;
       }
+      // The embedded consumer serves preview too: start it even before anything is published.
+      if (queue.mode === "embedded") await queue.start();
+      if (version !== generation) return;
       const published = await q<{ id: string }>("jobPublishedProjects");
       for (const project of published) {
-        if (version !== generation) return;
-        if (queue.mode === "embedded") await queue.start();
         if (version !== generation) return;
         await scheduleProject(project.id);
       }

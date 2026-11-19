@@ -1,13 +1,15 @@
 import { BootstrapService } from "./application/BootstrapService.js";
 import { IdentityAccountsService } from "./application/IdentityAccountsService.js";
 import { LoginWithPasswordUseCase } from "./application/LoginWithPasswordUseCase.js";
+import { LoginWithOAuthUseCase, type OAuthLogin } from "./application/LoginWithOAuthUseCase.js";
 import { RequestLoginCodeUseCase } from "./application/RequestLoginCodeUseCase.js";
 import { UpdateAccountNameUseCase } from "./application/UpdateAccountNameUseCase.js";
 import { VerifyLoginCodeUseCase } from "./application/VerifyLoginCodeUseCase.js";
 import { Password } from "./domain/Password.js";
 import type { BootstrapCrypto } from "./ports/bootstrap.js";
 import type { IdentityAccountsDependencies } from "./ports/accountLifecycle.js";
-import type { IAccountRepository, ILoginCodeRepository } from "./ports/repositories.js";
+import type { IAccountRepository, ILoginCodeRepository, IOAuthIdentityRepository } from "./ports/repositories.js";
+export type { OAuthLogin, OAuthLoginResult } from "./application/LoginWithOAuthUseCase.js";
 
 export * from "./domain/Email.js";
 export * from "./domain/Password.js";
@@ -23,6 +25,7 @@ export { PostgresAccountLifecycleRepository } from "./infrastructure/PostgresAcc
 export { PostgresPasswordResetRepository } from "./infrastructure/PostgresPasswordResetRepository.js";
 export { PostgresApiTokenRepository } from "./infrastructure/PostgresApiTokenRepository.js";
 export { PostgresMcpOAuthRepository } from "./infrastructure/PostgresMcpOAuthRepository.js";
+export { PostgresOAuthIdentityRepository } from "./infrastructure/PostgresOAuthIdentityRepository.js";
 export { BcryptArgonPasswordHasher } from "./infrastructure/BcryptArgonPasswordHasher.js";
 export { PlatformMailerService } from "./infrastructure/PlatformMailerService.js";
 export { NodeBootstrapCrypto } from "./infrastructure/NodeBootstrapCrypto.js";
@@ -33,6 +36,7 @@ export interface IdentityModuleDependencies {
   accounts: IdentityAccountsDependencies;
   accountRepository: IAccountRepository;
   loginCodes: ILoginCodeRepository;
+  oauthIdentities: IOAuthIdentityRepository;
   bootstrapCrypto: BootstrapCrypto;
   bootstrapPolicy: { bootstrapToken: string; publicUrl: string };
   claimInvites(accountId: string, email: string): Promise<void>;
@@ -64,6 +68,14 @@ export function createIdentityModule(dependencies: IdentityModuleDependencies) {
     (email) => service.canSignUp(email),
     (email) => service.createAccount(email, null, null),
   );
+  const loginWithOAuthUseCase = new LoginWithOAuthUseCase(
+    dependencies.accountRepository,
+    dependencies.oauthIdentities,
+    accounts.sessions,
+    (email) => service.canSignUp(email),
+    (email, name) => service.createAccount(email, name, null),
+    claimInvites,
+  );
   const updateAccountNameUseCase = new UpdateAccountNameUseCase(dependencies.accountRepository);
   const bootstrap = new BootstrapService(
     service,
@@ -84,6 +96,7 @@ export function createIdentityModule(dependencies: IdentityModuleDependencies) {
     createSession: (accountId: string) => service.createSession(accountId),
     assertStrongPassword: (password: string, email: string) => Password.assertStrong(password, email),
     loginWithPassword: (email: string, password: string) => loginWithPasswordUseCase.execute(email, password),
+    loginWithOAuth: (login: OAuthLogin) => loginWithOAuthUseCase.execute(login),
     setPassword: (accountId: string, password: string) => service.setPassword(accountId, password),
     changePassword: (accountId: string, current: string | undefined, next: string, email: string) =>
       service.changePassword(accountId, current, next, email),

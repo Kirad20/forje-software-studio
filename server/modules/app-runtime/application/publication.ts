@@ -2,6 +2,10 @@ import { assertPublishable, suggestSlug, validateSlug } from "../domain/publicat
 import type { PublicationPorts } from "./ports.js";
 import type { Author } from "../domain/publication.js";
 
+/** A component schema nobody declares any more: kept with its data, and how to use or remove it. */
+export const retiredSchemaWarning = (schema: string) =>
+  `El esquema ${schema} ya no lo declara ningún componente: se conserva con sus datos, pero ningún servicio lo usa. Para recuperarlo, vuelve a poner "database": "${schema}" con sus migraciones; para mover sus datos, crea en el nuevo esquema una migración que los copie (las migraciones leen todos los esquemas).`;
+
 /** Every gate completes before the published snapshot is mutated. */
 export function createPublication(ports: PublicationPorts) {
   const projectLocks = new Map<string, Promise<void>>();
@@ -29,11 +33,12 @@ export function createPublication(ports: PublicationPorts) {
       const files = await ports.readAllFiles(projectId);
       assertPublishable(await ports.checkProject(files, projectId));
       assertPublishable([], await ports.scan(projectId, files));
-      await ports.applyMigrations(projectId, files);
+      const migrated = await ports.applyMigrations(projectId, files);
       await ports.ensureOwner(projectId);
       await ports.recordPublish(projectId, slug, files, author);
       await ports.scheduleProject(projectId);
-      return { slug, url: ports.appUrl(slug) };
+      const warnings = (migrated?.retired ?? []).map(retiredSchemaWarning);
+      return warnings.length ? { slug, url: ports.appUrl(slug), warnings } : { slug, url: ports.appUrl(slug) };
       });
     },
     unpublishProject(projectId: string) {

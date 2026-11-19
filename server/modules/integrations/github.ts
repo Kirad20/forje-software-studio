@@ -30,7 +30,7 @@ const sync = createGithubSyncService(githubRepository, githubGateway, {
   readAllFiles: (p) => ports().readAllFiles(p),
   writeFile: (p, path, content, actor, author) => ports().writeFile(p, path, content, actor, author),
   deleteFile: (p, path, actor) => ports().deleteFile(p, path, actor),
-  assertValidPath: (path) => ports().assertValidPath(path),
+  assertValidPath: (path, manifest) => ports().assertValidPath(path, manifest),
   recheckBuild: (p) => ports().recheckBuild(p),
   emitProject: (p, event) => ports().emitProject(p, event),
   subscribe: (p, listener) => ports().subscribe(p, listener),
@@ -56,7 +56,7 @@ export async function linkRepo(p: string, a: string, input: RepoSelection) {
   await githubAccountRepository.saveLink(p, a, selected.owner, selected.repo, selected.branch, selected.installationId);
   return syncProject(p, { message: "Conectar con Forja" });
 }
-const imports = createGithubImportService(githubGateway, { assertValidPath: (p) => ports().assertValidPath(p) }, apps.selectRepository, githubAccountRepository.saveLink);
+const imports = createGithubImportService(githubGateway, { assertValidPath: (p, manifest) => ports().assertValidPath(p, manifest) }, apps.selectRepository, githubAccountRepository.saveLink);
 export const { prepare: prepareImport, attach: attachImport } = imports;
 export async function handleWebhook(raw: string, signature?: string) {
   if (Buffer.byteLength(raw) > 2 * 1024 * 1024) throw new GithubError("Webhook demasiado grande.", 413);

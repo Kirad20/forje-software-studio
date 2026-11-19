@@ -8,12 +8,15 @@ import type { AppEnv } from "../domain/contracts.js";
 import type { ProjectDb } from "../ports/database.js";
 import { ProjectDbClient } from "./projectDbClient.js";
 import { PROJECT_CACHE_SCHEMA } from "./cache.js";
+import { dataRole, layoutMigrations, layoutOf } from "../../../../contracts/projectLayout.js";
 export type { ProjectDb } from "../ports/database.js";
 export type ProjectDbEnv = AppEnv;
 
 export interface ProjectMigration {
   path: string;
   sql: string;
+  /** Schema of the forja.json component that owns it; absent for the app's migrations/. */
+  schema?: string;
 }
 
 const remote = config.appDataServiceUrl
@@ -133,6 +136,20 @@ create table if not exists _forja_sessions (
   user_id text not null references _forja_users(id) on delete cascade,
   expires_at timestamptz not null,
   created_at timestamptz not null default now()
+);
+create table if not exists _forja_oauth_accounts (
+  provider text not null,
+  account_id text not null,
+  user_id text not null references _forja_users(id) on delete cascade,
+  email text,
+  created_at timestamptz not null default now(),
+  primary key (provider, account_id)
+);
+create index if not exists _forja_oauth_accounts_user on _forja_oauth_accounts (user_id);
+create table if not exists _forja_oauth_tickets (
+  key_hash text primary key,
+  user_id text not null references _forja_users(id) on delete cascade,
+  expires_at timestamptz not null
 );
 create table if not exists _forja_reset_codes (
   id serial primary key,
@@ -382,8 +399,86 @@ function assertRuntimeSql(sql: string) {
   }
 }
 
-export function projectDb(projectId: string, env: ProjectDbEnv = "published"): ProjectDb {
-  if (remote) return remote.forProject(projectId, env);
+// --- Database per service: a forja.json component's schema and the role its code runs as ----
+
+const SCOPE = /^[a-z][a-z0-9_]{0,40}$/;
+const ensuredScopes = new WeakMap<PGlite, Set<string>>();
+
+function assertScope(schema: string) {
+  if (!SCOPE.test(schema) || schema === "public" || schema === "information_schema" || schema.startsWith("pg_") || schema.startsWith("_forja")) {
+    throw new Error(`Esquema de componente no válido: ${schema}`);
+  }
+}
+
+/** Creates the schema and a role with rights on it only (tables created later included). Idempotent. */
+const scopeSetupSql = (schema: string) => {
+  const role = dataRole(schema);
+  return `create schema if not exists "${schema}";
+do $$ begin if not exists (select from pg_roles where rolname = '${role}') then create role "${role}" nologin; end if; end $$;
+grant usage, create on schema "${schema}" to "${role}";
+grant all on all tables in schema "${schema}" to "${role}";
+grant all on all sequences in schema "${schema}" to "${role}";
+alter default privileges in schema "${schema}" grant all on tables to "${role}";
+alter default privileges in schema "${schema}" grant all on sequences to "${role}";`;
+};
+
+async function ensureScope(db: PGlite, schema: string) {
+  if (ensuredScopes.get(db)?.has(schema)) return;
+  await db.exec(scopeSetupSql(schema));
+  (ensuredScopes.get(db) ?? ensuredScopes.set(db, new Set()).get(db)!).add(schema);
+}
+
+/**
+ * The connection belongs to a superuser, so set_config('role', ...) could switch back inside a
+ * statement: scoped code may not call it (nor hide it behind U&"..." identifiers).
+ */
+function assertScopedSql(sql: string) {
+  assertRuntimeSql(sql);
+  if (/set_config|u&\s*["']/i.test(sql)) throw new Error("ctx.db de un componente con base de datos propia no puede cambiar la configuración de la sesión.");
+}
+
+/** ctx.db of a component with "database": every statement runs as its role, inside its schema. */
+function scopedProjectDb(projectId: string, env: ProjectDbEnv, schema: string): ProjectDb {
+  assertScope(schema);
+  const enter = `set local role "${dataRole(schema)}"; set local search_path to "${schema}"`;
+  const inScope = <T>(fn: (tx: Pick<PGlite, "query" | "exec">) => Promise<T>) => run(projectId, env, async (db) => {
+    await ensureScope(db, schema);
+    return db.transaction(async (tx) => {
+      await tx.exec(enter);
+      return fn(tx);
+    });
+  });
+  const api: ProjectDb = {
+    query: async (sql, params = []) => {
+      assertScopedSql(sql);
+      return inScope(async (tx) => (await tx.query(sql, params)).rows as never);
+    },
+    one: async (sql, params = []) => (await api.query(sql, params))[0] as never,
+    exec: async (sql) => {
+      assertScopedSql(sql);
+      return inScope(async (tx) => void (await tx.exec(sql)));
+    },
+    transaction: (fn) => inScope((tx) => fn({
+      query: async (sql: string, params: unknown[] = []) => {
+        assertScopedSql(sql);
+        return (await tx.query(sql, params)).rows as never;
+      },
+      one: async (sql: string, params: unknown[] = []) => {
+        assertScopedSql(sql);
+        return (await tx.query(sql, params)).rows[0] as never;
+      },
+    })),
+  };
+  return api;
+}
+
+/**
+ * The project's database for one environment. With `scope` (the schema of a forja.json
+ * component with "database"), statements run as that component's role inside its schema.
+ */
+export function projectDb(projectId: string, env: ProjectDbEnv = "published", scope?: string): ProjectDb {
+  if (remote) return remote.forProject(projectId, env, scope);
+  if (scope) return scopedProjectDb(projectId, env, scope);
   const api: ProjectDb = {
     query: (sql, params = []) => {
       assertRuntimeSql(sql);
@@ -415,11 +510,15 @@ export function projectDb(projectId: string, env: ProjectDbEnv = "published"): P
 }
 
 /** Runs data SQL against preview; schema SQL must be applied through a tracked migration. */
-export async function execSql(projectId: string, sql: string, env: ProjectDbEnv = "preview") {
+export async function execSql(projectId: string, sql: string, env: ProjectDbEnv = "preview", scope?: string) {
   assertRuntimeSql(sql);
-  if (remote) return remote.execSql(projectId, sql, env);
+  if (scope) assertScope(scope);
+  if (remote) return remote.execSql(projectId, sql, env, scope);
   return run(projectId, env, async (db) => {
-    const results = await db.exec(sql);
+    if (scope) await ensureScope(db, scope);
+    const results = scope
+      ? await db.transaction(async (tx) => { await tx.exec(`set local search_path to "${scope}", public`); return tx.exec(sql); })
+      : await db.exec(sql);
     return results.map((r) => ({
       fields: r.fields.map((f) => f.name),
       rows: r.rows,
@@ -429,32 +528,52 @@ export async function execSql(projectId: string, sql: string, env: ProjectDbEnv 
 }
 
 const MIGRATION_PATH = /^migrations\/\d+_[A-Za-z0-9_.$-]+\.sql$/;
+/** `<component root><migrations folder>/<n>_<name>.sql` (folder "migrations" or mapped in forja.json), applied inside the component's schema. */
+const COMPONENT_MIGRATION_PATH = /^[a-z0-9][A-Za-z0-9._/$@()-]*\/\d+_[A-Za-z0-9_.$-]+\.sql$/;
 const checksum = (sql: string) => createHash("sha256").update(sql).digest("hex");
-const migrationVersion = (path: string) => BigInt(/^migrations\/(\d+)_/.exec(path)![1]!);
+const migrationVersion = (path: string) => BigInt(/(?:^|[/:])(\d+)_[^/:]*$/.exec(path)![1]!);
+/** Each set of migrations keeps its own order: the app's ("") and one per component schema. */
+const migrationTrack = (migration: Pick<ProjectMigration, "schema">) => migration.schema ?? "";
+/**
+ * Ledger key. The app's migrations by path, as always; a component's by schema + file name
+ * (`orders:migrations/001_x.sql`), so moving the component's folder keeps its history.
+ */
+const ledgerName = (migration: ProjectMigration) =>
+  migration.schema ? `${migration.schema}:migrations/${migration.path.slice(migration.path.lastIndexOf("/") + 1)}` : migration.path;
+const ledgerSchema = (name: string) => /^([a-z][a-z0-9_]*):migrations\//.exec(name)?.[1];
+
+/** Schemas the project's forja.json still declares (a component with "database"). */
+export function declaredSchemas(files: Record<string, string>): string[] {
+  return layoutOf(files).components.flatMap((c) => (c.database ? [c.database] : []));
+}
 
 function orderedMigrations(input: Record<string, string> | ProjectMigration[]): ProjectMigration[] {
-  const migrations = Array.isArray(input)
-    ? input
-    : Object.entries(input).filter(([path]) => path.startsWith("migrations/")).map(([path, sql]) => ({ path, sql }));
+  const migrations = Array.isArray(input) ? input : layoutMigrations(input, layoutOf(input));
   for (const migration of migrations) {
-    if (!MIGRATION_PATH.test(migration.path) || !migration.sql.trim()) throw new Error(`Migration no válida: ${migration.path}`);
+    const valid = migration.schema === undefined ? MIGRATION_PATH.test(migration.path) : COMPONENT_MIGRATION_PATH.test(migration.path);
+    if (!valid || !migration.sql.trim()) throw new Error(`Migration no válida: ${migration.path}`);
+    if (migration.schema !== undefined) assertScope(migration.schema);
   }
   const sorted = [...migrations].sort((a, b) => {
+    const at = migrationTrack(a), bt = migrationTrack(b);
+    if (at !== bt) return at < bt ? -1 : 1;
     const av = migrationVersion(a.path);
     const bv = migrationVersion(b.path);
     return av < bv ? -1 : av > bv ? 1 : a.path.localeCompare(b.path);
   });
   if (new Set(sorted.map(({ path }) => path)).size !== sorted.length) throw new Error("Hay rutas de migración duplicadas.");
   for (let i = 1; i < sorted.length; i++) {
-    if (migrationVersion(sorted[i - 1]!.path) === migrationVersion(sorted[i]!.path)) {
+    if (migrationTrack(sorted[i - 1]!) === migrationTrack(sorted[i]!) && migrationVersion(sorted[i - 1]!.path) === migrationVersion(sorted[i]!.path)) {
       throw new Error("Cada migración debe tener un número de orden único.");
     }
   }
   return sorted;
 }
 
-async function applyProjectMigrationsLocal(projectId: string, input: Record<string, string> | ProjectMigration[], env: ProjectDbEnv) {
+async function applyProjectMigrationsLocal(projectId: string, input: Record<string, string> | ProjectMigration[], env: ProjectDbEnv, schemas?: string[]) {
   const migrations = orderedMigrations(input);
+  // A schema no component declares any more is retired: its data stays, its history stops gating.
+  const declared = new Set(schemas ?? (Array.isArray(input) ? migrations.flatMap((m) => (m.schema ? [m.schema] : [])) : declaredSchemas(input)));
   const queueKey = dbKey(projectId, env);
   const previous = migrationQueues.get(queueKey) ?? Promise.resolve();
   const current = previous.catch(() => {}).then(() => withProjectLock(projectId, async () => {
@@ -470,34 +589,71 @@ async function applyProjectMigrationsLocal(projectId: string, input: Record<stri
         "select migration_name, checksum from _forja_migrations order by migration_name",
       )).rows,
     );
-    const applied = new Map(appliedRows.map((row) => [row.migration_name, row.checksum]));
-    const byName = new Map(migrations.map((migration) => [migration.path, migration]));
-    for (const [path, hash] of applied) {
-      const currentMigration = byName.get(path);
-      if (!currentMigration) throw new Error(`No se puede publicar: la migración aplicada ${path} fue eliminada o renombrada.`);
-      if (checksum(currentMigration.sql) !== hash) throw new Error(`No se puede publicar: la migración aplicada ${path} fue modificada.`);
+    const byName = new Map(migrations.map((migration) => [ledgerName(migration), migration]));
+    const byPath = new Map(migrations.map((migration) => [migration.path, migration]));
+    // Component migrations recorded by path (before schema-based keys) move to their new key.
+    const rekeyed: [string, string][] = [];
+    const applied = new Map<string, string>();
+    for (const row of appliedRows) {
+      const legacy = !byName.has(row.migration_name) ? byPath.get(row.migration_name) : undefined;
+      if (legacy?.schema) rekeyed.push([row.migration_name, ledgerName(legacy)]);
+      applied.set(legacy?.schema ? ledgerName(legacy) : row.migration_name, row.checksum);
+    }
+    const retired = new Set<string>();
+    for (const [name, hash] of applied) {
+      const currentMigration = byName.get(name);
+      const schema = ledgerSchema(name);
+      if (!currentMigration) {
+        if (schema && !declared.has(schema)) { retired.add(schema); continue; }
+        if (schema) {
+          throw new Error(`No se puede publicar: la migración aplicada ${name.slice(schema.length + 1)} del esquema ${schema} ya no está en el proyecto. Un componente con "database": "${schema}" debe conservar todas sus migraciones aplicadas. Para retirar ese esquema, quita "database" del componente y borra sus migraciones: sus datos se conservan.`);
+        }
+        throw new Error(`No se puede publicar: la migración aplicada ${name} fue eliminada o renombrada.`);
+      }
+      if (checksum(currentMigration.sql) !== hash) {
+        throw new Error(`No se puede publicar: la migración aplicada ${currentMigration.path} fue modificada.${schema ? ` El esquema ${schema} ya la tiene aplicada: si reutilizas un esquema retirado, restaura sus migraciones originales o usa otro nombre de esquema.` : ""}`);
+      }
+    }
+    if (rekeyed.length) {
+      await runUnlocked(projectId, env, async (db) => {
+        for (const [from, to] of rekeyed) await db.query("update public._forja_migrations set migration_name = $2 where migration_name = $1", [from, to]);
+      });
     }
 
-    let latestApplied = appliedRows.reduce((latest, row) => {
-      const version = migrationVersion(row.migration_name);
-      return version > latest ? version : latest;
-    }, 0n);
+    const latestApplied = new Map<string, bigint>();
+    for (const name of applied.keys()) {
+      const schema = ledgerSchema(name);
+      if (schema && retired.has(schema)) continue;
+      const track = schema ?? "", version = migrationVersion(name);
+      if (version > (latestApplied.get(track) ?? 0n)) latestApplied.set(track, version);
+    }
     for (const migration of migrations) {
-      if (applied.has(migration.path)) continue;
+      if (applied.has(ledgerName(migration))) continue;
       const version = migrationVersion(migration.path);
-      if (version <= latestApplied) {
+      const track = migrationTrack(migration);
+      if (version <= (latestApplied.get(track) ?? 0n)) {
         throw new Error(`No se puede aplicar ${migration.path}: su orden debe ser posterior a las migraciones ya aplicadas.`);
       }
       const hash = checksum(migration.sql);
       await runUnlocked(projectId, env, async (db) => {
+        if (migration.schema) await ensureScope(db, migration.schema);
         await db.transaction(async (tx) => {
+          // A component's migration creates its tables inside its schema (public stays readable, e.g. _forja_users).
+          if (migration.schema) await tx.exec(`set local search_path to "${migration.schema}", public`);
           await tx.exec(migration.sql);
-          await tx.query("insert into _forja_migrations (migration_name, checksum) values ($1, $2)", [migration.path, hash]);
+          await tx.query("insert into public._forja_migrations (migration_name, checksum) values ($1, $2)", [ledgerName(migration), hash]);
         });
+        // Tables moved into the schema (alter table … set schema) get no default privileges: grant again.
+        if (migration.schema) {
+          ensuredScopes.get(db)?.delete(migration.schema);
+          await ensureScope(db, migration.schema);
+        }
       });
-      latestApplied = version;
+      latestApplied.set(track, version);
     }
-    return { applied: migrations.filter(({ path }) => !applied.has(path)).map(({ path }) => path) };
+    const result: { applied: string[]; retired?: string[] } = { applied: migrations.filter((m) => !applied.has(ledgerName(m))).map(({ path }) => path) };
+    if (retired.size) result.retired = [...retired].sort();
+    return result;
   }));
   migrationQueues.set(queueKey, current);
   try {
@@ -510,11 +666,16 @@ async function applyProjectMigrationsLocal(projectId: string, input: Record<stri
   }
 }
 
-/** Applies immutable, ordered migrations to the selected environment; each file and ledger entry commit atomically. */
-export async function applyProjectMigrations(projectId: string, input: Record<string, string> | ProjectMigration[], env: ProjectDbEnv = "preview") {
+/**
+ * Applies immutable, ordered migrations to the selected environment; each file and ledger entry
+ * commit atomically. `retired` lists component schemas no component declares any more: their
+ * data is kept and their applied migrations no longer gate publishing.
+ */
+export async function applyProjectMigrations(projectId: string, input: Record<string, string> | ProjectMigration[], env: ProjectDbEnv = "preview", schemas?: string[]): Promise<{ applied: string[]; retired?: string[] }> {
   const migrations = orderedMigrations(input);
-  if (remote) return remote.applyProjectMigrations(projectId, migrations, env);
-  return applyProjectMigrationsLocal(projectId, migrations, env);
+  const declared = schemas ?? (Array.isArray(input) ? undefined : declaredSchemas(input));
+  if (remote) return remote.applyProjectMigrations(projectId, migrations, env, declared);
+  return applyProjectMigrationsLocal(projectId, migrations, env, declared);
 }
 
 /** Full copy of one environment's database files, for Data export or internal duplication. */

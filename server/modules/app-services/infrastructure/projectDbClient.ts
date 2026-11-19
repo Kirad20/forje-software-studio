@@ -19,9 +19,10 @@ export class ProjectDbClient {
     if (!token) throw new Error("App data service token is required");
   }
 
-  forProject(projectId: string, env: AppEnv = "published"): ProjectDb {
+  /** `scope`: schema of a forja.json component with its own database (its role and schema apply). */
+  forProject(projectId: string, env: AppEnv = "published", scope?: string): ProjectDb {
     const request = <T>(operation: string, body: unknown) =>
-      this.request<T>(`${encodeURIComponent(projectId)}/${operation}`, { ...body as object, env });
+      this.request<T>(`${encodeURIComponent(projectId)}/${operation}`, { ...body as object, env, ...(scope ? { scope } : {}) });
     const api: ProjectDb = {
       query: <T = Record<string, unknown>>(sql: string, params: unknown[] = []) => request<T[]>("query", { sql, params }),
       one: async <T = Record<string, unknown>>(sql: string, params: unknown[] = []) => (await api.query<T>(sql, params))[0],
@@ -51,12 +52,13 @@ export class ProjectDbClient {
     return api;
   }
 
-  execSql(projectId: string, sql: string, env: AppEnv = "preview"): Promise<SqlExecutionResult[]> {
-    return this.request<SqlExecutionResult[]>(`${encodeURIComponent(projectId)}/exec-sql`, { sql, env });
+  execSql(projectId: string, sql: string, env: AppEnv = "preview", scope?: string): Promise<SqlExecutionResult[]> {
+    return this.request<SqlExecutionResult[]>(`${encodeURIComponent(projectId)}/exec-sql`, { sql, env, ...(scope ? { scope } : {}) });
   }
 
-  applyProjectMigrations(projectId: string, migrations: ProjectMigration[], env: AppEnv = "preview") {
-    return this.request<{ applied: string[] }>(`${encodeURIComponent(projectId)}/migrations/apply`, { migrations, env });
+  /** `schemas`: component schemas forja.json still declares; applied history of any other is retired. */
+  applyProjectMigrations(projectId: string, migrations: ProjectMigration[], env: AppEnv = "preview", schemas?: string[]) {
+    return this.request<{ applied: string[]; retired?: string[] }>(`${encodeURIComponent(projectId)}/migrations/apply`, { migrations, env, ...(schemas?.length ? { schemas } : {}) });
   }
 
   async dumpDatabase(projectId: string, env: AppEnv = "preview"): Promise<Blob> {

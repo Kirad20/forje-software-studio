@@ -1,24 +1,10 @@
 {
-  "4": "bootstrap/server.ts",
   "7": "projects/application/usecases.ts",
-  "13": "FusionOrchestrator.ts",
+  "11": "infrastructure/playground.ts",
   "16": "ProjectDb",
-  "18": "FileMap",
   "25": "server/index.ts",
+  "27": "modules/builder/index.ts",
   "32": "application/problems.ts",
-  "42": "app-services/context.ts",
-  "55": "skills.test.ts",
-  "71": "createJobs",
   "109": "accountLifecycle.ts",
-  "110": "IntegrationRepository",
-  "121": "PostgresProjectFileRepository",
-  "139": "services",
-  "154": ".execute",
-  "180": "CLAUDE.md",
-  "181": "Durable jobs worker",
-  "183": "service-worker.js",
-  "186": "{ BUILTIN_PACKAGES, MANIFEST, readDeps, writeDeps, isValidPackageName, packageName, isNodeBuiltin, depsDir, ensureDeps, resolvePackage, withManifestLock }",
-  "187": "{ publishProject, unpublishProject }",
-  "188": "{ quickScan, findSecret, formatFinding }",
-  "189": "TEST_DATABASE_URL"
+  "121": "PostgresProjectFileRepository"
 }

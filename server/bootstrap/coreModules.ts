@@ -9,6 +9,7 @@ import {
   PostgresAccountRepository,
   PostgresApiTokenRepository,
   PostgresLoginCodeRepository,
+  PostgresOAuthIdentityRepository,
   PostgresPasswordResetRepository,
   PostgresSessionRepository,
   createIdentityModule,
@@ -111,6 +112,7 @@ export function createCoreModules(dependencies: CoreModulesDependencies) {
     },
     accountRepository,
     loginCodes: new PostgresLoginCodeRepository(),
+    oauthIdentities: new PostgresOAuthIdentityRepository(),
     bootstrapCrypto: new NodeBootstrapCrypto(),
     bootstrapPolicy: { bootstrapToken: config.bootstrapToken, publicUrl: config.publicUrl },
     claimInvites: async (accountId, email) => {

@@ -42,6 +42,7 @@ function fixture() {
       policy,
     } as never,
     accountRepository: {} as never,
+    oauthIdentities: { findAccountId: vi.fn(), link: vi.fn() },
     loginCodes: { saveCode: vi.fn(), findCode: vi.fn(), incrementAttempts: vi.fn(), deleteCode: vi.fn() },
     bootstrapCrypto: { generate: () => "token", hash: (value) => value, matches: (a, b) => a === b },
     bootstrapPolicy: { bootstrapToken: "a-bootstrap-token-that-is-long-enough", publicUrl: "https://example.test" },

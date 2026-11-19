@@ -22,6 +22,7 @@ WORKDIR /app
 # tsx runs the server from source, so the full node_modules travels (it is a dev dependency).
 COPY --from=deps /app/node_modules ./node_modules
 COPY package.json package-lock.json tsconfig.json ./
+COPY contracts ./contracts
 COPY server ./server
 COPY sdk ./sdk
 COPY --from=build /app/dist ./dist

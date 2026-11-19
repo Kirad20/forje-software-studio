@@ -14,7 +14,9 @@ Content-Type: application/json
 {"name":"Orders demo","template":"orders-invoices"}
 ```
 
-`template` accepts `monolith` or `orders-invoices`; an unknown value is rejected
+`template` accepts `monolith`, `orders-invoices` or `components` (the same idea with
+`forja.json` components: an admin frontend, an orders API, a billing worker and a shared
+library; see [plan-arquitecturas-reales.md](plan-arquitecturas-reales.md)); an unknown value is rejected
 with HTTP 400 before creating a project. Omitting it preserves existing behavior.
 The Studio client supports
 `projectsController.createProject("Orders demo", { template: "orders-invoices" })`.

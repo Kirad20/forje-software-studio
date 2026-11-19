@@ -129,6 +129,7 @@ apps generadas ──▶ app-runtime: pv-<id> (vista previa) / <slug> (publicada
 ```
 
 - **Proyecto** = árbol de archivos virtual guardado en la BD de la plataforma: `pages/`, `components/`, `helpers/`, `endpoints/<ruta>_GET|POST.ts`, `jobs/`, `static/`, `base.css`. No hay disco por proyecto; esbuild compila directo desde la BD.
+- **Componentes** (`forja.json`, opcional): arquitecturas reales en un monorepo. Cada componente vive en su carpeta (`apps/admin/`, `services/orders/`, `packages/domain/`) y es `web` (frontend propio en su `mount`, p. ej. `/admin`), `api` (endpoints en `/_api/<route>/…`), `worker` (tareas `<componente>.<tarea>`) o `library` (código compartido, `~/packages/<lib>/…`); dentro reutiliza las convenciones nativas más carpetas libres para sus capas (`domain/`, `application/`, `infrastructure/`). `replicas`/`maxConcurrency` dan a una api o worker su propio pool de procesos, y `"database": true` su propio esquema de Postgres con un rol que solo puede usar ese esquema (base de datos por servicio; migraciones en `<root>migrations/`). **Exportar para producción** (Ajustes del proyecto) genera un `docker-compose` con Postgres, migraciones, un contenedor por servicio y un gateway nginx, que funciona sin Forja (`npm run test:export`). Sin `forja.json` todo funciona exactamente igual: la raíz es el componente implícito `app`, y se puede seguir trabajando así. Para migrar un proyecto legacy por contextos, el agente y el MCP tienen `architecture_migration_plan` y `extract_component` (rutas y nombres de tareas se conservan). Un proyecto con otra estructura se mapea sin moverlo: `paths` y `conventions` por componente en `forja.json` (p. ej. páginas en `src/routes` como `posts/[id].tsx`, endpoints `create.post.ts`, estáticos en `public`), patrones en `forja.services.json`, y `check_manifest` para probar el mapeo antes de guardarlo. La fuente de verdad es `contracts/projectLayout.ts`; plantilla «arquitectura por componentes», `npm run test:e2e:components` y plan en [docs/plan-arquitecturas-reales.md](docs/plan-arquitecturas-reales.md).
 - **Cada app vive en su propio origen**, así su código nunca toca la sesión del studio. Dentro del iframe del studio sus cookies van particionadas (CHIPS).
 - **Base de datos**: un Postgres 18 embebido (PGlite) por proyecto, compartido por vista previa y app publicada. Se "duerme" tras 60 s sin consultas y despierta en la siguiente.
 - **Equipo de agentes**: cada mensaje pasa por un análisis (heurística + clasificador barato si hace falta). Los cambios pequeños van por la vía rápida (un agente). Los grandes los planifica un agente que reparte tareas con dependencias y archivos propios entre especialistas de **datos**, **backend** e **interfaz**, que trabajan **en paralelo** (cada uno solo puede escribir sus archivos); después un agente de **revisión** compila, prueba y devuelve arreglos (hasta 2 rondas). El chat muestra un carril por agente con su modelo, pasos, tokens y coste.
@@ -154,7 +155,7 @@ apps generadas ──▶ app-runtime: pv-<id> (vista previa) / <slug> (publicada
 | Postgres gestionado que se duerme | PGlite por proyecto, duerme a los 60 s | ✅ (embebido, no Neon) |
 | Pestaña Data: navegar, SQL, exportar | Datos: tablas, consola SQL, exportar | ✅ (export = tar del data dir, no pg_dump) |
 | Auth email/contraseña, bloqueo, reset con código de 8 dígitos, admin del dueño | Igual | ✅ |
-| Google/Microsoft sign-in gestionado | — | ❌ falta |
+| Google/Microsoft sign-in gestionado | Better Auth: Google, Facebook, GitHub, Apple, Microsoft y los demás proveedores integrados, más cualquier servicio OIDC u OAuth 2.0 (`forja.auth.json`, `setup_oauth`, `auth.signInWith`); también en el login del Studio. Ver [docs/oauth.md](docs/oauth.md) | ✅ (credenciales propias de cada app, no gestionadas) |
 | Storage con CDN, 100 MB/archivo | Disco local, 100 MB/archivo y 1 GB/proyecto | ⚠️ sin CDN/S3 |
 | Correo con sandbox hasta verificar dominio | Igual; SMTP opcional | ⚠️ la verificación DNS es manual (botón) |
 | Correo entrante | Endpoint de ingreso + registro | ⚠️ sin MX real |
@@ -175,7 +176,7 @@ El panel Datos expone `GET /api/projects/:id/db/metrics` con aperturas, errores 
 tiempo acumulado en cola y duración de operaciones; son acumulados del proceso, no percentiles.
 
 El storage sigue en disco local; la cuota inicial es 1 GB por proyecto y 100 MB por archivo.
-OAuth de Google/Microsoft, entrega entrante con MX real, S3/CDN, embeddings/voz, Stripe
+Entrega entrante con MX real, S3/CDN, embeddings/voz, Stripe
 Connect y presencia duradera no están habilitados por estas APIs.
 | Checkpoints: línea de tiempo por cambio con autor, restaurar a cualquier punto | Registro de cambios (Constructor/Tú/Agente MCP), checkpoints con nombre, marca de publicación; restaurar es deshacible | ✅ |
 | Publicar a subdominio, despublicar, app privada | `<slug>.localhost`, privada por token | ✅ |

@@ -213,6 +213,7 @@ export function Dashboard() {
           <select disabled={busy} value={template} onChange={(e) => setTemplate(e.target.value as NonNullable<CreateProjectOptions["template"]>)}>
             <option value="monolith">Proyecto vacío (monolito)</option>
             <option value="orders-invoices">Ejemplo: API de pedidos + worker de facturas</option>
+            <option value="components">Ejemplo: arquitectura por componentes (panel /admin, API, worker y librería)</option>
           </select>
         </label>
         <div className="idea-bar">

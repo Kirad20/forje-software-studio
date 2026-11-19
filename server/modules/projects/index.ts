@@ -3,12 +3,14 @@ import { ProjectsApplication, isDevFile } from "./application/ProjectsApplicatio
 import { RenameFileUseCase } from "./application/RenameFileUseCase.js";
 import { WriteFileUseCase } from "./application/WriteFileUseCase.js";
 import { ProjectPath } from "./domain/ProjectPath.js";
+import { NATIVE_LAYOUT, parseLayout } from "../../../contracts/projectLayout.js";
 import { Project as ProjectEntity } from "./domain/Project.js";
 import type { Author, IProjectFileRepository } from "./ports/repositories.js";
 import type { ProjectsStore, ProjectServices } from "./ports/projects.js";
 import type { StarterTemplate } from "./domain/StarterTemplate.js";
 import { starterFiles as monolithStarterFiles, parseStarterTemplate } from "./domain/StarterTemplate.js";
 import { ordersInvoicesFiles } from "./infrastructure/OrdersInvoicesStarter.js";
+import { componentsStarterFiles } from "./infrastructure/ComponentsStarter.js";
 
 export * from "./domain/ProjectPath.js";
 export * from "./domain/Checkpoint.js";
@@ -17,6 +19,7 @@ export type { StarterTemplate } from "./domain/StarterTemplate.js";
 export function starterFiles(name: string, template?: StarterTemplate): Record<string, string> {
   parseStarterTemplate(template);
   const files = monolithStarterFiles(name);
+  if (template === "components") return { ...files, ...componentsStarterFiles() };
   return template === "orders-invoices" ? { ...files, ...ordersInvoicesFiles() } : files;
 }
 export * from "./ports/repositories.js";
@@ -43,7 +46,8 @@ export function createProjectsModule(dependencies: ProjectsModuleDependencies) {
   return {
     application,
     isDevFile,
-    assertValidPath: ProjectPath.assertValid,
+    /** `manifest`: source of a forja.json (e.g. from a repository) whose component folders are valid too; throws when it is invalid. */
+    assertValidPath: (path: string, manifest?: string) => ProjectPath.assertValid(path, manifest === undefined ? NATIVE_LAYOUT : parseLayout(manifest)),
     createProject: (ownerId: string, name: string, description = "", files?: Parameters<typeof application.createProject>[3], orgId?: string, template?: StarterTemplate) =>
       application.createProject(ownerId, name, description, files, orgId, template),
     duplicateProject: (ownerId: string, sourceId: string) => application.duplicateProject(ownerId, sourceId),

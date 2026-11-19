@@ -1,4 +1,5 @@
 import { BUILDER_SYSTEM_PROMPT, BUILTIN_SKILLS, renderSkill } from "../../modules/builder/index.js";
+import { BUILTIN_OAUTH_PROVIDERS } from "../../../contracts/oauthProviders.js";
 
 /**
  * Topic guides for external MCP agents, cut from the builder's manual so there is one
@@ -70,6 +71,58 @@ Sin forja.services.json, todos los endpoints y jobs corren en el monolito existe
 Las réplicas aíslan pools de procesos por proyecto, entorno y servicio, pero todos los servicios de un entorno comparten la misma base de datos de la app. No son contenedores independientes, no exponen listeners de red propios y no proporcionan gRPC. Cambiar réplicas no crea bases de datos ni cambia rutas HTTP: siguen bajo /_api/.
 
 En Studio, Servicios → Centro de control muestra la topología y permite ajustar escala y reiniciar pools locales del app-runtime. Esto no reinicia workers remotos ni demuestra su estado de salud. Lee docs/project-services.md antes de diseñar o modificar una topología.`,
+  },
+  {
+    id: "social-auth",
+    title: "Inicio de sesión con redes sociales y OAuth (Better Auth)",
+    summary: "Google, Facebook, GitHub, Apple, Microsoft… y cualquier servicio OIDC u OAuth 2.0 con forja.auth.json, setup_oauth y auth.signInWith.",
+    body: `# Redes sociales y OAuth (forja.auth.json)
+
+Los usuarios de la app pueden entrar con cualquier proveedor que trae Better Auth (${BUILTIN_OAUTH_PROVIDERS.join(", ")}) y con cualquier servicio OpenID Connect u OAuth 2.0. Llegan a las mismas cuentas que el correo y la contraseña: useUser(), ctx.requireUser() y los roles no cambian.
+
+Configúralo con setup_oauth (solo si el dueño lo pide): providers: ["google", "facebook"] para los integrados y providers_json para el resto:
+- OIDC: { "empresa": { "type": "oidc", "name": "Empresa", "discoveryUrl": "https://sso.empresa.com/.well-known/openid-configuration" } }
+- OAuth 2.0: { "strava": { "type": "oauth2", "authorizationUrl": "…", "tokenUrl": "…", "userInfoUrl": "…", "scopes": ["read"], "profile": { "id": "id", "email": "email", "name": "firstname", "image": "profile" } } } (rutas con puntos para perfiles anidados: "data.user.email").
+Opcionales: name (texto del botón), scopes, options (se pasan tal cual al proveedor: tenantId, prompt, hd…), secretOptions ({ opción: SECRETO }), clientIdSecret / clientSecretSecret (nombres de los secretos), public (cliente sin secreto, con PKCE), pkce, authentication ("basic" | "post"), trustEmail, y signUp: false en la raíz para que el acceso social no cree cuentas.
+
+setup_oauth escribe forja.auth.json, crea la cuenta admin del dueño, pide los secretos <ID>_CLIENT_ID y <ID>_CLIENT_SECRET (las credenciales nunca van en el archivo) y devuelve las URL de redirección que el dueño registra en cada proveedor: <origen de la app>/_baas/auth/oauth/callback/<id>, una para la vista previa y otra para la app publicada.
+
+En la página de login: auth.providers() devuelve los proveedores con secretos configurados ([{ id, name }]); un botón por proveedor con auth.signInWith(id, { redirectTo }). En la vista previa del studio abre una ventana emergente y resuelve con el usuario; publicada, sale de la página y vuelve con la sesión. Si algo falla, vuelve con el motivo: auth.oauthError().
+
+Seguridad: la misma cuenta del proveedor siempre llega al mismo usuario; un primer acceso solo se une a una cuenta existente con ese correo si el proveedor lo verifica (o es un proveedor que solo comparte correos confirmados: Google, Apple, Microsoft, Facebook, GitHub, GitLab). Si el proveedor no comparte el correo, el acceso se rechaza con el motivo. Lee docs/oauth.md.`,
+  },
+  {
+    id: "components",
+    title: "Componentes: varios frontends, APIs, workers y librerías (forja.json)",
+    summary: "Monorepo real: componentes web/api/worker/library en carpetas propias, rutas, procesos propios y reglas de validación.",
+    body: `# Componentes (forja.json)
+
+Sin forja.json, la app es un único componente implícito (app) con pages/, components/, helpers/, endpoints/ y jobs/ en la raíz, como siempre.
+
+Con forja.json (version 1) se declaran hasta 32 componentes, cada uno en su carpeta:
+
+- web: frontend propio servido en su mount (\`/admin\`); tiene pages/ (con _layout.tsx y _404.tsx), static/ (en \`<mount>/static/\`), base.css y carpetas libres (features/, components/).
+- api: endpoints/<accion>_GET|POST.ts servidos en \`/_api/<route>/<accion>\` (route = nombre por defecto) y jobs/; carpetas libres para sus capas (domain/, application/, ports.ts, infrastructure/).
+- worker: solo jobs/, que se encolan como \`<componente>.<tarea>\`.
+- library: código compartido; se importa con \`~/packages/<lib>/...\`.
+
+Reglas: escribe forja.json antes que los archivos del componente (las rutas fuera de las carpetas declaradas se rechazan); las carpetas no pueden empezar por pages, components, helpers, endpoints, jobs, static, migrations, src ni solaparse; los mounts y prefijos de ruta son únicos. replicas (1–8) y maxConcurrency (1–32) en api/worker dan al componente su propio pool de procesos, visible y escalable en Servicios → Centro de control. Un forja.json inválido falla la compilación con el motivo.\n\nBase de datos por servicio: \`\"database\": true\` (o un nombre de esquema) en una api o worker le da un esquema Postgres propio; su ctx.db se ejecuta con un rol que solo puede usar ese esquema (las tablas de la app y de otros servicios dan \"permission denied\"). Sus migraciones viven en \`<root>migrations/\` con numeración propia; créalas con execute_sql y component. Los componentes sin database y la app usan migrations/ de la raíz. En Datos, sus tablas aparecen como esquema.tabla. Mover la carpeta del componente conserva su historial (se registra por esquema y archivo). Para retirar su base de datos, quita \"database\" y borra sus migraciones: el esquema queda retirado con sus datos intactos y la publicación lo avisa; volver a declararlo con sus migraciones lo recupera.\n\nExportar para producción (Ajustes del proyecto) genera un docker-compose con Postgres, un paso de migraciones, un contenedor por servicio (con su rol de base de datos) y un gateway nginx con cada frontend; funciona sin Forja, salvo los servicios de plataforma (inicio de sesión, archivos, correo, IA, tiempo real y pagos), que responden 501. Lee docs/plan-arquitecturas-reales.md.\n\nMapear otra estructura: cada componente puede declarar \`paths\` (web: pages, components, static, styles; api: endpoints, jobs, migrations; worker: jobs, migrations), carpetas relativas a su root (pages y endpoints admiten "" para la raíz del componente), y \`conventions\` (web: pages "dots" = posts.$id.tsx o "folders" = posts/[id].tsx con index.tsx; api: endpoints "suffix" = create_POST.ts, "dot" = create.post.ts o "folders" = create/POST.ts). Los estáticos se sirven siempre en \`<mount>/static/\` aunque la carpeta sea, por ejemplo, public. La raíz puede ser src (no src/main ni src/test, que son de Spring). forja.services.json acepta patrones en endpoints y jobs ("backend/handlers/**/*.post.ts"; * dentro de una carpeta, ** a cualquier profundidad). Prueba un manifiesto antes de guardarlo con check_manifest (forja_json y/o forja_services_json): muestra qué sirve cada componente, los servicios expandidos, los problemas y los archivos que quedan fuera, sin escribir nada. Después guárdalo con write_file (el agente puede editar los dos manifiestos) y comprueba con check_build. Un repositorio de GitHub con otro framework se importa si trae un forja.json que lo mapee.`,
+  },
+  {
+    id: "legacy-migration",
+    title: "Migrar un proyecto legacy a componentes",
+    summary: "Seguir trabajando con la estructura legacy o migrar por contextos con architecture_migration_plan y extract_component, sin romper rutas ni tareas.",
+    body: `# Migrar un proyecto legacy a componentes
+
+Un proyecto legacy (sin forja.json, con todo en pages/, components/, helpers/, endpoints/ y jobs/, con o sin forja.services.json) sigue funcionando igual: no hace falta migrarlo. Migra solo cuando el dueño pida servicios separados, un monorepo o una base de datos por servicio, y de un contexto en uno.
+
+1. architecture_migration_plan (solo lectura): un componente por contexto (endpoints/<contexto>/, helpers/<contexto>/ y los servicios de forja.services.json). Muestra qué va a services/<contexto>/, qué va a una library en packages/<contexto>/ (lo que importan las páginas), las rutas, las tareas, las tablas exclusivas o compartidas y los avisos.
+2. Resuelve antes los avisos que bloquean: prefijos de ruta que no se pueden conservar, adaptadores de servidor importados desde páginas e imports entre contextos.
+3. extract_component con un contexto: mueve los archivos, reescribe los imports, declara el componente en forja.json y quita esos archivos de forja.services.json heredando réplicas y concurrencia. Compila el resultado antes de escribir y lo deshace todo si algo falla. Las rutas /_api/<contexto>/… y los nombres de las tareas no cambian (legacyJobNames).
+4. Verifica con check_build, call_endpoint en cada ruta movida y get_problems antes de extraer el siguiente.
+5. Base de datos por servicio, como paso aparte: extract_component con database: true y move_tables con las tablas que solo usa ese contexto; genera una migración que las mueve a su esquema (en vista previa al momento, en producción al publicar). Las compartidas tienen que dejar de usarse desde fuera primero.
+
+Las páginas siguen en la app. Pasar un frontend a un componente web cambia sus URLs (su mount): hazlo solo si el dueño lo pide. Lee la guía "components" para el formato de forja.json.`,
   },
   {
     id: "durable-workers",

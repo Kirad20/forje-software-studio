@@ -43,6 +43,19 @@ describe("Projects File Use Cases (TDD)", () => {
       expect(fileRepo.writeFile).not.toHaveBeenCalled();
     });
 
+    it("writes free folders inside forja.json component roots and refuses an invalid manifest", async () => {
+      const manifest = JSON.stringify({ version: 1, components: { admin: { kind: "web", root: "apps/admin" } } });
+      vi.spyOn(fileRepo, "readFile").mockImplementation(async (_p, path) => (path === "forja.json" ? manifest : undefined));
+      const useCase = new WriteFileUseCase(fileRepo);
+      await useCase.execute("p1", "apps/admin/features/users/UsersTable.tsx", "export {}", "builder");
+      expect(fileRepo.writeFile).toHaveBeenCalledWith("p1", "apps/admin/features/users/UsersTable.tsx", "export {}");
+      await expect(useCase.execute("p1", "apps/site/x.tsx", "x", "builder")).rejects.toThrow("Ruta no válida");
+      await expect(useCase.execute("p1", "forja.json", "{\"version\":1}", "builder")).rejects.toThrow("forja.json");
+      const next = JSON.stringify({ version: 1, components: { admin: { kind: "web", root: "apps/admin", mount: "/panel" } } });
+      await useCase.execute("p1", "forja.json", next, "builder");
+      expect(fileRepo.writeFile).toHaveBeenCalledWith("p1", "forja.json", next);
+    });
+
     it("persists Spring backend files written through MCP with their change history", async () => {
       const useCase = new WriteFileUseCase(fileRepo);
       const files = {

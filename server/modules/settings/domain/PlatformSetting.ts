@@ -1,4 +1,4 @@
-export type SettingGroup = "accounts" | "credits" | "models" | "email" | "payments" | "github" | "observability" | "runtime" | "evals";
+export type SettingGroup = "accounts" | "auth" | "credits" | "models" | "email" | "payments" | "github" | "observability" | "runtime" | "evals";
 export type PlatformSettingType = "string" | "url" | "number" | "boolean" | "enum" | "secret" | "list";
 
 export interface SettingDef {

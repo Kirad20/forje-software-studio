@@ -47,8 +47,9 @@ it("uses the production PGlite repository for signup, sessions, lockout and tran
       getTransport: () => null, emailFrom: () => "platform@example.test", log: vi.fn(),
     });
     const sendEmail = vi.fn(email.sendEmail);
+    const authRepository = createAuthRepository(db);
     const api = createAuth({
-      projectDb: () => createAuthRepository(db), sendEmail,
+      projectDb: () => authRepository, sendEmail,
       projectOwnerEmail: async (id) => (await repository.one<{ email: string }>("authProjectOwner", [id]))!.email,
       log: vi.fn(),
       hashPassword, verifyPassword, sha256, newId, newToken, numericCode: () => "12345678",
@@ -75,11 +76,31 @@ it("uses the production PGlite repository for signup, sessions, lockout and tran
     expect(await api.userFromSession("p", signed.token)).toBeNull();
     await expect(api.confirmPasswordReset("p", { email: "user@example.com", code: "12345678", password: "new-password" })).rejects.toThrow("código");
     await expect(api.signIn("p", { email: "user@example.com", password: "new-password" })).resolves.toHaveProperty("token");
+    const testUser = await api.createTestUser("p", { email: " Test.User@Example.com ", name: "  Test User  " });
+    expect(testUser).toMatchObject({ email: "test.user@example.com", name: "Test User", role: "user" });
+    expect(await authRepository.one("authSignInUser", ["test.user@example.com"])).toMatchObject({ password_hash: null });
+    await expect(api.createTestUser("p", { email: "test.user@example.com" })).rejects.toMatchObject({ status: 409 });
     const preview = await api.testSession("p", "user@example.com");
     expect(await api.userFromSession("p", preview.token)).toEqual(signed.user);
     await api.endSession("p", preview.token);
     expect(await api.userFromSession("p", preview.token)).toBeNull();
+    const testSession = await api.testSession("p", testUser.email);
+    expect(await api.userFromSession("p", testSession.token)).toEqual(testUser);
+    await api.endSession("p", testSession.token);
+    expect(await api.userFromSession("p", testSession.token)).toBeNull();
   } finally {
     await pg.close();
   }
 }, 30_000);
+
+it("disables test-user creation in production without touching the app database", async () => {
+  const projectDb = vi.fn();
+  const api = createAuth({ projectDb } as any);
+  vi.stubEnv("NODE_ENV", "production");
+  try {
+    await expect(api.createTestUser("p", { email: "test@example.com" })).rejects.toMatchObject({ status: 403 });
+    expect(projectDb).not.toHaveBeenCalled();
+  } finally {
+    vi.unstubAllEnvs();
+  }
+});

@@ -41,6 +41,9 @@ jobs:
       - run: npm test
       - run: npm run test:pwa
       - run: npm run test:e2e
+      - run: npm run test:e2e:components
+      - run: npm run test:export
+      - run: npm run test:e2e:oauth
       - run: npm run test:agents
       - run: npm run test:github
       - run: npm run test:github-ui

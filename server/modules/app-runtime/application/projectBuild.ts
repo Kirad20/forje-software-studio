@@ -1,9 +1,12 @@
 import type { BuildProblem, FileMap } from "../domain/publication.js";
 import { endpointRoutes, exampleFiles, jobFiles, readJobSettings } from "../domain/routes.js";
 import { readProjectServices, SERVICES_MANIFEST } from "../domain/services.js";
+import { COMPONENTS_MANIFEST, layoutProblems, safeLayout } from "../../../../contracts/projectLayout.js";
+import { AUTH_MANIFEST, safeOAuthConfig } from "../../../../contracts/oauthProviders.js";
 
 export interface ProjectCompilerPort {
-  client(files: FileMap): Promise<unknown>;
+  /** Browser bundle of a page component: the app when `component` is omitted, else a web component. */
+  client(files: FileMap, component?: string): Promise<unknown>;
   server(files: FileMap, entry: string): Promise<{ exports: string[] }>;
   examples(files: FileMap, file: string): Promise<unknown>;
   problems(error: unknown): BuildProblem[] | null;
@@ -16,10 +19,22 @@ export function createProjectCheck(compiler: ProjectCompilerPort) {
     try { readProjectServices(files); } catch (error) {
       problems.push({ file: SERVICES_MANIFEST, text: (error as Error).message });
     }
+    const { layout, error: layoutError } = safeLayout(files);
+    if (layoutError) problems.push({ file: COMPONENTS_MANIFEST, text: layoutError });
+    const oauthError = safeOAuthConfig(files[AUTH_MANIFEST]).error;
+    if (oauthError) problems.push({ file: AUTH_MANIFEST, text: oauthError });
+    problems.push(...layoutProblems(files, layout));
     try { await compiler.client(files); } catch (error) {
       const known = compiler.problems(error);
       if (!known) throw error;
       problems.push(...known);
+    }
+    for (const web of layout.components.filter((c) => c.kind === "web")) {
+      try { await compiler.client(files, web.name); } catch (error) {
+        const known = compiler.problems(error);
+        if (!known) throw error;
+        problems.push(...known);
+      }
     }
     for (const file of [...endpointRoutes(files).map((e) => e.file), ...jobFiles(files).map((j) => j.file)]) {
       try {

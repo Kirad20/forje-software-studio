@@ -4,6 +4,8 @@
  * review (builder/securityReview.ts) reads the code like a person would.
  */
 
+import { fileSide, layoutOf, type ProjectLayout } from "../../../../contracts/projectLayout.js";
+
 export type Severity = "critical" | "high" | "medium" | "low";
 
 export interface Finding {
@@ -21,8 +23,9 @@ export interface Finding {
 
 type FileMap = Record<string, string>;
 
-const isClient = (p: string) => p.startsWith("pages/") || p.startsWith("components/") || (p.startsWith("static/") && !p.startsWith("static/__dev/")) || p === "base.css";
-const isServer = (p: string) => p.startsWith("endpoints/") || p.startsWith("jobs/") || p.startsWith("helpers/");
+/** Client or server as the project layout says (native prefixes without forja.json; component kinds with it). */
+const isClient = (p: string, layout: ProjectLayout) => fileSide(p, layout) === "client";
+const isServer = (p: string, layout: ProjectLayout) => fileSide(p, layout) === "server";
 const isCode = (p: string) => /\.(tsx?|jsx?|mjs|html|css|json)$/.test(p) && !p.endsWith(".spec.ts") && !p.endsWith(".example.tsx");
 
 const SECRETS: { name: string; re: RegExp }[] = [
@@ -52,10 +55,11 @@ export function quickScan(files: FileMap, fingerprint: (...parts: string[]) => s
   const out: Finding[] = [];
   const add = (f: Omit<Finding, "id" | "source">, snippet: string) => out.push({ ...f, id: fingerprint(f.rule, f.file ?? "", snippet.trim().replace(/\s+/g, " ")), source: "quick" });
 
+  const layout = layoutOf(files);
   for (const [path, text] of Object.entries(files)) {
     if (text.startsWith("base64:") || !isCode(path)) continue;
-    const client = isClient(path);
-    const server = isServer(path);
+    const client = isClient(path, layout);
+    const server = isServer(path, layout);
 
     for (const s of SECRETS) {
       const m = s.re.exec(text);

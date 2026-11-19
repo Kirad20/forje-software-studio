@@ -14,6 +14,15 @@ export interface AppUser {
   role: string;
 }
 
+/** What a provider said about the person after a social or OAuth sign-in (see server/shared/oauth.ts). */
+export interface OAuthIdentity {
+  provider: string;
+  accountId: string;
+  email: string | null;
+  emailVerified: boolean;
+  name: string | null;
+}
+
 const SESSION_DAYS = AUTH_POLICY.sessionDays;
 const MAX_FAILED = AUTH_POLICY.maxFailed;
 const LOCK_MINUTES = AUTH_POLICY.lockMinutes;
@@ -41,6 +50,19 @@ async function createAppUser(projectId: string, input: { email: string; password
   ));
   if (!user) throw new AuthError("Ya existe una cuenta con ese correo.", 409);
   return user;
+}
+
+async function createTestUser(projectId: string, input: { email: string; name?: string }): Promise<AppUser> {
+  if (process.env.NODE_ENV === "production") throw new AuthError("La creación de usuarios de prueba no está disponible en producción.", 403);
+  const email = normalizeEmail(input.email);
+  const db = projectDb(projectId, "preview");
+  if (await db.one("authEmailExists", [email])) {
+    throw new AuthError("Ya existe una cuenta con ese correo.", 409);
+  }
+  return (await db.one<AppUser>(
+    "authCreateUser",
+    [newId(), email, input.name?.trim() || null, null],
+  ))!;
 }
 
 async function signIn(projectId: string, input: { email: string; password: string }, env: AppEnv = "published") {
@@ -185,6 +207,61 @@ async function endSession(projectId: string, token: string, env: AppEnv = "previ
   await projectDb(projectId, env).query("authDeleteSession", [sha256(token)]);
 }
 
+/**
+ * Signs in with a provider identity. The same provider account always reaches the same
+ * user; a first sign-in joins the account with that address only when the provider
+ * vouches for it (verified, or a provider that only shares confirmed addresses), so nobody
+ * can take over an email/password account through a provider that does not check emails.
+ */
+async function signInWithOAuth(
+  projectId: string,
+  identity: OAuthIdentity,
+  policy: { trustEmail: boolean; signUp: boolean },
+  env: AppEnv = "published",
+) {
+  if (!identity.provider || !identity.accountId) throw new AuthError("El proveedor no identificó la cuenta.", 400);
+  if (!identity.email) throw new AuthError("El proveedor no compartió tu correo; permite el acceso al correo e inténtalo de nuevo.", 400);
+  const email = normalizeEmail(identity.email);
+  const db = projectDb(projectId, env);
+  let user = await db.one<AppUser>("authOAuthUser", [identity.provider, identity.accountId]);
+  if (!user) {
+    const existing = await db.one<AppUser>("authFindUser", [email]);
+    if (existing) {
+      if (!(identity.emailVerified || policy.trustEmail)) {
+        throw new AuthError("Ya existe una cuenta con ese correo. Entra con tu contraseña.", 409);
+      }
+      user = existing;
+    } else {
+      if (!policy.signUp) throw new AuthError("Esta app no permite crear cuentas con este proveedor.", 403);
+      user = (await db.one<AppUser>("authCreateUser", [newId(), email, identity.name?.trim().slice(0, 200) || null, null]))
+        ?? (await db.one<AppUser>("authFindUser", [email]));
+      if (!user) throw new AuthError("No se pudo crear la cuenta.", 409);
+    }
+    await db.query("authLinkOAuthAccount", [identity.provider, identity.accountId, user.id, email]);
+  }
+  return { user, token: await createSession(projectId, user.id, env) };
+}
+
+/**
+ * Preview runs inside the studio's iframe, where the provider can only be opened in a popup
+ * whose cookies the iframe cannot see. The popup leaves a ticket under a key only the
+ * iframe knows; the iframe trades it for its own session (once, within 5 minutes).
+ */
+async function createOAuthTicket(projectId: string, key: string, userId: string, env: AppEnv = "preview") {
+  const db = projectDb(projectId, env);
+  await db.query("authPurgeOAuthTickets", []);
+  await db.query("authCreateOAuthTicket", [sha256(key), userId]);
+}
+
+async function takeOAuthTicket(projectId: string, key: string, env: AppEnv = "preview") {
+  const db = projectDb(projectId, env);
+  const row = await db.one<{ user_id: string }>("authTakeOAuthTicket", [sha256(key)]);
+  if (!row) return null;
+  const user = await db.one<AppUser>("authUserById", [row.user_id]);
+  if (!user) return null;
+  return { user, token: await createSession(projectId, user.id, env) };
+}
+
 async function setTemporaryPassword(projectId: string, email: string, password: string, env: AppEnv = "preview") {
   const db = projectDb(projectId, env);
   const r = await db.query("authTemporaryPassword", [
@@ -194,5 +271,5 @@ async function setTemporaryPassword(projectId: string, email: string, password: 
   if (!r.length) throw new AuthError("No existe ese usuario.", 404);
 }
 
-return { signUp, signIn, userFromSession, signOut, requestPasswordReset, confirmPasswordReset, ensureOwnerAdmin, ensureProjectOwner, createAppUser, updateAppUserPassword, testSession, endSession, setTemporaryPassword };
+return { signUp, createTestUser, signIn, signInWithOAuth, createOAuthTicket, takeOAuthTicket, userFromSession, signOut, requestPasswordReset, confirmPasswordReset, ensureOwnerAdmin, ensureProjectOwner, createAppUser, updateAppUserPassword, testSession, endSession, setTemporaryPassword };
 }

@@ -139,6 +139,8 @@ export const TOOL_HINTS: Record<string, Hints> = {
   list_secrets: READ,
   security_scan: READ,
   check_standards: READ,
+  architecture_migration_plan: READ,
+  check_manifest: READ,
   load_skill: READ,
   get_preview_url: READ,
   write_file: WRITE,
@@ -147,9 +149,11 @@ export const TOOL_HINTS: Record<string, Hints> = {
   remember: WRITE,
   request_secret: WRITE,
   setup_auth: { ...WRITE, idempotentHint: true },
+  setup_oauth: { ...WRITE, idempotentHint: true },
   create_checkpoint: WRITE,
   fetch_url: { readOnlyHint: true, openWorldHint: true },
   rename_file: WRITE,
+  extract_component: WRITE,
   // These delete code or touch real data.
   delete_file: DESTRUCTIVE,
   remove_dependency: DESTRUCTIVE,
@@ -166,7 +170,7 @@ export const TOOL_HINTS: Record<string, Hints> = {
 const hintsOf = (name: string): Hints => TOOL_HINTS[name] ?? DESTRUCTIVE;
 
 /** Tools that change code: they take expected_version and answer with the new version. */
-export const VERSIONED_WRITES = new Set(["write_file", "edit_file", "delete_file", "rename_file", "add_dependency", "remove_dependency"]);
+export const VERSIONED_WRITES = new Set(["write_file", "edit_file", "delete_file", "rename_file", "add_dependency", "remove_dependency", "extract_component", "setup_oauth"]);
 /** Reads that report the version to pass back. */
 const VERSIONED_READS = new Set(["question", "list_files", "project_map", "read_files"]);
 const expectedVersionProp = {

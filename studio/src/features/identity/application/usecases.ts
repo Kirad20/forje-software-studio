@@ -6,6 +6,11 @@ export function createIdentityUseCases(http: HttpPort) {
     currentAccount: () => http.request<{ account: Me }>("/me"),
     logout: () => http.request("/auth/logout", { body: {} }),
     authStatus: () => http.request<{ needsSetup: boolean }>("/auth/status"),
+    /** Social and OAuth providers configured for the studio (Google, Facebook, others). */
+    oauthProviders: () => http.request<{ providers: { id: string; name: string }[] }>("/auth/oauth/providers"),
+    /** Full-page navigation: the provider signs the person in and sends them back here. */
+    oauthStartUrl: (provider: string, redirect: string) =>
+      `/api/auth/oauth/${encodeURIComponent(provider)}/start?redirect=${encodeURIComponent(redirect)}`,
     setup: (body: { token: string; email: string; password: string; name: string }) =>
       http.request("/auth/setup", { body }),
     login: (body: { email: string; password: string }) => http.request("/auth/login", { body }),

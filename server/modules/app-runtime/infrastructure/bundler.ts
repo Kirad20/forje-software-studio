@@ -10,6 +10,7 @@ export { formatProblem, type BuildProblem } from "../domain/publication.js";
 import { createProjectCheck } from "../application/projectBuild.js";
 import { endpointRoutes, exampleFiles, jobFiles, pageRoutes } from "../domain/routes.js";
 import { detectSpringProject } from "../domain/spring.js";
+import { COMPONENTS_MANIFEST, componentOf, IMPLICIT_COMPONENT, layoutOf } from "../../../../contracts/projectLayout.js";
 export { endpointRoutes, exampleFiles, jobFiles, pageRoutes, readJobSettings, type EndpointInfo, type JobInfo, type PageInfo } from "../domain/routes.js";
 import { BUILTIN_PACKAGES, ensureDeps, isNodeBuiltin, MANIFEST, packageName, readDeps, type Deps } from "./deps.js";
 
@@ -126,20 +127,31 @@ function toProblems(e: unknown): BuildProblem[] {
 
 // --- Pages & routes -------------------------------------------------------------
 
-/** `pages/_index.tsx` → `/`, `pages/about.tsx` → `/about`, `pages/posts.$id.tsx` → `/posts/:id`. */
-export async function buildClient(files: FileMap, opts: { minify?: boolean } = {}): Promise<{ js: string; css: string }> {
-  const routes = pageRoutes(files);
+/**
+ * `pages/_index.tsx` → `/`, `pages/about.tsx` → `/about`, `pages/posts.$id.tsx` → `/posts/:id`.
+ * One bundle per page component: the app (root pages/) by default, or a web component of
+ * forja.json (its pages under its mount, with its own _layout, _404 and base.css).
+ */
+export async function buildClient(files: FileMap, opts: { minify?: boolean; component?: string } = {}): Promise<{ js: string; css: string }> {
+  const name = opts.component ?? IMPLICIT_COMPONENT;
+  const component = layoutOf(files).components.find((c) => c.name === name && (c.kind === "app" || c.kind === "web"));
+  if (!component) throw new BuildError([{ file: COMPONENTS_MANIFEST, text: `No hay un componente web llamado "${name}"` }]);
+  const root = component.root;
+  // Mapped structures: the component's styles file and pages folder (Forja's own by default).
+  const styles = `${root}${component.paths.styles}`;
+  const pagesDir = `${root}${component.paths.pages ? `${component.paths.pages}/` : ""}`;
+  const routes = pageRoutes(files).filter((r) => (r.component ?? IMPLICIT_COMPONENT) === name);
   const lines = [
     `import { createElement } from "react";`,
     `import { createRoot } from "react-dom/client";`,
     `import { ForjaApp } from "@forja/client";`,
   ];
-  if ("base.css" in files) lines.push(`import "./base.css";`);
+  if (styles in files) lines.push(`import "./${styles}";`);
   routes.forEach((r, i) => lines.push(`import P${i} from "./${r.file}";`));
-  const layout = files["pages/_layout.tsx"] !== undefined;
-  const notFound = files["pages/_404.tsx"] !== undefined;
-  if (layout) lines.push(`import Layout from "./pages/_layout.tsx";`);
-  if (notFound) lines.push(`import NotFound from "./pages/_404.tsx";`);
+  const layout = files[`${pagesDir}_layout.tsx`] !== undefined;
+  const notFound = files[`${pagesDir}_404.tsx`] !== undefined;
+  if (layout) lines.push(`import Layout from "./${pagesDir}_layout.tsx";`);
+  if (notFound) lines.push(`import NotFound from "./${pagesDir}_404.tsx";`);
   lines.push(
     `const routes = [${routes.map((r, i) => `{ pattern: ${JSON.stringify(r.pattern)}, component: P${i} }`).join(", ")}];`,
     `createRoot(document.getElementById("root")).render(createElement(ForjaApp, { routes${layout ? ", layout: Layout" : ""}${notFound ? ", notFound: NotFound" : ""} }));`,
@@ -177,10 +189,13 @@ async function bundleBrowser(files: FileMap, entry: string, minify = false): Pro
 /** components/Card.example.tsx, pages/orders.example.tsx: each named export is one example. */
 export async function buildExamples(files: FileMap, file: string): Promise<{ js: string; css: string }> {
   if (!exampleFiles(files).includes(file)) throw new BuildError([{ file, text: "No existe ese archivo de ejemplos" }]);
+  // Examples of a web component use that component's base.css.
+  const owner = componentOf(file, layoutOf(files))?.component;
+  const css = `${owner?.root ?? ""}${owner?.paths.styles ?? "base.css"}`;
   const entry = [
     `import { createElement as h, Component } from "react";`,
     `import { createRoot } from "react-dom/client";`,
-    "base.css" in files ? `import "./base.css";` : "",
+    css in files ? `import "./${css}";` : "",
     `import * as examples from "./${file}";`,
     // One failing example must not hide the others.
     `class Boundary extends Component { constructor(p) { super(p); this.state = { error: null }; }
@@ -207,10 +222,20 @@ export interface CompiledModule {
 
 const compileCache = new Map<string, Promise<CompiledModule>>();
 
-/** Server code depends on endpoints/, jobs/, helpers/ and package.json only; hash just those. */
+/**
+ * Server code depends on endpoints/, jobs/, helpers/ and package.json only, plus — with
+ * forja.json — the manifest and every non-web component (apis, workers, libraries); hash just those.
+ */
 function serverHash(files: FileMap, entry: string) {
+  const layout = layoutOf(files);
+  const serverSide = (f: string) => {
+    if (!layout.manifest) return false;
+    if (f === COMPONENTS_MANIFEST) return true;
+    const kind = componentOf(f, layout)?.component.kind;
+    return kind === "api" || kind === "worker" || kind === "library";
+  };
   const relevant = Object.keys(files)
-    .filter((f) => /^(endpoints|jobs|helpers)\//.test(f) || f === MANIFEST)
+    .filter((f) => /^(endpoints|jobs|helpers)\//.test(f) || f === MANIFEST || serverSide(f))
     .sort()
     .map((f) => `${f}\0${files[f]}`)
     .join("\0");
@@ -269,7 +294,7 @@ export async function compileServerModule(files: FileMap, entry: string): Promis
  */
 /** Compiles everything and reports every problem — the builder's "does it build?" check. */
 export const checkProject = createProjectCheck({
-  client: buildClient, server: compileServerModule, examples: buildExamples,
+  client: (files, component) => buildClient(files, { component }), server: compileServerModule, examples: buildExamples,
   problems: (error) => error instanceof BuildError ? error.problems : null,
   backend: async (files, projectId) =>
     detectSpringProject(files) ? (await import("./languages.js")).springRuntime.problems(files, projectId) : [],

@@ -39,7 +39,7 @@ You own the data model: create and change tables through execute_sql, which reco
 - Verify with describe_database and check_build. You do not write endpoints or pages.`;
 
 const BACKEND_ROLE = `# Your role: backend
-You own endpoints/, jobs/ and the bounded contexts in helpers/<context>/: endpoints that match helpers/contract.ts exactly (method, route, input, output: parse the body with the contract's input schema and type what you return with the contract's output), background jobs, sign-in setup (setup_auth), secrets (request_secret), integrations, and tests for business logic in helpers/<context>/*.spec.ts.
+You own endpoints/, jobs/ and the bounded contexts in helpers/<context>/: endpoints that match helpers/contract.ts exactly (method, route, input, output: parse the body with the contract's input schema and type what you return with the contract's output), background jobs, sign-in setup (setup_auth; social and OAuth providers with setup_oauth), secrets (request_secret), integrations, and tests for business logic in helpers/<context>/*.spec.ts.
 - Hexagonal + DDD by default (see "Backend"): write domain.ts, ports.ts, application.ts and adapters.ts per context first, then the endpoints and jobs as thin composition roots that call one use case each. SQL and ctx.* calls live only in adapters; rules live only in the domain.
 - Every list endpoint is paginated (cursor or page + limit in the contract, LIMIT in the adapter's query, an index matching its order); never return a whole table.
 - The data task already created the tables; you cannot change the schema. All ctx.db calls are environment-scoped CRUD; never issue DDL or schema-changing SQL from endpoints/jobs. If a column is missing, work around it if you can and say so in your report.
@@ -56,7 +56,7 @@ You own pages/, components/, base.css, helpers/api.ts and the *.example.tsx file
 const PLANNER = `# Your role: planner
 You turn the owner's request into a plan for a team of specialists that work in parallel:
 - data: tables and migrations (execute_sql; tracked under migrations/) and the shared TypeScript types in helpers/ (helpers/types.ts).
-- backend: endpoints/ and jobs/, the bounded contexts in helpers/<context>/ (domain, ports, application, adapters and their specs), sign-in setup (setup_auth), secrets and integrations.
+- backend: endpoints/ and jobs/, the bounded contexts in helpers/<context>/ (domain, ports, application, adapters and their specs), sign-in setup (setup_auth, setup_oauth), secrets and integrations.
 - ui: pages/ (including pages/login.tsx when there is sign-in), components/ (components/ui/ design system and components/<feature>/), base.css, helpers/api.ts and examples.
 Steps:
 1. The project map is already in your message — do not call project_map. Read only what you need: the existing helpers/contract.ts if there is one, the files you will extend, and one or two existing pages or endpoints to copy their conventions. New work follows the patterns the app already has; do not introduce a second way of doing the same thing.
@@ -137,7 +137,7 @@ export { TALK, WORK };
 type AgentToolRole = "planner" | "data" | "backend" | "ui" | "qa" | "fast" | "chat" | "security";
 export const ROLE_TOOLS: Record<AgentToolRole, string[]> = {
   security: ["load_skill", "project_map", "read_files", "find_symbol", "related_files", "search_code", "describe_database", "security_scan"],
-  planner: ["load_skill", "read_files", "find_symbol", "related_files", "search_code", "describe_database", "fetch_url", "write_file", "edit_file", "remember", "forget"],
+  planner: ["load_skill", "read_files", "find_symbol", "related_files", "search_code", "describe_database", "fetch_url", "write_file", "edit_file", "remember", "forget", "architecture_migration_plan", "check_manifest"],
   data: ["load_skill", "project_map", "read_files", "find_symbol", "search_code", "describe_database", "execute_sql", "query_database", "write_file", "edit_file", "check_build", "check_standards", "get_problems", "run_tests"],
   backend: [
     "load_skill",
@@ -152,6 +152,9 @@ export const ROLE_TOOLS: Record<AgentToolRole, string[]> = {
     "edit_file",
     "delete_file",
     "rename_file",
+    "architecture_migration_plan",
+    "extract_component",
+    "check_manifest",
     "add_dependency",
     "remove_dependency",
     "check_build",
@@ -164,16 +167,17 @@ export const ROLE_TOOLS: Record<AgentToolRole, string[]> = {
     "request_secret",
     "list_secrets",
     "setup_auth",
+    "setup_oauth",
     "fetch_url",
   ],
   ui: ["load_skill", "project_map", "read_files", "find_symbol", "related_files", "search_code", "write_file", "edit_file", "delete_file", "rename_file", "add_dependency", "remove_dependency", "check_build", "check_standards", "get_problems", "get_logs", "call_endpoint", "browser_test"],
   qa: ["load_skill", "project_map", "read_files", "find_symbol", "related_files", "search_code", "describe_database", "query_database", "check_build", "get_problems", "run_tests", "check_standards", "call_endpoint", "browser_test", "security_scan", "get_logs"],
   fast: [
-    "set_project_profile", "project_map", "find_symbol", "related_files", "read_files", "write_file", "edit_file", "delete_file", "rename_file",
+    "set_project_profile", "project_map", "find_symbol", "related_files", "read_files", "write_file", "edit_file", "delete_file", "rename_file", "architecture_migration_plan", "extract_component", "check_manifest",
     "add_dependency", "remove_dependency", "search_code", "call_endpoint", "browser_test", "security_scan", "load_skill", "check_standards",
     "remember", "forget", "fetch_url", "describe_database", "query_database", "check_build", "run_tests", "get_logs", "get_problems", "get_preview_url", "publish_app",
   ],
-  chat: ["load_skill", "project_map", "read_files", "find_symbol", "related_files", "search_code", "describe_database", "query_database", "get_problems", "get_logs", "list_secrets", "security_scan", "fetch_url", "remember", "forget"],
+  chat: ["load_skill", "project_map", "architecture_migration_plan", "check_manifest", "read_files", "find_symbol", "related_files", "search_code", "describe_database", "query_database", "get_problems", "get_logs", "list_secrets", "security_scan", "fetch_url", "remember", "forget"],
 };
 
 for (const tools of Object.values(ROLE_TOOLS)) tools.push("question");

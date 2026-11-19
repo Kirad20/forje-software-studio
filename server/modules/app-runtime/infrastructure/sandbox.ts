@@ -4,7 +4,6 @@ import { fileURLToPath } from "node:url";
 import { config, ROOT_DIR } from "../../../shared/config.js";
 import type { AppUser } from "../../app-services/auth.js";
 import { serviceContext, type AppEnv, type ServiceContext } from "../../app-services/context.js";
-import { projectDb } from "../../app-services/projectDb.js";
 import { log } from "./observation.js";
 import type { ServiceExecution } from "../domain/services.js";
 
@@ -62,6 +61,8 @@ export interface RunInput {
   // job
   payload?: unknown;
   job?: string;
+  /** Schema of the forja.json component that owns the entrypoint, when it has its own database. */
+  scope?: string;
   execution?: ServiceExecution;
 }
 
@@ -251,7 +252,8 @@ async function beginTransaction(projectId: string, run: Run): Promise<string> {
   const id = `tx${run.txs.size + 1}_${Date.now()}`;
   return new Promise((resolveBegin, rejectBegin) => {
     let settle!: (commit: boolean) => void;
-    const done = projectDb(projectId, run.env)
+    // The run's ctx.db: confined to its component's schema when it owns one.
+    const done = run.ctx.db
       .transaction(async (tx) => {
         const commit = await new Promise<boolean>((res) => {
           settle = res;
@@ -405,7 +407,7 @@ export function restartSandboxService(projectId: string, service: string, env?: 
 }
 
 export async function runInSandbox(projectId: string, kind: "endpoint" | "job" | "test", input: Omit<RunInput, "env">, source: "endpoint" | "job") {
-  const ctx = await serviceContext(projectId, input.env_name, input.base, source);
+  const ctx = await serviceContext(projectId, input.env_name, input.base, source, input.scope);
   const execution = input.execution ?? { service: "monolith", replicas: 1, maxConcurrency: Number.MAX_SAFE_INTEGER };
   if (!/^[a-z][a-z0-9-]{0,39}$/.test(execution.service) || !Number.isInteger(execution.replicas) || execution.replicas < 1 || execution.replicas > 8 ||
       !Number.isSafeInteger(execution.maxConcurrency) || execution.maxConcurrency < 1) throw new Error("Configuracion de ejecucion no valida");
