@@ -72,7 +72,7 @@ try {
   }
   const setup = await req("POST", "/api/auth/setup", { body: { token: BOOTSTRAP, email: "owner@example.com", password: "una contraseña larga", name: "Dueña" } });
   ok(setup.status === 200, "owner account", setup.text);
-  const project = (await req("POST", "/api/projects", { body: { prompt: "Tienda con panel y API de pedidos" } })).json.project;
+  const project = (await req("POST", "/api/projects", { body: { prompt: "Tienda con panel y API de pedidos", template: "monolith" } })).json.project;
   ok(!!project?.id, "project created");
   const pv = `pv-${project.id}.localhost`;
   const share = new URL(project.previewUrl).searchParams.get("share");
@@ -234,7 +234,7 @@ try {
   ok(legacyPublish.status === 200, "the migrated project publishes", legacyPublish.text);
 
   // A project with another structure, mapped by forja.json paths/conventions instead of rewritten.
-  const mappedProject = (await req("POST", "/api/projects", { body: { prompt: "Blog con otra estructura" } })).json.project;
+  const mappedProject = (await req("POST", "/api/projects", { body: { prompt: "Blog con otra estructura", template: "monolith" } })).json.project;
   const mpv = `pv-${mappedProject.id}.localhost`;
   const mput = (p, content) => req("PUT", `/api/projects/${mappedProject.id}/file`, { body: { path: p, content } });
   const mtool = async (name, args) => (await req("POST", "/mcp", { headers: mcpH, body: { jsonrpc: "2.0", id: mcpId++, method: "tools/call", params: { name, arguments: { projectId: mappedProject.id, ...args } } } })).json?.result;

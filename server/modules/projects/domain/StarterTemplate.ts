@@ -1,12 +1,44 @@
-export type StarterTemplate = "monolith" | "orders-invoices" | "components";
+export type StarterTemplate = "standard" | "monolith" | "orders-invoices" | "components";
+
+/** New projects start with forja.json components unless the creator picks another starter. */
+export const DEFAULT_STARTER_TEMPLATE: StarterTemplate = "standard";
 
 export function parseStarterTemplate(value: unknown): StarterTemplate | undefined {
   if (value === undefined) return undefined;
-  if (value === "monolith" || value === "orders-invoices" || value === "components") return value;
-  throw new Error("Template no válido: usa monolith, orders-invoices o components");
+  if (value === "standard" || value === "monolith" || value === "orders-invoices" || value === "components") return value;
+  throw new Error("Template no válido: usa standard, monolith, orders-invoices o components");
 }
 
-/** Existing projects and creation without a selector retain the monolith starter. */
+/**
+ * The standard structure every new project starts with: a forja.json with a web frontend at
+ * "/" (apps/web), an API with its own database schema (services/api, served at /_api/v1/…)
+ * and a shared library (packages/shared). Empty: no demo data, only the welcome page.
+ */
+export function standardStarterFiles(name: string): Record<string, string> {
+  const web: Record<string, string> = {};
+  for (const [path, content] of Object.entries(starterFiles(name))) web[`apps/web/${path}`] = content;
+  return {
+    "forja.json": JSON.stringify({
+      version: 1,
+      components: {
+        web: { kind: "web", root: "apps/web", mount: "/", description: "Frontend de la app" },
+        api: { kind: "api", root: "services/api", route: "v1", database: true, description: "API y datos de la app" },
+        shared: { kind: "library", root: "packages/shared", description: "Tipos y reglas compartidas entre web y api" },
+      },
+    }, null, 2) + "\n",
+    ...web,
+    "services/api/endpoints/health_GET.ts": `// forja:public — liveness check, returns no data.
+export default async function () {
+  return { ok: true };
+}
+`,
+    "packages/shared/index.ts": `/** Types and pure rules shared by apps/web and services/api: import from "~/packages/shared". */
+export {};
+`,
+  };
+}
+
+/** The native single-app starter (pages/, endpoints/… at the root); opt-in with template "monolith". */
 export function starterFiles(name: string): Record<string, string> {
   return {
     "base.css": `/* Design tokens: the only place colors, radii, shadows and type sizes are defined.

@@ -77,7 +77,9 @@ export function Dashboard() {
   const [tab, setTab] = useState<"mine" | "shared">("mine");
   const [folders, setFolders] = useState<Folder[]>([]);
   const [prompt, setPrompt] = useState("");
-  const [template, setTemplate] = useState<NonNullable<CreateProjectOptions["template"]>>("monolith");
+  const [template, setTemplate] = useState<NonNullable<CreateProjectOptions["template"]>>("standard");
+  // Blank starters wait for the owner's idea and hand it to the builder; examples need no prompt.
+  const blank = template === "standard" || template === "monolith";
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
@@ -102,13 +104,13 @@ export function Dashboard() {
   }, []);
 
   const create = async () => {
-    if (!prompt.trim() && template === "monolith") return;
+    if (!prompt.trim() && blank) return;
     setBusy(true);
     setError("");
     try {
-      const { project } = await projectsController.createProject(prompt || "Pedidos y facturas", template === "monolith" ? {} : { template });
+      const { project } = await projectsController.createProject(prompt || "Pedidos y facturas", template === "standard" ? {} : { template });
       // The project view hands the idea to the builder when it opens.
-      if (template === "monolith") browser.sessionStorage.setItem(`forja:first:${project.id}`, prompt);
+      if (blank) browser.sessionStorage.setItem(`forja:first:${project.id}`, prompt);
       go(`/p/${project.id}`);
     } catch (e) {
       setError((e as Error).message);
@@ -211,7 +213,8 @@ export function Dashboard() {
         <label>
           Plantilla inicial
           <select disabled={busy} value={template} onChange={(e) => setTemplate(e.target.value as NonNullable<CreateProjectOptions["template"]>)}>
-            <option value="monolith">Proyecto vacío (monolito)</option>
+            <option value="standard">Proyecto vacío (web, API y librería compartida)</option>
+            <option value="monolith">Proyecto vacío (monolito, estructura anterior)</option>
             <option value="orders-invoices">Ejemplo: API de pedidos + worker de facturas</option>
             <option value="components">Ejemplo: arquitectura por componentes (panel /admin, API, worker y librería)</option>
           </select>
@@ -229,7 +232,7 @@ export function Dashboard() {
             Constructor incluido
           </span>
           <div className="split-btn">
-            <button className="primary" disabled={(!prompt.trim() && template === "monolith") || busy} onClick={create}>
+            <button className="primary" disabled={(!prompt.trim() && blank) || busy} onClick={create}>
               {busy ? <span className="spinner" /> : <Send />} Crear proyecto
             </button>
             <Menu
