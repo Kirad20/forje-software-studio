@@ -36,15 +36,15 @@
     "semantic_hash": ""
   },
   "test/agents.mjs": {
-    "mtime": 1795371498.0285456,
-    "seen": 1795371844.621008,
-    "ast_hash": "5a30b949da1ee56d46810e15867fcf42",
+    "mtime": 1795372234.8236084,
+    "seen": 1795372335.1426215,
+    "ast_hash": "9cf8fcead733a92569cc4aec11672bd4",
     "semantic_hash": ""
   },
   "test/e2e.mjs": {
-    "mtime": 1795371498.0285456,
-    "seen": 1795371844.6210134,
-    "ast_hash": "82f1292e1fb88e60918fa28b446d19fc",
+    "mtime": 1795372234.830619,
+    "seen": 1795372335.142627,
+    "ast_hash": "b905b7e98df2daa41b7b0517b86292e3",
     "semantic_hash": ""
   },
   "test/fakeGithub.mjs": {
@@ -528,9 +528,9 @@
     "semantic_hash": ""
   },
   "server/modules/projects/application/CreateProjectUseCase.ts": {
-    "mtime": 1795371498.020532,
-    "seen": 1795371844.6206799,
-    "ast_hash": "7aca02b65dd11e8c2054fa8add91360f",
+    "mtime": 1795372172.8179169,
+    "seen": 1795372335.1386862,
+    "ast_hash": "a7045fa2875ea68da923fdc5a28f74f2",
     "semantic_hash": ""
   },
   "server/modules/projects/application/DeleteFileUseCase.ts": {
@@ -570,9 +570,9 @@
     "semantic_hash": ""
   },
   "server/modules/projects/index.ts": {
-    "mtime": 1795371498.020706,
-    "seen": 1795371844.6207018,
-    "ast_hash": "849a1a0a3d864ba60f3c17dd6ebece5d",
+    "mtime": 1795372172.8176484,
+    "seen": 1795372335.138929,
+    "ast_hash": "e5301546e4806bdfa9a5d8d8e3d6a35e",
     "semantic_hash": ""
   },
   "server/modules/projects/infrastructure/PostgresProjectFileRepository.ts": {
@@ -1386,9 +1386,9 @@
     "semantic_hash": ""
   },
   "server/bootstrap/mcp/server.ts": {
-    "mtime": 1795371497.941651,
-    "seen": 1795371844.61986,
-    "ast_hash": "ad8aabc7a4299af6429c8b8f8dda8a2b",
+    "mtime": 1795372199.5420763,
+    "seen": 1795372335.1302965,
+    "ast_hash": "ea58a16b489725f8ed0328b70ceec2d6",
     "semantic_hash": ""
   },
   "server/bootstrap/server.ts": {
@@ -1518,9 +1518,9 @@
     "semantic_hash": ""
   },
   "server/modules/builder/infrastructure/prompt.ts": {
-    "mtime": 1795371633.7462883,
-    "seen": 1795371844.6202507,
-    "ast_hash": "548abd53ff507d066a365f4b00635d7a",
+    "mtime": 1795372199.5416849,
+    "seen": 1795372335.1340923,
+    "ast_hash": "db37623695f4c57dc990487239745470",
     "semantic_hash": ""
   },
   "server/modules/builder/infrastructure/rename.ts": {
@@ -1812,9 +1812,9 @@
     "semantic_hash": ""
   },
   "studio/src/features/projects/presentation/Dashboard.tsx": {
-    "mtime": 1795371498.0267122,
-    "seen": 1795371844.6209538,
-    "ast_hash": "abecea5ea5ac58d0064d58822256ae17",
+    "mtime": 1795372185.2063534,
+    "seen": 1795372335.1419888,
+    "ast_hash": "d954fb9731743677200291ae8a3de843",
     "semantic_hash": ""
   },
   "studio/src/features/projects/presentation/ProjectView.tsx": {
@@ -3078,9 +3078,9 @@
     "semantic_hash": ""
   },
   "studio/src/features/projects/application/usecases.ts": {
-    "mtime": 1795371498.0267122,
-    "seen": 1795371844.6209497,
-    "ast_hash": "81515b518344d6ec43297b60c7d33937",
+    "mtime": 1795372185.206645,
+    "seen": 1795372335.1419618,
+    "ast_hash": "7f98297586ee3d5c43bd9670be1f1693",
     "semantic_hash": ""
   },
   "studio/src/shared/application/http-port.ts": {
@@ -3312,9 +3312,9 @@
     "semantic_hash": ""
   },
   "server/modules/projects/domain/StarterTemplate.ts": {
-    "mtime": 1795371498.020706,
-    "seen": 1795371844.6207004,
-    "ast_hash": "7e0797b1dda2334f0c51921b6e818faf",
+    "mtime": 1795372172.8173778,
+    "seen": 1795372335.1389263,
+    "ast_hash": "67d6af6b92169f329a5500f278acedb9",
     "semantic_hash": ""
   },
   "server/bootstrap/composition.ts": {
@@ -4188,9 +4188,9 @@
     "semantic_hash": ""
   },
   "test/unit/modules/projects/starterTemplate.test.ts": {
-    "mtime": 1795371498.035287,
-    "seen": 1795371844.6213067,
-    "ast_hash": "aa7f4ae500b0a4c4a92aba59410d0530",
+    "mtime": 1795372212.1310668,
+    "seen": 1795372335.1460292,
+    "ast_hash": "bdb731bc030cb2406e1514d7e5a0ea0d",
     "semantic_hash": ""
   },
   "test/unit/ollama.test.ts": {
@@ -4464,15 +4464,15 @@
     "semantic_hash": ""
   },
   "test/e2e-components.mjs": {
-    "mtime": 1795371498.0285456,
-    "seen": 1795371844.6210093,
-    "ast_hash": "fe6d6dce95268b86307c65116228972a",
+    "mtime": 1795372234.826038,
+    "seen": 1795372335.142624,
+    "ast_hash": "a84ca13ac2a72f270b70270719fefce4",
     "semantic_hash": ""
   },
   "test/e2e-oauth.mjs": {
-    "mtime": 1795371498.0285456,
-    "seen": 1795371844.6210108,
-    "ast_hash": "9899d8fc523deaef941b94d9138c2582",
+    "mtime": 1795372234.8285685,
+    "seen": 1795372335.1426256,
+    "ast_hash": "423e1095db386a3d5df514bb7abcbe71",
     "semantic_hash": ""
   },
   "test/export-standalone.mjs": {
@@ -4488,9 +4488,9 @@
     "semantic_hash": ""
   },
   "test/unit/modules/app-runtime/components.test.ts": {
-    "mtime": 1795371498.0312405,
-    "seen": 1795371844.621124,
-    "ast_hash": "e2039163d216477cda07bc4c65f6b363",
+    "mtime": 1795372212.1307564,
+    "seen": 1795372335.143573,
+    "ast_hash": "3e405400dbf8b2f81b0b882b5a2c8f73",
     "semantic_hash": ""
   },
   "test/unit/modules/app-runtime/standaloneExport.test.ts": {
