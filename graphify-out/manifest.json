@@ -54,15 +54,15 @@
     "semantic_hash": ""
   },
   "test/fakeLlm.mjs": {
-    "mtime": 1795371498.0285456,
-    "seen": 1795371844.6210182,
-    "ast_hash": "3e2b7949bf4a8e890b941a3769b11831",
+    "mtime": 1795372610.3762972,
+    "seen": 1795373492.0097883,
+    "ast_hash": "56dd56cd157f646df3b55b5c37883ae9",
     "semantic_hash": ""
   },
   "test/github.mjs": {
-    "mtime": 1795371498.0285456,
-    "seen": 1795371844.6210217,
-    "ast_hash": "12315bd1df11b8417b25547c1b2d7c39",
+    "mtime": 1795373439.9882915,
+    "seen": 1795373492.0098052,
+    "ast_hash": "41756c101563175182e6f026b4d11c97",
     "semantic_hash": ""
   },
   "test/unit/browser.test.ts": {
@@ -570,9 +570,9 @@
     "semantic_hash": ""
   },
   "server/modules/projects/index.ts": {
-    "mtime": 1795372172.8176484,
-    "seen": 1795372335.138929,
-    "ast_hash": "e5301546e4806bdfa9a5d8d8e3d6a35e",
+    "mtime": 1795373180.6116772,
+    "seen": 1795373492.0071027,
+    "ast_hash": "7cee254faee9413db577fe3339128139",
     "semantic_hash": ""
   },
   "server/modules/projects/infrastructure/PostgresProjectFileRepository.ts": {
@@ -876,9 +876,9 @@
     "semantic_hash": ""
   },
   "server/modules/builder/infrastructure/BuilderTurnAdapter.ts": {
-    "mtime": 1795371497.947144,
-    "seen": 1795371844.6202211,
-    "ast_hash": "f93416ac46a7c94dfa50176fe5188aec",
+    "mtime": 1795373192.8633614,
+    "seen": 1795373492.0031326,
+    "ast_hash": "c504f813b68cdb0ee78e00207789e434",
     "semantic_hash": ""
   },
   "server/modules/builder/infrastructure/FinishGateAdapter.ts": {
@@ -3312,9 +3312,9 @@
     "semantic_hash": ""
   },
   "server/modules/projects/domain/StarterTemplate.ts": {
-    "mtime": 1795372172.8173778,
-    "seen": 1795372335.1389263,
-    "ast_hash": "67d6af6b92169f329a5500f278acedb9",
+    "mtime": 1795373180.6111155,
+    "seen": 1795373492.0071003,
+    "ast_hash": "8e78ee4d34673116b025f3d4b9ecdf12",
     "semantic_hash": ""
   },
   "server/bootstrap/composition.ts": {
