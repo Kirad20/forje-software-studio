@@ -102,7 +102,7 @@ try {
   // Model catalog and whitelists.
   const models = (await req("GET", "/api/models")).json;
   ok(models.models.length === 3 && models.models.every((m) => m.enabled), "configured models are listed and allowed by default", JSON.stringify(models.models.map((m) => m.id)));
-  const project = (await req("POST", "/api/projects", { prompt: "Notas" })).json.project;
+  const project = (await req("POST", "/api/projects", { prompt: "Notas", template: "monolith" })).json.project;
   // Keep the flaky model out of the team turn; it gets its own test below.
   await req("PUT", `/api/projects/${project.id}/models`, { enabled: ["openai:fake-strong", "openai:fake-mid"], concurrency: 3 });
   const pm = (await req("GET", `/api/projects/${project.id}/models`)).json;

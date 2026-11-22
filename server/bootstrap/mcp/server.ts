@@ -34,6 +34,7 @@ export function projectInTokenScope(account: Pick<PublicAccount, "tokenOrgId" | 
  */
 export const SERVER_INSTRUCTIONS = `Forja aloja apps full-stack TypeScript/React con base de datos Postgres, auth, archivos, correo, IA, tareas y tiempo real incluidos.
 Contexto primero: en cuanto conozcas el projectId, tu PRIMERA llamada para tomar contexto del proyecto debe ser question, el cerebro de conocimientos basado en el grafo, antes de get_guides, project_map, list_files, read_files o cualquier edición. Esto también aplica a la plantilla de un proyecto recién creado. Formula la consulta con la tarea del usuario; si aún no conoces los módulos o símbolos, no necesitas sus nombres para consultar el cerebro. No preguntes al dueño por la estructura del proyecto ni empieces pidiendo un listado de archivos.
+Los proyectos nuevos nacen con forja.json (estructura estándar): apps/web (frontend en /: pages/, components/, base.css), services/api (endpoints/ y jobs/ servidos en /_api/v1/…, con base de datos propia: execute_sql con component "api") y packages/shared (tipos y reglas compartidas, ~/packages/shared). En ellos las rutas de abajo van dentro de esas carpetas, no en la raíz. Un proyecto sin forja.json usa la estructura nativa.
 Un proyecto SOLO admite estas rutas:
 - pages/<nombre>.tsx (raíz / = pages/_index.tsx; params con $: posts.$id.tsx; _layout.tsx y _404.tsx opcionales)
 - components/<Nombre>.tsx (+ .module.css, + .example.tsx)

@@ -28,13 +28,17 @@ function creation() {
 }
 
 describe("opt-in orders/invoices starter", () => {
-  it("preserves the original default and forwards an explicit selector through creation", async () => {
+  it("creates the standard structure by default, keeps monolith opt-in and forwards an explicit selector through creation", async () => {
     const { store, useCase } = creation();
     await useCase.execute({ ownerId: "owner", name: "Demo" });
-    expect(store.create.mock.calls[0]![1]).toEqual(starterFiles("Demo"));
+    expect(store.create.mock.calls[0]![1]).toEqual(starterFiles("Demo", "standard"));
+    expect(store.create.mock.calls[0]![1]["forja.json"]).toContain('"apps/web"');
     expect(starterFiles("Demo")["forja.services.json"]).toBeUndefined();
+    await useCase.execute({ ownerId: "owner", name: "Demo", template: "monolith" });
+    expect(store.create.mock.calls.at(-1)![1]).toEqual(starterFiles("Demo"));
+    expect(starterFiles("Demo")["forja.json"]).toBeUndefined();
     await useCase.execute({ ownerId: "owner", name: "Demo", template: "orders-invoices" });
-    const files = store.create.mock.calls[1]![1];
+    const files = store.create.mock.calls.at(-1)![1];
     expect(readProjectServices(files)?.services.invoices.kind).toBe("worker");
     expect(files["endpoints/orders/create_POST.ts"]).toBeDefined();
     expect(readProjectServices(files)?.services.orders.jobs).toEqual(["jobs/order-invoiced.ts"]);

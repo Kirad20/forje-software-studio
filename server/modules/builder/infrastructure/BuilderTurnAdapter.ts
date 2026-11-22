@@ -7,7 +7,7 @@ import type { Account } from "../../identity/contracts.js";
 import { getAccount, createCheckpoint, getProject, readAllFiles, writeFile, enabledOrgSkills } from "./CoreModulesAdapter.js";
 import { one, q } from "../../../shared/database/index.js";
 import { addMemory, memorySection, memorySettings, MEMORY_KINDS } from "../../memory/memory.js";
-import type { Project } from "../../projects/index.js";
+import { STANDARD_SCAFFOLD_FILES, type Project } from "../../projects/index.js";
 import { formatProblem } from "../../app-runtime/index.js";
 import { typecheckProject } from "../../app-runtime/index.js";
 import { skillIndex } from "./skills.js";
@@ -310,7 +310,9 @@ async function runFast(s: TurnState): Promise<void> {
   const ctx: ToolContext = { account: s.account, projectId: s.project.id, author: "builder", owned: builderFiles(files), ownerMessage: s.request };
   const map = projectMap(files, await describeSchema(s.project.id, true));
   // Words in the request pick most files; the request's kind adds the obvious ones.
-  const focus = isNewApp(s) ? ["pages/", "components/", "base.css"] : s.features.intent === "style" || s.features.domains.includes("ui") ? ["base.css"] : [];
+  const focus = isNewApp(s)
+    ? ["pages/", "components/", "base.css", "apps/web/pages/", "apps/web/components/", "apps/web/base.css"]
+    : s.features.intent === "style" || s.features.domains.includes("ui") ? ["base.css", "apps/web/base.css"] : [];
   const preload = selectContext(files, s.request, focus, 20_000);
   await new FastBuildUseCase<AgentResult, ReturnType<typeof listProblems>[number]>({
     signal: s.signal,
@@ -804,7 +806,8 @@ async function executeBuilderTurn(
     if (open.length) s.context += `\n\n## Problemas abiertos en la vista previa\n${formatProblems(open, 8)}`;
     },
     analyze: async () => {
-      const fileCount = Object.keys(await readAllFiles(projectId)).length;
+      // Starter scaffolding (forja.json, health check, empty shared library) does not make a project non-empty.
+      const fileCount = Object.keys(await readAllFiles(projectId)).filter((path) => !STANDARD_SCAFFOLD_FILES.has(path)).length;
       s.skills = skillIndex(await readAllFiles(projectId), await enabledOrgSkills(project.orgId));
       return analyzeRequest(scope, userText, { images: s.images.length, targeted: userText.includes("[Elemento seleccionado"), fileCount });
     },

@@ -137,6 +137,29 @@ function assertProjectObject(sql: string, prefix: RegExp): void {
   }
 }
 
+const IDENT = String.raw`(?:"(?:""|[^"])+"|[a-z_][a-z_0-9$]*)`;
+const QUALIFIED = new RegExp(String.raw`^\s*(${IDENT}(?:\s*\.\s*${IDENT})?)\s*`, "i");
+const CREATE_VIEW = /^CREATE\s+(?:OR\s+REPLACE\s+)?(?:(?:TEMP|TEMPORARY)\s+)?(?:RECURSIVE\s+)?VIEW\s+/i;
+const CREATE_MATERIALIZED_VIEW = /^CREATE\s+MATERIALIZED\s+VIEW\s+(?:IF\s+NOT\s+EXISTS\s+)?/i;
+const REFRESH_MATERIALIZED_VIEW = /^REFRESH\s+MATERIALIZED\s+VIEW\s+(?:CONCURRENTLY\s+)?/i;
+const DROP_OBJECT = /^DROP\s+(?:TABLE|(?:MATERIALIZED\s+)?VIEW|INDEX|TYPE)\s+(?:IF\s+EXISTS\s+)?/i;
+/** ALTER TABLE subcommands that are never allowed: they change ownership, security or storage, not the app's data model. */
+const ALTER_TABLE_FORBIDDEN = /\b(?:RENAME|OWNER|DISABLE|ENABLE|VALIDATE|SET\s+(?:SCHEMA|TABLESPACE|LOGGED|UNLOGGED|WITHOUT|ACCESS\s+METHOD))\b/i;
+
+/** DROP TABLE a, "b".c [CASCADE | RESTRICT]: every target must be an app object. */
+function assertDropTargets(statement: string): void {
+  let rest = statement.slice(DROP_OBJECT.exec(statement)![0].length).replace(/\s+(?:CASCADE|RESTRICT)\s*$/i, "");
+  for (;;) {
+    const match = QUALIFIED.exec(rest);
+    if (!match) throw new Error("SQL del agente rechazado: DROP solo admite nombres de objetos de la app, separados por comas.");
+    assertProjectObject(match[1]!, /^/);
+    rest = rest.slice(match[0].length);
+    if (!rest) return;
+    if (!rest.startsWith(",")) throw new Error("SQL del agente rechazado: DROP solo admite nombres de objetos de la app, separados por comas.");
+    rest = rest.slice(1);
+  }
+}
+
 export function assertSafeAgentSql(sql: string): void {
   const statements = redactSqlData(sql).split(";").map((statement) => statement.trim()).filter(Boolean);
   if (!statements.length) throw new Error("No hay ninguna sentencia SQL para ejecutar.");
@@ -155,11 +178,23 @@ export function assertSafeAgentSql(sql: string): void {
       assertProjectObject(statement, /^CREATE\s+TYPE\s+(?:IF\s+NOT\s+EXISTS\s+)?/i);
       continue;
     }
-    if (
-      /^ALTER\s+TABLE\b/i.test(statement) &&
-      /\bADD\b/i.test(statement) &&
-      !/\b(?:DROP|RENAME|OWNER|DISABLE|ENABLE|VALIDATE|SET\s+(?:SCHEMA|TABLESPACE|LOGGED|UNLOGGED|WITHOUT|ACCESS\s+METHOD))\b/i.test(statement)
-    ) {
+    if (CREATE_VIEW.test(statement)) {
+      assertProjectObject(statement, CREATE_VIEW);
+      continue;
+    }
+    if (CREATE_MATERIALIZED_VIEW.test(statement)) {
+      assertProjectObject(statement, CREATE_MATERIALIZED_VIEW);
+      continue;
+    }
+    if (REFRESH_MATERIALIZED_VIEW.test(statement)) {
+      assertProjectObject(statement, REFRESH_MATERIALIZED_VIEW);
+      continue;
+    }
+    if (DROP_OBJECT.test(statement)) {
+      assertDropTargets(statement);
+      continue;
+    }
+    if (/^ALTER\s+TABLE\b/i.test(statement) && /\b(?:ADD|DROP)\b/i.test(statement) && !ALTER_TABLE_FORBIDDEN.test(statement)) {
       assertProjectObject(statement, /^ALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?(?:ONLY\s+)?/i);
       continue;
     }
@@ -167,14 +202,35 @@ export function assertSafeAgentSql(sql: string): void {
       assertProjectObject(statement, /^INSERT\s+INTO\s+(?:ONLY\s+)?/i);
       continue;
     }
-    throw new Error("SQL del agente rechazado: solo se permiten CREATE TABLE/INDEX, CREATE TYPE AS ENUM, ALTER TABLE aditivo e INSERT sin UPDATE por conflicto.");
+    throw new Error("SQL del agente rechazado: solo se permiten CREATE TABLE/INDEX/VIEW, CREATE MATERIALIZED VIEW, CREATE TYPE AS ENUM, ALTER TABLE ADD/DROP, DROP TABLE/VIEW/INDEX/TYPE de la app e INSERT sin UPDATE por conflicto.");
   }
 }
 
 export function containsSchemaChange(sql: string): boolean {
   return redactSqlData(sql)
     .split(";")
-    .some((statement) => /^\s*(?:CREATE\s+(?:(?:UNIQUE|TEMP|TEMPORARY)\s+)?(?:TABLE|INDEX)\b|CREATE\s+TYPE\b|ALTER\s+TABLE\b)/i.test(statement));
+    .some((statement) =>
+      /^\s*(?:CREATE\s+(?:(?:UNIQUE|TEMP|TEMPORARY)\s+)?(?:TABLE|INDEX)\b|CREATE\s+TYPE\b|ALTER\s+TABLE\b|DROP\b)/i.test(statement) ||
+      CREATE_VIEW.test(statement.trim()) ||
+      CREATE_MATERIALIZED_VIEW.test(statement.trim()),
+    );
+}
+
+/**
+ * Schema changes that lose stored data when replayed in production: DROP TABLE, DROP TYPE
+ * (its columns go with it), ALTER TABLE … DROP [COLUMN] and any DROP … CASCADE. Dropping a
+ * plain view, a materialized view (derived data) or an index, or a constraint/default, loses nothing.
+ */
+export function containsDestructiveSchemaChange(sql: string): boolean {
+  return redactSqlData(sql)
+    .split(";")
+    .map((statement) => statement.trim())
+    .some((statement) =>
+      /^DROP\s+(?:TABLE|TYPE)\b/i.test(statement) ||
+      (/^DROP\b/i.test(statement) && /\bCASCADE\s*$/i.test(statement)) ||
+      (/^ALTER\s+TABLE\b/i.test(statement) &&
+        /\bDROP\s+(?!(?:DEFAULT|NOT\s+NULL|IDENTITY|EXPRESSION|CONSTRAINT)\b)/i.test(statement)),
+    );
 }
 
 export function containsDataChange(sql: string): boolean {
@@ -192,6 +248,10 @@ export function assertSafePreviewSql(sql: string): void {
     if (/^CREATE\s+(?:(?:UNIQUE|TEMP|TEMPORARY)\s+)?TABLE\b/i.test(statement) ||
         /^CREATE\s+(?:UNIQUE\s+)?INDEX\b/i.test(statement) ||
         /^CREATE\s+TYPE\b/i.test(statement) ||
+        CREATE_VIEW.test(statement) ||
+        CREATE_MATERIALIZED_VIEW.test(statement) ||
+        REFRESH_MATERIALIZED_VIEW.test(statement) ||
+        DROP_OBJECT.test(statement) ||
         /^ALTER\s+TABLE\b/i.test(statement)) {
       assertSafeAgentSql(statement);
       continue;
@@ -217,6 +277,6 @@ export function assertSafePreviewSql(sql: string): void {
       assertProjectObject(statement, prefix);
       continue;
     }
-    throw new Error("SQL del agente rechazado: solo se permite SQL de datos en vista previa y DDL aditivo registrado como migración.");
+    throw new Error("SQL del agente rechazado: solo se permite SQL de datos en vista previa y DDL de la app registrado como migración.");
   }
 }

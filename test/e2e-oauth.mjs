@@ -104,7 +104,7 @@ try {
   }
   const setup = await call(owner, "POST", `${studio}/api/auth/setup`, { body: { token: BOOTSTRAP, email: "owner@example.com", password: "una contraseña larga", name: "Dueña" } });
   ok(setup.status === 200, "owner account", setup.text);
-  const project = (await call(owner, "POST", `${studio}/api/projects`, { body: { prompt: "App con acceso social" } })).json?.project;
+  const project = (await call(owner, "POST", `${studio}/api/projects`, { body: { prompt: "App con acceso social", template: "monolith" } })).json?.project;
   ok(!!project?.id, "project created");
   const pv = `http://pv-${project.id}.localhost:${PORT}`;
   const share = new URL(project.previewUrl).searchParams.get("share");
@@ -236,7 +236,7 @@ try {
   const mcpHeaders = { authorization: `Bearer ${token}`, accept: "application/json, text/event-stream" };
   await call(null, "POST", `${studio}/mcp`, { headers: mcpHeaders, body: { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "e2e", version: "1" } } } });
   let mcpId = 10;
-  const second = (await call(owner, "POST", `${studio}/api/projects`, { body: { prompt: "Otra app" } })).json?.project;
+  const second = (await call(owner, "POST", `${studio}/api/projects`, { body: { prompt: "Otra app", template: "monolith" } })).json?.project;
   const tool = async (name, args) => (await call(null, "POST", `${studio}/mcp`, { headers: mcpHeaders, body: { jsonrpc: "2.0", id: mcpId++, method: "tools/call", params: { name, arguments: { projectId: second.id, ...args } } } })).json?.result;
   const text = (r) => (r?.content ?? []).map((c) => c.text).join("\n");
   const configured = await tool("setup_oauth", {

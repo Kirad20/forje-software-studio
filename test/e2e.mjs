@@ -104,7 +104,7 @@ const me = await req("GET", "/api/me");
 ok(me.json?.account?.credits > 0, "account has credits", me.text);
 
 // Project
-const created = await req("POST", "/api/projects", { body: { prompt: "Lista de tareas con equipo" } });
+const created = await req("POST", "/api/projects", { body: { prompt: "Lista de tareas con equipo", template: "monolith" } });
 const project = created.json.project;
 ok(project?.id && /^[0-9a-f]{16}$/.test(project.id), "project created", created.text);
 const pv = `pv-${project.id}.localhost`;

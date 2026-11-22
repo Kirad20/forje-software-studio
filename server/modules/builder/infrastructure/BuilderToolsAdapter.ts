@@ -30,7 +30,7 @@ import { checkManifests } from "./manifestCheck.js";
 import { allSkills, findSkill, renderSkill } from "./skills.js";
 import { standardsScan } from "../domain/Standards.js";
 import { normalizeProjectProfile } from "../../projects/index.js";
-import { assertSafePreviewSql, containsDataChange, containsSchemaChange } from "../domain/AgentSqlPolicy.js";
+import { assertSafePreviewSql, containsDataChange, containsDestructiveSchemaChange, containsSchemaChange } from "../domain/AgentSqlPolicy.js";
 import { assertOwnerRequestedForget, assertOwnerSourcedMemory } from "../domain/MemoryProvenance.js";
 import { assertOwnerRequestedAuthSetup, assertOwnerRequestedOAuthSetup, assertOwnerRequestedPublish, assertOwnerRequestedSecret } from "../domain/OwnerActionPolicy.js";
 
@@ -795,10 +795,13 @@ export const builderTools: BuilderTool[] = [
   {
     name: "execute_sql",
     description:
-      "Ejecuta SQL de Postgres 18 únicamente en la vista previa. El DDL se guarda primero como una migración nueva e inmutable en migrations/*.sql y luego se aplica a la vista previa; no edites ese archivo directamente. El DML de datos solamente cambia la vista previa y no se copia al publicar. Incluye la opción migration=true solo para un backfill intencional que también deba ejecutarse en producción al publicar. Con component (un componente de forja.json con \"database\"), la migración se guarda en <root>migrations/ y todo se ejecuta dentro del esquema de ese componente (sin prefijo de esquema en las tablas).",
-    input_schema: obj({ sql: str("SQL a ejecutar"), migration: { type: "boolean", description: "Usar solo para un backfill de datos intencional que deba publicarse en producción; crea una migración" }, component: str("Opcional: nombre de un componente de forja.json con base de datos propia") }, ["sql"]),
-    async run(i: { sql: string; migration?: boolean; component?: string }, ctx) {
+      "Ejecuta SQL de Postgres 18 únicamente en la vista previa. El DDL se guarda primero como una migración nueva e inmutable en migrations/*.sql y luego se aplica a la vista previa; no edites ese archivo directamente. El DML de datos solamente cambia la vista previa y no se copia al publicar. Incluye la opción migration=true solo para un backfill intencional que también deba ejecutarse en producción al publicar. Admite vistas (CREATE [OR REPLACE] VIEW, CREATE MATERIALIZED VIEW, REFRESH MATERIALIZED VIEW) y eliminaciones (DROP TABLE/VIEW/INDEX/TYPE, ALTER TABLE … DROP COLUMN/CONSTRAINT). Lo que borra datos guardados en producción (DROP TABLE, DROP TYPE, DROP COLUMN o cualquier DROP … CASCADE) exige destructive=true, y solo debes usarlo cuando el dueño pidió explícitamente eliminar eso. Con component (un componente de forja.json con \"database\"), la migración se guarda en <root>migrations/ y todo se ejecuta dentro del esquema de ese componente (sin prefijo de esquema en las tablas).",
+    input_schema: obj({ sql: str("SQL a ejecutar"), migration: { type: "boolean", description: "Usar solo para un backfill de datos intencional que deba publicarse en producción; crea una migración" }, destructive: { type: "boolean", description: "Confirma una migración que borra datos en producción (DROP TABLE, DROP TYPE, DROP COLUMN, DROP … CASCADE). Úsalo solo si el dueño pidió eliminarlo" }, component: str("Opcional: nombre de un componente de forja.json con base de datos propia") }, ["sql"]),
+    async run(i: { sql: string; migration?: boolean; destructive?: boolean; component?: string }, ctx) {
       assertSafePreviewSql(i.sql);
+      if (containsDestructiveSchemaChange(i.sql) && !i.destructive) {
+        throw new Error("Esta migración borra datos que se perderán también en producción al publicar (DROP TABLE, DROP TYPE, DROP COLUMN o DROP … CASCADE). Si el dueño pidió eliminarlo, repite la llamada con destructive=true; si no, usa un cambio aditivo.");
+      }
       if (containsSchemaChange(i.sql) && containsDataChange(i.sql) && !i.migration) {
         throw new Error("Separa el DDL del SQL de datos, o marca migration=true si esos datos son un backfill intencional que debe aplicarse también en producción.");
       }

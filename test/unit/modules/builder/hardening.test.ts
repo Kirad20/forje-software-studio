@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assertSafeAgentSql, assertSafePreviewSql, containsDataChange, containsSchemaChange } from "../../../../server/modules/builder/domain/AgentSqlPolicy.js";
+import { assertSafeAgentSql, assertSafePreviewSql, containsDataChange, containsDestructiveSchemaChange, containsSchemaChange } from "../../../../server/modules/builder/domain/AgentSqlPolicy.js";
 import { assertOwnerRequestedForget, assertOwnerSourcedMemory } from "../../../../server/modules/builder/domain/MemoryProvenance.js";
 import { assertOwnerRequestedAuthSetup, assertOwnerRequestedPublish, assertOwnerRequestedSecret } from "../../../../server/modules/builder/domain/OwnerActionPolicy.js";
 import { isMigrationPath, isSafeProjectPath, ownsFile } from "../../../../server/modules/builder/domain/FinishGatePolicy.js";
@@ -81,14 +81,67 @@ describe("agent SQL policy", () => {
     `)).not.toThrow();
   });
 
+  it("allows views and drops of app objects as migrations", () => {
+    expect(() => assertSafeAgentSql(`
+      CREATE VIEW active_notes AS SELECT id, body FROM notes WHERE NOT archived;
+      CREATE OR REPLACE VIEW "app"."note_authors" (id, email) AS SELECT n.id, u.email FROM notes n JOIN _forja_users u ON u.id = n.user_id;
+      CREATE MATERIALIZED VIEW IF NOT EXISTS note_counts AS SELECT user_id, count(*) FROM notes GROUP BY user_id;
+      REFRESH MATERIALIZED VIEW note_counts;
+      DROP VIEW IF EXISTS active_notes;
+      DROP MATERIALIZED VIEW note_counts;
+      DROP INDEX IF EXISTS notes_created_idx;
+      DROP TABLE IF EXISTS old_notes, "app"."legacy;notes" CASCADE;
+      DROP TYPE note_status;
+      ALTER TABLE notes DROP COLUMN IF EXISTS legacy_body;
+      ALTER TABLE notes DROP CONSTRAINT notes_body_check, ADD CONSTRAINT notes_body_len CHECK (length(body) < 5000);
+      ALTER TABLE notes ALTER COLUMN body DROP NOT NULL;
+    `)).not.toThrow();
+    expect(() => assertSafePreviewSql("DROP TABLE notes; CREATE VIEW v AS SELECT 1")).not.toThrow();
+    expect(containsSchemaChange("DROP TABLE notes")).toBe(true);
+    expect(containsSchemaChange("CREATE OR REPLACE VIEW v AS SELECT 1")).toBe(true);
+    expect(containsSchemaChange("CREATE MATERIALIZED VIEW mv AS SELECT 1")).toBe(true);
+    expect(containsSchemaChange("REFRESH MATERIALIZED VIEW mv")).toBe(false);
+  });
+
   it.each([
-    "DROP TABLE notes",
-    "ALTER TABLE notes DROP COLUMN body",
+    ["DROP TABLE notes", true],
+    ["drop table if exists a, b", true],
+    ["DROP TYPE note_status", true],
+    ["ALTER TABLE notes DROP COLUMN body", true],
+    ["ALTER TABLE notes DROP body", true],
+    ["DROP VIEW v CASCADE", true],
+    ["DROP VIEW v", false],
+    ["DROP MATERIALIZED VIEW mv", false],
+    ["DROP INDEX ix", false],
+    ["ALTER TABLE notes DROP CONSTRAINT c", false],
+    ["ALTER TABLE notes ALTER COLUMN body DROP DEFAULT", false],
+    ["ALTER TABLE notes ALTER COLUMN body DROP NOT NULL", false],
+    ["INSERT INTO notes (body) VALUES ('DROP TABLE notes')", false],
+    [String.raw`INSERT INTO notes (body) VALUES ('x\'; DROP TABLE notes; --')`, true],
+  ])("flags data-losing schema changes: %s", (sql, destructive) => {
+    expect(containsDestructiveSchemaChange(sql)).toBe(destructive);
+  });
+
+  it.each([
+    "DROP TABLE _forja_users",
+    'DROP TABLE notes, "public"."_forja_sessions"',
+    "DROP VIEW pg_catalog.pg_tables",
+    "DROP TABLE notes; DROP SCHEMA public CASCADE",
+    "DROP FUNCTION f()",
+    "DROP INDEX CONCURRENTLY ix",
+    "DROP TABLE notes; SELECT 1",
+    "CREATE VIEW _forja_users_v AS SELECT * FROM notes",
+    'CREATE OR REPLACE VIEW "public"."_forja_users" AS SELECT 1',
+    "CREATE MATERIALIZED VIEW pg_stats_copy AS SELECT 1",
+    "REFRESH MATERIALIZED VIEW _forja_cache",
+    "ALTER TABLE notes RENAME COLUMN body TO text",
+    "ALTER TABLE notes DROP COLUMN body, OWNER TO postgres",
+    "ALTER TABLE _forja_users DROP COLUMN email",
     "INSERT INTO notes (body) VALUES ('x') ON CONFLICT (id) DO UPDATE SET body = excluded.body",
     "WITH rows AS (SELECT 1) DELETE FROM notes",
     "DO $$ BEGIN DROP TABLE notes; END $$",
     "INSERT INTO notes (body) VALUES ('x'); /* comment */ TRUNCATE notes",
-    String.raw`INSERT INTO notes (body) VALUES ('x\'; DROP TABLE notes; --')`,
+    String.raw`INSERT INTO notes (body) VALUES ('x\'; DROP TABLE _forja_users; --')`,
     "INSERT INTO _forja_users (email) VALUES ('attacker@example.com')",
     "ALTER TABLE IF EXISTS _forja_users ADD COLUMN owner_id text",
     'CREATE TABLE "public"."_forja_users" (email text)',
@@ -108,7 +161,7 @@ describe("agent SQL policy", () => {
     expect(() => assertSafeAgentSql("UPDATE notes SET body = 'edited'")).toThrow(/SQL del agente rechazado/);
     expect(() => assertSafePreviewSql("TRUNCATE notes, _forja_users")).toThrow(/SQL del agente rechazado/);
     expect(() => assertSafePreviewSql("DELETE FROM _forja_users")).toThrow(/SQL del agente rechazado/);
-    expect(() => assertSafePreviewSql("DROP TABLE notes")).toThrow(/SQL del agente rechazado/);
+    expect(() => assertSafePreviewSql("DROP TABLE _forja_users")).toThrow(/SQL del agente rechazado/);
   });
 
   it("detects schema changes while ignoring SQL-looking text and comments", () => {

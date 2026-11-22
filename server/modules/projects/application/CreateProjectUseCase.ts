@@ -3,7 +3,7 @@ import { Checkpoint } from "../domain/Checkpoint.js";
 import { CreateCheckpointUseCase } from "./CreateCheckpointUseCase.js";
 import type { ProjectSnapshot } from "../domain/ProjectSnapshot.js";
 import type { ProjectsStore, ProjectServices } from "../ports/projects.js";
-import { parseStarterTemplate, type StarterTemplate } from "../domain/StarterTemplate.js";
+import { DEFAULT_STARTER_TEMPLATE, parseStarterTemplate, type StarterTemplate } from "../domain/StarterTemplate.js";
 
 export interface CreateProjectInput {
   id?: string;
@@ -24,7 +24,7 @@ export class CreateProjectUseCase {
   ) {}
 
   async execute(input: CreateProjectInput): Promise<ProjectSnapshot> {
-    const template = parseStarterTemplate(input.template);
+    const template = parseStarterTemplate(input.template) ?? DEFAULT_STARTER_TEMPLATE;
     const project = new Project({
       id: input.id ?? this.services.projectId(),
       ownerId: input.ownerId,

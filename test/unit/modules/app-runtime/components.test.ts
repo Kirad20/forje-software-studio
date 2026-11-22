@@ -7,7 +7,7 @@ import { quickScan } from "../../../../server/modules/app-runtime/domain/securit
 import { projectMap } from "../../../../server/modules/builder/infrastructure/projectIndex.js";
 import { roleCanWrite, validatePlan } from "../../../../server/modules/builder/domain/Plan.js";
 import { standardsScan } from "../../../../server/modules/builder/domain/Standards.js";
-import { parseLayout } from "../../../../contracts/projectLayout.js";
+import { layoutProblems, parseLayout } from "../../../../contracts/projectLayout.js";
 import { starterFiles } from "../../../../server/modules/projects/index.js";
 
 const manifest = {
@@ -164,5 +164,17 @@ describe("forja.json components at run time", () => {
     expect(Object.keys(files).filter((f) => f.startsWith("migrations/"))).toEqual([]);
     expect(parseLayout(files["forja.json"]!).components.filter((c) => c.database).map((c) => c.database)).toEqual(["orders", "billing"]);
     expect(Object.keys(readProjectServices(files)!.services)).toEqual(["orders"]);
+  });
+  it("ships the standard starter (web at /, api with its own schema, shared library) with no root app files", async () => {
+    const files = starterFiles("Demo", "standard");
+    expect(await checkProject(files)).toEqual([]);
+    expect(layoutProblems(files)).toEqual([]);
+    expect(standardsScan(files).filter((p) => /^(apps|services|packages)\//.test(p.file ?? ""))).toEqual([]);
+    expect(Object.keys(files).filter((f) => !/^(apps|services|packages)\//.test(f))).toEqual(["forja.json"]);
+    expect(pageRoutes(files).map((p) => p.pattern)).toEqual(["/"]);
+    expect(endpointRoutes(files).map((e) => `${e.method} ${e.route}`)).toEqual(["GET v1/health"]);
+    const layout = parseLayout(files["forja.json"]!);
+    expect(layout.components.map((c) => `${c.name}:${c.kind}`)).toEqual(["app:app", "web:web", "api:api", "shared:library"]);
+    expect(layout.components.find((c) => c.name === "api")?.database).toBe("api");
   });
 });

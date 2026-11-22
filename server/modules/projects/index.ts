@@ -8,16 +8,17 @@ import { Project as ProjectEntity } from "./domain/Project.js";
 import type { Author, IProjectFileRepository } from "./ports/repositories.js";
 import type { ProjectsStore, ProjectServices } from "./ports/projects.js";
 import type { StarterTemplate } from "./domain/StarterTemplate.js";
-import { starterFiles as monolithStarterFiles, parseStarterTemplate } from "./domain/StarterTemplate.js";
+import { starterFiles as monolithStarterFiles, parseStarterTemplate, standardStarterFiles } from "./domain/StarterTemplate.js";
 import { ordersInvoicesFiles } from "./infrastructure/OrdersInvoicesStarter.js";
 import { componentsStarterFiles } from "./infrastructure/ComponentsStarter.js";
 
 export * from "./domain/ProjectPath.js";
 export * from "./domain/Checkpoint.js";
-export { parseStarterTemplate } from "./domain/StarterTemplate.js";
+export { parseStarterTemplate, DEFAULT_STARTER_TEMPLATE, STANDARD_SCAFFOLD_FILES } from "./domain/StarterTemplate.js";
 export type { StarterTemplate } from "./domain/StarterTemplate.js";
 export function starterFiles(name: string, template?: StarterTemplate): Record<string, string> {
   parseStarterTemplate(template);
+  if (template === "standard") return standardStarterFiles(name);
   const files = monolithStarterFiles(name);
   if (template === "components") return { ...files, ...componentsStarterFiles() };
   return template === "orders-invoices" ? { ...files, ...ordersInvoicesFiles() } : files;

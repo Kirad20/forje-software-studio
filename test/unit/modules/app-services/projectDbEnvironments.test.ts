@@ -379,3 +379,18 @@ it("caps open databases by closing the least recently used idle one, never a bus
     config.projectDbs.maxOpen = previous;
   }
 }, 180_000);
+
+it("applies migrations that create views and drop app objects, and lets app code refresh materialized views", async () => {
+  const id = "views-and-drops";
+  await applyProjectMigrations(id, {
+    "migrations/001_notes.sql": "create table notes (id int primary key, body text, legacy text); create table old_notes (id int);",
+    "migrations/002_views.sql": "create view note_bodies as select id, body from notes; create materialized view note_count as select count(*)::int as n from notes;",
+    "migrations/003_drops.sql": "drop table old_notes; alter table notes drop column legacy; drop view note_bodies;",
+  }, "published");
+  const db = projectDb(id, "published");
+  await db.query("insert into notes (id, body) values (1, 'a')");
+  await db.query("refresh materialized view note_count");
+  await expect(db.one("select n from note_count")).resolves.toEqual({ n: 1 });
+  await expect(db.query("select * from old_notes")).rejects.toThrow();
+  await expect(db.query("select legacy from notes")).rejects.toThrow();
+});

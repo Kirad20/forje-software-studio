@@ -166,6 +166,23 @@ function script(body) {
   return { role: "unknown", res: reply("…") };
 }
 
+/**
+ * Projects created with the standard starter keep the frontend in apps/web/: the scripted
+ * answers use native paths, so move their UI files there when the request shows that layout.
+ */
+function webRoot(body, out) {
+  const seen = JSON.stringify(body.messages ?? []);
+  if (!seen.includes("apps/web/")) return;
+  for (const c of out.choices?.[0]?.message?.tool_calls ?? []) {
+    if (!["write_file", "edit_file"].includes(c.function.name)) continue;
+    const args = JSON.parse(c.function.arguments);
+    if (typeof args.path === "string" && /^(?:pages\/|components\/|base\.css$)/.test(args.path)) {
+      args.path = `apps/web/${args.path}`;
+      c.function.arguments = JSON.stringify(args);
+    }
+  }
+}
+
 export function startFakeLlm() {
   const server = http.createServer((req, res) => {
     let raw = "";
@@ -182,6 +199,7 @@ export function startFakeLlm() {
         return res.end(JSON.stringify({ error: { message: "overloaded" } }));
       }
       const { role, res: out } = script(body);
+      webRoot(body, out);
       const first = body.messages?.find((m) => m.role === "user");
       const text = typeof first?.content === "string" ? first.content : (first?.content ?? []).map((p) => p.text ?? "").join("\n");
       // What the agent was handed up front, so tests can check the context it got.
