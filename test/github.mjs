@@ -88,7 +88,7 @@ try {
   await req("POST", "/api/auth/request", { body: { email: "owner@example.com" } });
   const code = [...serverLog.matchAll(/owner@example.com: (\d{6})/g)].pop()[1];
   await req("POST", "/api/auth/verify", { body: { email: "owner@example.com", code } });
-  const project = (await req("POST", "/api/projects", { body: { prompt: "Notas" } })).json.project;
+  const project = (await req("POST", "/api/projects", { body: { prompt: "Notas", template: "monolith" } })).json.project;
   const pid = project.id;
   const full = `${gh.login}/notas-forja`;
 
@@ -175,7 +175,7 @@ try {
   ok((await req("GET", `/api/projects/${pid}/files`)).json.files.some((f) => f.path === "helpers/web.ts"), "webhook push lands in the project");
 
   // --- Link an existing (empty) repository ---
-  const p2 = (await req("POST", "/api/projects", { body: { prompt: "Otra" } })).json.project;
+  const p2 = (await req("POST", "/api/projects", { body: { prompt: "Otra", template: "monolith" } })).json.project;
   gh.createEmptyRepo("vacio");
   const linked = await req("POST", `/api/projects/${p2.id}/github`, { body: { mode: "link", repo: `https://github.com/${gh.login}/vacio` } });
   ok(linked.status === 200 && Object.keys(gh.filesAt(`${gh.login}/vacio`, "main")).length >= 4, "linking an empty repo initializes it and pushes the project", linked.text);

@@ -9,6 +9,9 @@ export function parseStarterTemplate(value: unknown): StarterTemplate | undefine
   throw new Error("Template no válido: usa standard, monolith, orders-invoices o components");
 }
 
+/** Files of the standard starter that are scaffolding, not app content: a project holding only these and the welcome page is still empty. */
+export const STANDARD_SCAFFOLD_FILES: ReadonlySet<string> = new Set(["forja.json", "services/api/endpoints/health_GET.ts", "packages/shared/index.ts"]);
+
 /**
  * The standard structure every new project starts with: a forja.json with a web frontend at
  * "/" (apps/web), an API with its own database schema (services/api, served at /_api/v1/…)

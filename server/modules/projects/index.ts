@@ -14,7 +14,7 @@ import { componentsStarterFiles } from "./infrastructure/ComponentsStarter.js";
 
 export * from "./domain/ProjectPath.js";
 export * from "./domain/Checkpoint.js";
-export { parseStarterTemplate, DEFAULT_STARTER_TEMPLATE } from "./domain/StarterTemplate.js";
+export { parseStarterTemplate, DEFAULT_STARTER_TEMPLATE, STANDARD_SCAFFOLD_FILES } from "./domain/StarterTemplate.js";
 export type { StarterTemplate } from "./domain/StarterTemplate.js";
 export function starterFiles(name: string, template?: StarterTemplate): Record<string, string> {
   parseStarterTemplate(template);
