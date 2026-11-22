@@ -393,7 +393,7 @@ function assertRuntimeSql(sql: string) {
     } else { statement += c; i++; }
   }
   if (statement.trim()) statements.push(statement);
-  const allowed = /^(?:select|with|insert|update|delete|truncate|values|show|explain)\b/i;
+  const allowed = /^(?:select|with|insert|update|delete|truncate|values|show|explain|refresh\s+materialized\s+view)\b/i;
   if (!statements.length || statements.some((part) => !allowed.test(part.trimStart()))) {
     throw new Error("ctx.db solo permite consultas y operaciones de datos; cambia el esquema con execute_sql y una migración.");
   }
