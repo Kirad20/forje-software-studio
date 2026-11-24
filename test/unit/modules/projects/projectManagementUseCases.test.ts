@@ -14,6 +14,9 @@ describe("Projects Management Use Cases (TDD)", () => {
       writeFile: vi.fn(),
       deleteFile: vi.fn(),
       renameFile: vi.fn(),
+      writeFileIf: vi.fn().mockResolvedValue(true),
+      deleteFileIf: vi.fn().mockResolvedValue(true),
+      renameFileIf: vi.fn().mockResolvedValue(true),
       logChange: vi.fn().mockResolvedValue(1),
       touch: vi.fn(),
     };

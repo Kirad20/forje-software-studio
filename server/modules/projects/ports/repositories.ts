@@ -1,6 +1,7 @@
 import type { Project, Visibility } from "../domain/Project.js";
 
 import type { Author } from "../domain/Author.js";
+import type { FileExpectation } from "../../../../contracts/fileEtag.js";
 export type { Author } from "../domain/Author.js";
 
 export interface LogChangeInput {
@@ -29,6 +30,11 @@ export interface IProjectFileRepository {
   writeFile(projectId: string, path: string, content: string): Promise<void>;
   deleteFile(projectId: string, path: string): Promise<void>;
   renameFile(projectId: string, from: string, to: string): Promise<void>;
+  /** Atomic compare-and-set by content sha (see FileEtag): false when the file no longer matches `expected`. */
+  writeFileIf(projectId: string, path: string, content: string, expected: FileExpectation): Promise<boolean>;
+  deleteFileIf(projectId: string, path: string, expected: string): Promise<boolean>;
+  /** Moves `from` to `to` only if `from` still has `expected` and `to` does not exist. */
+  renameFileIf(projectId: string, from: string, to: string, expected: string): Promise<boolean>;
   logChange(projectId: string, change: LogChangeInput): Promise<number>;
   touch(projectId: string, paths: string[]): Promise<void>;
 }

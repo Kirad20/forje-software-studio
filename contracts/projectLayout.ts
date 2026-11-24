@@ -213,7 +213,8 @@ export function parseLayout(source: string | undefined): ProjectLayout {
     }
     if (kind === "api") {
       const route = entry.route === undefined ? name : entry.route;
-      if (typeof route !== "string" || !ROUTE.test(route)) fail(`${name}.route no válido: "${String(route)}" (por ejemplo "orders" o "v1/orders")`);
+      // "" serves the endpoints at the root of /_api/ (like the implicit app): migrating a legacy project keeps every URL.
+      if (typeof route !== "string" || (route !== "" && !ROUTE.test(route))) fail(`${name}.route no válido: "${String(route)}" (por ejemplo "orders" o "v1/orders"; "" para servir en la raíz de /_api/)`);
       if (routes.has(route)) fail(`${name}.route "${route}" ya lo usa ${routes.get(route)}`);
       routes.set(route, name);
       component.route = route;
