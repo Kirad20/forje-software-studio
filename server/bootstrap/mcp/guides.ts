@@ -122,6 +122,8 @@ Un proyecto legacy (sin forja.json, con todo en pages/, components/, helpers/, e
 4. Verifica con check_build, call_endpoint en cada ruta movida y get_problems antes de extraer el siguiente.
 5. Base de datos por servicio, como paso aparte: extract_component con database: true y move_tables con las tablas que solo usa ese contexto; genera una migración que las mueve a su esquema (en vista previa al momento, en producción al publicar). Las compartidas tienen que dejar de usarse desde fuera primero.
 
+Alternativa para pasar TODO el monolito a la estructura estándar de una vez, sin partirlo en servicios: migrate_to_standard (sin apply solo muestra el plan; con apply: true mueve pages/ y components/ a apps/web, endpoints/, jobs/ y los helpers de servidor a services/api y lo que importan las páginas a packages/shared). Las URLs /_api, los nombres de las tareas y los datos no cambian (api con route "" y sin base de datos propia); deja un checkpoint antes. Pasar a /_api/v1 o darle un esquema propio a la api son pasos aparte.
+
 Las páginas siguen en la app. Pasar un frontend a un componente web cambia sus URLs (su mount): hazlo solo si el dueño lo pide. Lee la guía "components" para el formato de forja.json.`,
   },
   {

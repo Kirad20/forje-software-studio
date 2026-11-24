@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { WriteFileUseCase } from "../../../../server/modules/projects/application/WriteFileUseCase.js";
 import { DeleteFileUseCase } from "../../../../server/modules/projects/application/DeleteFileUseCase.js";
+import { RenameFileUseCase } from "../../../../server/modules/projects/application/RenameFileUseCase.js";
+import { contentEtag } from "../../../../contracts/fileEtag.js";
 import type { IProjectFileRepository } from "../../../../server/modules/projects/ports/repositories.js";
 
 describe("Projects File Use Cases (TDD)", () => {
@@ -13,9 +15,66 @@ describe("Projects File Use Cases (TDD)", () => {
       writeFile: vi.fn(),
       deleteFile: vi.fn(),
       renameFile: vi.fn(),
+      writeFileIf: vi.fn().mockResolvedValue(true),
+      deleteFileIf: vi.fn().mockResolvedValue(true),
+      renameFileIf: vi.fn().mockResolvedValue(true),
       logChange: vi.fn().mockResolvedValue(1),
       touch: vi.fn(),
     };
+  });
+
+  describe("per-file concurrency (expected sha)", () => {
+    const old = "export const a = 1;";
+    const seen = contentEtag(old);
+
+    it("writes through compare-and-set when the caller still sees the current content", async () => {
+      vi.spyOn(fileRepo, "readFile").mockResolvedValue(old);
+      await new WriteFileUseCase(fileRepo).execute("p1", "helpers/a.ts", "export const a = 2;", "mcp", undefined, seen);
+      expect(fileRepo.writeFileIf).toHaveBeenCalledWith("p1", "helpers/a.ts", "export const a = 2;", seen);
+      expect(fileRepo.writeFile).not.toHaveBeenCalled();
+      expect(fileRepo.logChange).toHaveBeenCalledWith("p1", expect.objectContaining({ kind: "edit", before: { "helpers/a.ts": old } }));
+    });
+
+    it("refuses a stale sha without writing or logging, and reports the current one", async () => {
+      vi.spyOn(fileRepo, "readFile").mockResolvedValue("someone else changed it");
+      await expect(new WriteFileUseCase(fileRepo).execute("p1", "helpers/a.ts", "x", "mcp", undefined, seen)).rejects.toMatchObject({ code: "FILE_CONFLICT" });
+      expect(fileRepo.writeFileIf).not.toHaveBeenCalled();
+      expect(fileRepo.logChange).not.toHaveBeenCalled();
+    });
+
+    it("refuses when the file changes between the check and the atomic write", async () => {
+      vi.spyOn(fileRepo, "readFile").mockResolvedValue(old);
+      vi.spyOn(fileRepo, "writeFileIf").mockResolvedValue(false);
+      await expect(new WriteFileUseCase(fileRepo).execute("p1", "helpers/a.ts", "x", "mcp", undefined, seen)).rejects.toThrow("FILE_CONFLICT");
+      expect(fileRepo.logChange).not.toHaveBeenCalled();
+    });
+
+    it("creates only if absent when expected is null", async () => {
+      vi.spyOn(fileRepo, "readFile").mockResolvedValue(undefined);
+      await new WriteFileUseCase(fileRepo).execute("p1", "helpers/new.ts", "export {}", "mcp", undefined, null);
+      expect(fileRepo.writeFileIf).toHaveBeenCalledWith("p1", "helpers/new.ts", "export {}", null);
+      vi.spyOn(fileRepo, "readFile").mockResolvedValue("already there");
+      await expect(new WriteFileUseCase(fileRepo).execute("p1", "helpers/new.ts", "export {}", "mcp", undefined, null)).rejects.toThrow("FILE_CONFLICT");
+    });
+
+    it("deletes and renames only against the sha the caller saw", async () => {
+      vi.spyOn(fileRepo, "readFile").mockResolvedValue(old);
+      await new DeleteFileUseCase(fileRepo).execute("p1", "helpers/a.ts", "mcp", seen);
+      expect(fileRepo.deleteFileIf).toHaveBeenCalledWith("p1", "helpers/a.ts", seen);
+      await expect(new DeleteFileUseCase(fileRepo).execute("p1", "helpers/a.ts", "mcp", "0".repeat(64))).rejects.toThrow("FILE_CONFLICT");
+
+      vi.spyOn(fileRepo, "readFile").mockImplementation(async (_p, path) => (path === "helpers/a.ts" ? old : undefined));
+      await new RenameFileUseCase(fileRepo).execute("p1", "helpers/a.ts", "helpers/b.ts", "mcp", seen);
+      expect(fileRepo.renameFileIf).toHaveBeenCalledWith("p1", "helpers/a.ts", "helpers/b.ts", seen);
+      await expect(new RenameFileUseCase(fileRepo).execute("p1", "helpers/a.ts", "helpers/b.ts", "mcp", "0".repeat(64))).rejects.toThrow("FILE_CONFLICT");
+    });
+
+    it("keeps last-writer-wins when no sha is given", async () => {
+      vi.spyOn(fileRepo, "readFile").mockResolvedValue(old);
+      await new WriteFileUseCase(fileRepo).execute("p1", "helpers/a.ts", "export const a = 3;", "owner");
+      expect(fileRepo.writeFile).toHaveBeenCalled();
+      expect(fileRepo.writeFileIf).not.toHaveBeenCalled();
+    });
   });
 
   describe("WriteFileUseCase", () => {

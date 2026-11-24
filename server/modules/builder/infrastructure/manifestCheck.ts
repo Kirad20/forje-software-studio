@@ -34,7 +34,7 @@ export function checkManifests(current: FileMap, proposed: { components?: string
   for (const c of layout.components) {
     const own = <T extends { component?: string }>(list: T[]) => list.filter((x) => (x.component ?? "app") === c.name);
     const where = c.kind === "app" ? "raíz" : c.root;
-    const head = `\n## ${c.kind === "app" ? "app" : `${c.kind} "${c.name}"`} en ${where}${c.kind === "web" ? ` · mount ${c.mount}` : ""}${c.kind === "api" ? ` · /_api/${c.route}/…` : ""}${c.database ? ` · esquema ${c.database}` : ""}${describe(c)}`;
+    const head = `\n## ${c.kind === "app" ? "app" : `${c.kind} "${c.name}"`} en ${where}${c.kind === "web" ? ` · mount ${c.mount}` : ""}${c.kind === "api" ? ` · /_api/${c.route ? `${c.route}/` : ""}…` : ""}${c.database ? ` · esquema ${c.database}` : ""}${describe(c)}`;
     const p = own(pages), e = own(endpoints), j = own(jobs);
     const m = migrations.filter((x) => (c.database ? x.schema === c.database : c.kind === "app" && !x.schema));
     if (c.kind === "app" && !p.length && !e.length && !j.length && !m.length) continue;

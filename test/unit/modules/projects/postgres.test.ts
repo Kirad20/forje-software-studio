@@ -10,6 +10,7 @@ import { ProjectsApplication } from "../../../../server/modules/projects/applica
 import { WriteFileUseCase } from "../../../../server/modules/projects/application/WriteFileUseCase.js";
 import { RenameFileUseCase } from "../../../../server/modules/projects/application/RenameFileUseCase.js";
 import { DeleteFileUseCase } from "../../../../server/modules/projects/application/DeleteFileUseCase.js";
+import { contentEtag } from "../../../../contracts/fileEtag.js";
 
 const fresh = await freshDatabase();
 const pool = new pg.Pool({ connectionString: fresh.url });
@@ -111,6 +112,40 @@ describe("Projects Postgres adapter regression", () => {
     expect(await store.listFiles(id)).toMatchObject([{ path: "pages/b.tsx", size: 2 }]);
     await remove.execute(id, "pages/b.tsx");
     expect(await store.readFile(id, "pages/b.tsx")).toBeUndefined();
+  });
+
+  it("applies per-file compare-and-set atomically: disjoint files never conflict, one of two racing writers loses", async () => {
+    const { id } = await app.createProject("owner", "Agents", "", { "pages/a.tsx": "A", "pages/b.tsx": "B" });
+    const shaA = contentEtag("A");
+    const shaB = contentEtag("B");
+    // Two agents, two files, same stale project version: both succeed.
+    await Promise.all([
+      write.execute(id, "pages/a.tsx", "A-agent1", "mcp", "agent1", shaA),
+      write.execute(id, "pages/b.tsx", "B-agent2", "mcp", "agent2", shaB),
+    ]);
+    expect(await store.readAllFiles(id)).toEqual({ "pages/a.tsx": "A-agent1", "pages/b.tsx": "B-agent2" });
+    // Same file, same sha, at the same time: exactly one wins and nothing is lost silently.
+    const results = await Promise.allSettled([
+      write.execute(id, "pages/a.tsx", "A-x", "mcp", "x", contentEtag("A-agent1")),
+      write.execute(id, "pages/a.tsx", "A-y", "mcp", "y", contentEtag("A-agent1")),
+    ]);
+    expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+    const lost = results.find((r) => r.status === "rejected") as PromiseRejectedResult;
+    expect(lost.reason).toMatchObject({ code: "FILE_CONFLICT" });
+    expect(["A-x", "A-y"]).toContain(await store.readFile(id, "pages/a.tsx"));
+    // The SQL hash equals the domain hash (accents, emoji, base64 payloads).
+    for (const text of ["", "ñandú ✓ 🚀", "base64:AAEC"]) {
+      await store.writeFile(id, "static/t.txt", text);
+      expect(await store.deleteFileIf(id, "static/t.txt", contentEtag(text))).toBe(true);
+    }
+    // Create-only, guarded delete and guarded rename.
+    expect(await store.writeFileIf(id, "pages/c.tsx", "C", null)).toBe(true);
+    expect(await store.writeFileIf(id, "pages/c.tsx", "C2", null)).toBe(false);
+    expect(await store.renameFileIf(id, "pages/c.tsx", "pages/b.tsx", contentEtag("C"))).toBe(false);
+    expect(await store.renameFileIf(id, "pages/c.tsx", "pages/d.tsx", contentEtag("stale"))).toBe(false);
+    expect(await store.renameFileIf(id, "pages/c.tsx", "pages/d.tsx", contentEtag("C"))).toBe(true);
+    expect(await store.deleteFileIf(id, "pages/d.tsx", contentEtag("stale"))).toBe(false);
+    expect(await store.readFile(id, "pages/d.tsx")).toBe("C");
   });
 
   it("rolls back all restored paths if a later replacement fails", async () => {

@@ -125,7 +125,7 @@ export function projectMap(files: FileMap, schema: Record<string, { name: string
     const { layout, error } = safeLayout(files);
     section("Componentes (forja.json)", error ? [error] : layout.components.map((c) => {
       const where = c.kind === "app" ? "raíz (pages/, endpoints/, jobs/, helpers/)" : c.root;
-      const exposed = c.kind === "web" || c.kind === "app" ? ` · páginas en ${c.mount}` : c.kind === "api" ? ` · /_api/${c.route}/…` : "";
+      const exposed = c.kind === "web" || c.kind === "app" ? ` · páginas en ${c.mount}` : c.kind === "api" ? ` · /_api/${c.route ? `${c.route}/` : ""}…` : "";
       const pool = c.replicas || c.maxConcurrency ? ` · proceso propio (replicas ${c.replicas ?? 1}, maxConcurrency ${c.maxConcurrency ?? (c.kind === "worker" ? 1 : 8)})` : "";
       return `${c.name} · ${c.kind} · ${where}${exposed}${pool}`;
     }));

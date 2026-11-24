@@ -1,0 +1,10 @@
+{
+  "7": "projects/application/usecases.ts",
+  "11": "infrastructure/playground.ts",
+  "16": "ProjectDb",
+  "25": "server/index.ts",
+  "27": "modules/builder/index.ts",
+  "32": "application/problems.ts",
+  "109": "accountLifecycle.ts",
+  "121": "PostgresProjectFileRepository"
+}

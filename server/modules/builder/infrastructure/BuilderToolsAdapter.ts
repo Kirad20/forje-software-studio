@@ -24,12 +24,12 @@ import { AUTH_MANIFEST, BUILTIN_OAUTH_PROVIDERS, isBuiltinOAuthProvider, oauthCa
 import { findSymbol, projectMap, relatedFiles } from "./projectIndex.js";
 import { rewriteImports } from "./rename.js";
 import { isMigrationPath, isSafeProjectPath, ownsFile } from "../domain/FinishGatePolicy.js";
-import { COMPONENTS_MANIFEST, componentOf, dataScopeOf, isComponentMigrationPath, isLayoutMigrationPath, isNativeProjectPath, layoutOf } from "../../../../contracts/projectLayout.js";
-import { extractComponent, formatMigrationPlan, planComponentMigration } from "./componentMigration.js";
+import { COMPONENTS_MANIFEST, componentOf, dataScopeOf, fileKind, isComponentMigrationPath, isLayoutMigrationPath, isNativeProjectPath, layoutOf } from "../../../../contracts/projectLayout.js";
+import { extractComponent, formatMigrationPlan, migrateToStandard, planComponentMigration } from "./componentMigration.js";
 import { checkManifests } from "./manifestCheck.js";
 import { allSkills, findSkill, renderSkill } from "./skills.js";
 import { standardsScan } from "../domain/Standards.js";
-import { normalizeProjectProfile } from "../../projects/index.js";
+import { contentEtag, FileConflictError, normalizeProjectProfile, resolveExpectation, shortEtag } from "../../projects/index.js";
 import { assertSafePreviewSql, containsDataChange, containsDestructiveSchemaChange, containsSchemaChange } from "../domain/AgentSqlPolicy.js";
 import { assertOwnerRequestedForget, assertOwnerSourcedMemory } from "../domain/MemoryProvenance.js";
 import { assertOwnerRequestedAuthSetup, assertOwnerRequestedOAuthSetup, assertOwnerRequestedPublish, assertOwnerRequestedSecret } from "../domain/OwnerActionPolicy.js";
@@ -165,6 +165,13 @@ const out = (properties: Record<string, unknown>, optional: string[] = []) => ({
 });
 const arr = (items: unknown) => ({ type: "array", items });
 const S = { type: "string" };
+/** Per-file concurrency token (sha256 of the content) so several agents can write the same project at once. */
+const expectedShaProp = {
+  expected_sha: {
+    type: "string",
+    description: 'sha del archivo tal como lo leíste (read_files o tu última escritura; sirven los primeros 12 caracteres). Si otro lo cambió desde entonces falla con FILE_CONFLICT sin pisar nada; los demás archivos no cuentan. "absent" = el archivo no debe existir. Opcional.',
+  },
+};
 const N = { type: "number" };
 const I = { type: "integer" };
 const B = { type: "boolean" };
@@ -283,28 +290,30 @@ export const builderTools: BuilderTool[] = [
           {
             path: S,
             exists: B,
+            sha: { type: "string", description: "sha256 del archivo entero: pásalo (o sus 12 primeros caracteres) como expected_sha al escribirlo" },
             content: { type: "string", description: "Texto sin números de línea; solo el rango si se pidió uno" },
             range: out({ from: I, to: I, total: I }),
             unchanged: { type: "boolean", description: "Ya lo leíste en esta tarea y no cambió: no se reenvía" },
           },
-          ["content", "range", "unchanged"],
+          ["sha", "content", "range", "unchanged"],
         ),
       ),
     }),
     async data(i: { paths: string[] }, ctx) {
-      const files: { path: string; exists: boolean; content?: string; range?: { from: number; to: number; total: number }; unchanged?: boolean }[] = [];
+      const files: { path: string; exists: boolean; sha?: string; content?: string; range?: { from: number; to: number; total: number }; unchanged?: boolean }[] = [];
       for (const raw of i.paths.slice(0, 20)) {
         const m = /^(.*?):(\d+)-(\d+)$/.exec(raw);
         const p = m ? m[1]! : raw;
         const c = await builderCoreModules().projects.readFile(ctx.projectId, p);
+        const sha = c === undefined ? undefined : contentEtag(c);
         if (c === undefined) files.push({ path: p, exists: false });
-        else if (ctx.reads && ctx.reads.get(raw) === createHash("sha1").update(c).digest("hex")) files.push({ path: p, exists: true, unchanged: true });
-        else if (!m) files.push({ path: p, exists: true, content: c });
+        else if (ctx.reads && ctx.reads.get(raw) === createHash("sha1").update(c).digest("hex")) files.push({ path: p, exists: true, sha, unchanged: true });
+        else if (!m) files.push({ path: p, exists: true, sha, content: c });
         else {
           const lines = c.split("\n");
           const from = Math.max(1, Number(m[2]));
           const to = Math.min(lines.length, Number(m[3]));
-          files.push({ path: p, exists: true, content: lines.slice(from - 1, to).join("\n"), range: { from, to, total: lines.length } });
+          files.push({ path: p, exists: true, sha, content: lines.slice(from - 1, to).join("\n"), range: { from, to, total: lines.length } });
         }
         if (c !== undefined) ctx.reads?.set(raw, createHash("sha1").update(c).digest("hex"));
       }
@@ -314,6 +323,7 @@ export const builderTools: BuilderTool[] = [
       clip(
         d.files
           .map((f) => {
+            // The text is a stable contract (agents parse it); the sha travels in the typed data and the MCP footer.
             if (!f.exists) return `### ${f.path}\n(no existe)`;
             if (f.unchanged) return `### ${f.path}\n(sin cambios desde que lo leíste antes en esta tarea; sigue en tu contexto)`;
             if (!f.range) return `### ${f.path}\n${numbered(f.content!)}`;
@@ -327,13 +337,15 @@ export const builderTools: BuilderTool[] = [
   {
     name: "write_file",
     description: "Crea o reemplaza un archivo completo, excepto migrations/*.sql, que se generan únicamente con execute_sql. Para cambios en un archivo existente usa edit_file (gasta muchos menos tokens).",
-    input_schema: obj({ path: str("Ruta, p. ej. pages/_index.tsx"), content: str("Contenido completo") }, ["path", "content"]),
-    async run(i: { path: string; content: string }, ctx) {
+    input_schema: obj({ path: str("Ruta, p. ej. pages/_index.tsx"), content: str("Contenido completo"), ...expectedShaProp }, ["path", "content"]),
+    async run(i: { path: string; content: string; expected_sha?: string }, ctx) {
       await assertNotAnyMigrationFile(i.path, ctx);
       assertOwned(ctx, i.path);
-      await builderCoreModules().projects.writeFile(ctx.projectId, i.path, i.content, ctx.author, ctx.actor);
+      const projects = builderCoreModules().projects;
+      const expected = resolveExpectation(i.path, i.expected_sha, i.expected_sha ? await projects.readFile(ctx.projectId, i.path) : undefined);
+      await projects.writeFile(ctx.projectId, i.path, i.content, ctx.author, ctx.actor, expected);
       noteWrite(ctx, i.path);
-      return `Escrito ${i.path} (${i.content.length} B)`;
+      return `Escrito ${i.path} (${i.content.length} B, sha ${shortEtag(contentEtag(i.content))})`;
     },
   },
   {
@@ -351,42 +363,60 @@ export const builderTools: BuilderTool[] = [
           description: "Varios cambios en orden, en lugar de old_text/new_text",
           items: obj({ old_text: str("Texto exacto a reemplazar"), new_text: str("Texto nuevo"), replace_all: { type: "boolean", description: "Reemplazar todas las apariciones" } }, ["old_text", "new_text"]),
         },
+        ...expectedShaProp,
       },
       ["path"],
     ),
-    async run(i: { path: string; old_text?: string; new_text?: string; replace_all?: boolean; edits?: { old_text: string; new_text: string; replace_all?: boolean }[] }, ctx) {
+    async run(i: { path: string; old_text?: string; new_text?: string; replace_all?: boolean; edits?: { old_text: string; new_text: string; replace_all?: boolean }[]; expected_sha?: string }, ctx) {
       await assertNotAnyMigrationFile(i.path, ctx);
       assertOwned(ctx, i.path);
       const edits = i.edits?.length ? i.edits : i.old_text !== undefined && i.new_text !== undefined ? [{ old_text: i.old_text, new_text: i.new_text, replace_all: i.replace_all }] : [];
       if (!edits.length) throw new Error("Hace falta old_text y new_text, o una lista edits.");
-      let c = await builderCoreModules().projects.readFile(ctx.projectId, i.path);
+      const projects = builderCoreModules().projects;
+      // read → edit → write is never blind: the write applies only if the file is still what we read.
+      // With no expected_sha from the caller, a concurrent change just re-applies the same edits on the fresh content.
+      let c = await projects.readFile(ctx.projectId, i.path);
       if (c === undefined) throw new Error(`No existe ${i.path}`);
-      let total = 0;
-      for (const [n, e] of edits.entries()) {
-        const which = edits.length > 1 ? ` (cambio ${n + 1})` : "";
-        const count = e.old_text ? c.split(e.old_text).length - 1 : 0;
-        if (count === 0) throw new Error(`old_text${which} no aparece en el archivo. Lee el archivo y vuelve a intentarlo con el texto exacto. No se guardó nada.`);
-        if (count > 1 && !e.replace_all) throw new Error(`old_text${which} aparece ${count} veces; añade contexto o usa replace_all. No se guardó nada.`);
-        c = e.replace_all ? c.split(e.old_text).join(e.new_text) : c.replace(e.old_text, () => e.new_text);
-        total += e.replace_all ? count : 1;
+      const pinned = resolveExpectation(i.path, i.expected_sha, c);
+      for (let attempt = 1; ; attempt++) {
+        let next = c;
+        let total = 0;
+        for (const [n, e] of edits.entries()) {
+          const which = edits.length > 1 ? ` (cambio ${n + 1})` : "";
+          const count = e.old_text ? next.split(e.old_text).length - 1 : 0;
+          if (count === 0) throw new Error(`old_text${which} no aparece en el archivo. Lee el archivo y vuelve a intentarlo con el texto exacto. No se guardó nada.`);
+          if (count > 1 && !e.replace_all) throw new Error(`old_text${which} aparece ${count} veces; añade contexto o usa replace_all. No se guardó nada.`);
+          next = e.replace_all ? next.split(e.old_text).join(e.new_text) : next.replace(e.old_text, () => e.new_text);
+          total += e.replace_all ? count : 1;
+        }
+        try {
+          await projects.writeFile(ctx.projectId, i.path, next, ctx.author, ctx.actor, pinned ?? contentEtag(c));
+        } catch (e) {
+          if (!(e instanceof FileConflictError) || pinned !== undefined || attempt >= 3) throw e;
+          const fresh = await projects.readFile(ctx.projectId, i.path);
+          if (fresh === undefined) throw e;
+          c = fresh;
+          continue;
+        }
+        noteWrite(ctx, i.path);
+        return `Editado ${i.path} (${total} reemplazo${total > 1 ? "s" : ""}, sha ${shortEtag(contentEtag(next))}${attempt > 1 ? `; otro cambio concurrente en el archivo se conservó (${attempt} intentos)` : ""})`;
       }
-      await builderCoreModules().projects.writeFile(ctx.projectId, i.path, c, ctx.author, ctx.actor);
-      noteWrite(ctx, i.path);
-      return `Editado ${i.path} (${total} reemplazo${total > 1 ? "s" : ""})`;
     },
   },
   {
     name: "delete_file",
     description:
       "Borra un archivo. Antes revisa con related_files o find_symbol quién lo importa y quita esos imports, o la compilación fallará. Queda en el registro de cambios y se puede restaurar.",
-    input_schema: obj({ path: str("Ruta") }, ["path"]),
-    async run(i: { path: string }, ctx) {
+    input_schema: obj({ path: str("Ruta"), ...expectedShaProp }, ["path"]),
+    async run(i: { path: string; expected_sha?: string }, ctx) {
       // Retiring a component's database: its migrations may go once forja.json no longer declares it (its data stays).
       const current = layoutOf(await builderCoreModules().projects.readAllFiles(ctx.projectId));
       const retiring = (isComponentMigrationPath(i.path) || isLayoutMigrationPath(i.path, current)) && !dataScopeOf(i.path, current);
       if (!retiring) await assertNotAnyMigrationFile(i.path, ctx);
       assertOwned(ctx, i.path);
-      await builderCoreModules().projects.deleteFile(ctx.projectId, i.path, ctx.author);
+      const projects = builderCoreModules().projects;
+      const expected = resolveExpectation(i.path, i.expected_sha, i.expected_sha ? await projects.readFile(ctx.projectId, i.path) : undefined);
+      await projects.deleteFile(ctx.projectId, i.path, ctx.author, expected ?? undefined);
       noteWrite(ctx, i.path);
       return `Borrado ${i.path}`;
     },
@@ -395,8 +425,8 @@ export const builderTools: BuilderTool[] = [
     name: "rename_file",
     description:
       "Mueve o renombra un archivo y reescribe los imports que apuntan a él (y los imports relativos del propio archivo si cambia de carpeta). No mueve archivos hermanos como <Nombre>.module.css o <Nombre>.example.tsx: renómbralos con otra llamada si hace falta. Falla si la ruta nueva ya existe. Después corre check_build.",
-    input_schema: obj({ from: str("Ruta actual"), to: str("Ruta nueva") }, ["from", "to"]),
-    async run(i: { from: string; to: string }, ctx) {
+    input_schema: obj({ from: str("Ruta actual"), to: str("Ruta nueva"), ...expectedShaProp }, ["from", "to"]),
+    async run(i: { from: string; to: string; expected_sha?: string }, ctx) {
       // A component's migrations may move with its folder: the history is keyed by schema and file name.
       let moving = false;
       const current = layoutOf(await builderCoreModules().projects.readAllFiles(ctx.projectId));
@@ -417,8 +447,21 @@ export const builderTools: BuilderTool[] = [
       if (i.to in files) throw new Error(`Ya existe ${i.to}. Elige otra ruta o borra ese archivo primero con delete_file.`);
       const rewrites = rewriteImports(files, i.from, i.to);
       for (const p of Object.keys(rewrites)) if (p !== i.to) assertOwned(ctx, p);
-      await builderCoreModules().projects.renameFile(ctx.projectId, i.from, i.to, ctx.author);
-      for (const [p, content] of Object.entries(rewrites)) await builderCoreModules().projects.writeFile(ctx.projectId, p, content, ctx.author, ctx.actor);
+      const projects = builderCoreModules().projects;
+      const pinned = resolveExpectation(i.from, i.expected_sha, files[i.from]);
+      // The move and each import rewrite apply only if the file is still what we read; a file somebody
+      // else changed meanwhile is left alone (and reported) instead of being overwritten.
+      await projects.renameFile(ctx.projectId, i.from, i.to, ctx.author, pinned ?? contentEtag(files[i.from]!));
+      const skipped: string[] = [];
+      for (const [p, content] of Object.entries(rewrites)) {
+        try {
+          await projects.writeFile(ctx.projectId, p, content, ctx.author, ctx.actor, contentEtag(p === i.to ? files[i.from]! : files[p]!));
+        } catch (e) {
+          if (!(e instanceof FileConflictError)) throw e;
+          skipped.push(p);
+          delete rewrites[p];
+        }
+      }
       noteWrite(ctx, i.from, i.to, ...Object.keys(rewrites));
       const stem = i.from.replace(/\.tsx?$/, "");
       const siblings = Object.keys(files).filter((p) => p !== i.from && (p.startsWith(`${stem}.module.`) || p.startsWith(`${stem}.example.`)));
@@ -428,6 +471,7 @@ export const builderTools: BuilderTool[] = [
         updated.length ? `Imports actualizados en: ${updated.join(", ")}` : "Ningún archivo lo importaba.",
         rewrites[i.to] !== undefined ? "También se ajustaron sus imports relativos." : "",
         siblings.length ? `No se movieron: ${siblings.join(", ")}.` : "",
+        skipped.length ? `FILE_CONFLICT: cambiaron mientras se movía y no se actualizaron sus imports: ${skipped.join(", ")}. Léelos de nuevo, corrige el import de ${i.to} y corre check_build.` : "",
       ]
         .filter(Boolean)
         .join("\n");
@@ -718,6 +762,51 @@ export const builderTools: BuilderTool[] = [
       ].filter(Boolean).join("\n");
     },
   },
+  {
+    name: "migrate_to_standard",
+    description:
+      "Migra de una vez un monolito legacy (pages/, components/, endpoints/, jobs/, helpers/ en la raíz) a la estructura estándar de forja.json: apps/web (páginas y componentes), services/api (endpoints, tareas y helpers de servidor) y packages/shared (lo que importan las páginas, como ~/packages/shared). Las URLs /_api, los nombres de las tareas y los datos no cambian (api con route \"\" y sin base de datos propia; migrations/ sigue en la raíz). Reescribe todos los imports, declara el forja.json, compila el resultado antes de escribir y lo deshace todo si algo falla. Por defecto solo muestra el plan: llama con apply: true para ejecutarlo; deja un checkpoint antes para restaurar de un clic. Para separar un servicio por contexto usa extract_component.",
+    input_schema: obj({ apply: { type: "boolean", description: "true para ejecutar la migración; sin él solo se muestra el plan" } }),
+    async run(i: { apply?: boolean }, ctx) {
+      const projects = builderCoreModules().projects;
+      const files = await projects.readAllFiles(ctx.projectId);
+      const m = migrateToStandard(files);
+      const summary = [
+        `${m.moves.length} archivos: ${m.counts.web} → apps/web, ${m.counts.api} → services/api, ${m.counts.shared} → packages/shared; ${m.counts.stays} se quedan en la raíz (migrations/, package.json…).`,
+        `${m.routes.length} rutas /_api sin cambios${m.jobs.length ? `, ${m.jobs.length} tareas con su mismo nombre (legacyJobNames)` : ""}. Imports reescritos en ${Object.keys(m.writes).length - 1} archivos.`,
+        ...m.warnings.map((w) => `Aviso: ${w}`),
+      ];
+      if (!i.apply) return clip(["PLAN (no se ha escrito nada):", ...summary, "", "Para ejecutarlo llama de nuevo con apply: true."].join("\n"));
+      for (const mv of m.moves) assertOwned(ctx, mv.from);
+      const problems = await checkProject(m.files, ctx.projectId);
+      if (problems.length) throw new Error(`No se migró nada: el resultado no compilaría.\n${problems.slice(0, 12).map((p) => formatProblem(p)).join("\n")}`);
+      await projects.createCheckpoint(ctx.projectId, "Antes de migrar a la estructura estándar", ctx.author);
+      const undo: (() => Promise<unknown>)[] = [];
+      const moved = new Set(m.moves.map((mv) => mv.to));
+      try {
+        // forja.json first: the new folders are valid only once it declares their component.
+        await projects.writeFile(ctx.projectId, COMPONENTS_MANIFEST, m.writes[COMPONENTS_MANIFEST]!, ctx.author, ctx.actor);
+        undo.push(() => (files[COMPONENTS_MANIFEST] === undefined ? projects.deleteFile(ctx.projectId, COMPONENTS_MANIFEST, ctx.author) : projects.writeFile(ctx.projectId, COMPONENTS_MANIFEST, files[COMPONENTS_MANIFEST]!, ctx.author, ctx.actor)));
+        for (const mv of m.moves) {
+          await projects.renameFile(ctx.projectId, mv.from, mv.to, ctx.author);
+          undo.push(() => projects.renameFile(ctx.projectId, mv.to, mv.from, ctx.author));
+        }
+        const origin = new Map(m.moves.map((mv) => [mv.to, mv.from]));
+        for (const [p, content] of Object.entries(m.writes)) {
+          if (p === COMPONENTS_MANIFEST) continue;
+          await projects.writeFile(ctx.projectId, p, content, ctx.author, ctx.actor);
+          const original = files[origin.get(p) ?? p];
+          if (original !== undefined) undo.push(() => projects.writeFile(ctx.projectId, p, original, ctx.author, ctx.actor));
+        }
+      } catch (error) {
+        for (const step of undo.reverse()) await step().catch(() => {});
+        throw new Error(`Se deshizo la migración: ${(error as Error).message}`);
+      }
+      if (ctx.owned) ctx.owned.push("apps/web/", "services/api/", "packages/shared/");
+      noteWrite(ctx, COMPONENTS_MANIFEST, ...m.moves.flatMap((mv) => [mv.from, mv.to]), ...Object.keys(m.writes).filter((p) => !moved.has(p)));
+      return ["Migrado a la estructura estándar.", ...summary, "Siguiente: check_build, call_endpoint de alguna ruta y get_problems. Para volver atrás restaura el checkpoint «Antes de migrar a la estructura estándar»."].join("\n");
+    },
+  },
   typed({
     name: "check_standards",
     description: "Comprueba los estándares de Forja en el código actual: colores escritos a mano en vez de tokens de base.css, estilos visuales en línea, enlaces internos con <a href>, llamadas a la API con tipo escrito a mano cuando hay contrato, endpoints que no usan helpers/contract.ts y helpers con lógica de negocio sin pruebas. No bloquea nada, pero la comprobación automática antes de terminar te lo pedirá: úsalo tras una tanda de cambios y arregla lo que encuentre.",
@@ -885,7 +974,9 @@ export const builderTools: BuilderTool[] = [
     }),
     async data(i: { path?: string }, ctx) {
       const files = await builderCoreModules().projects.readAllFiles(ctx.projectId);
-      const specs = Object.keys(files).filter((f) => /^helpers\/.+\.spec\.tsx?$/.test(f) && (!i.path || f === i.path));
+      // Specs live in helpers/ (native) or anywhere inside a component (apps/…, services/…, packages/…).
+      const layout = layoutOf(files);
+      const specs = Object.keys(files).filter((f) => /\.spec\.tsx?$/.test(f) && fileKind(f, layout) === "test" && (!i.path || f === i.path));
       const results: { spec: string; status: "pass" | "fail" | "empty" | "error"; test?: string; ms?: number; error?: string }[] = [];
       let failed = 0;
       for (const spec of specs) {

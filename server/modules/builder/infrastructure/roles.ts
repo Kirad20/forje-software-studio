@@ -154,6 +154,7 @@ export const ROLE_TOOLS: Record<AgentToolRole, string[]> = {
     "rename_file",
     "architecture_migration_plan",
     "extract_component",
+    "migrate_to_standard",
     "check_manifest",
     "add_dependency",
     "remove_dependency",
@@ -173,7 +174,7 @@ export const ROLE_TOOLS: Record<AgentToolRole, string[]> = {
   ui: ["load_skill", "project_map", "read_files", "find_symbol", "related_files", "search_code", "write_file", "edit_file", "delete_file", "rename_file", "add_dependency", "remove_dependency", "check_build", "check_standards", "get_problems", "get_logs", "call_endpoint", "browser_test"],
   qa: ["load_skill", "project_map", "read_files", "find_symbol", "related_files", "search_code", "describe_database", "query_database", "check_build", "get_problems", "run_tests", "check_standards", "call_endpoint", "browser_test", "security_scan", "get_logs"],
   fast: [
-    "set_project_profile", "project_map", "find_symbol", "related_files", "read_files", "write_file", "edit_file", "delete_file", "rename_file", "architecture_migration_plan", "extract_component", "check_manifest",
+    "set_project_profile", "project_map", "find_symbol", "related_files", "read_files", "write_file", "edit_file", "delete_file", "rename_file", "architecture_migration_plan", "extract_component", "migrate_to_standard", "check_manifest",
     "add_dependency", "remove_dependency", "search_code", "call_endpoint", "browser_test", "security_scan", "load_skill", "check_standards",
     "remember", "forget", "fetch_url", "describe_database", "query_database", "check_build", "run_tests", "get_logs", "get_problems", "get_preview_url", "publish_app",
   ],

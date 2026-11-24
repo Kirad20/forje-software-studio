@@ -3,6 +3,8 @@ import { ProjectsApplication, isDevFile } from "./application/ProjectsApplicatio
 import { RenameFileUseCase } from "./application/RenameFileUseCase.js";
 import { WriteFileUseCase } from "./application/WriteFileUseCase.js";
 import { ProjectPath } from "./domain/ProjectPath.js";
+import type { FileExpectation } from "../../../contracts/fileEtag.js";
+export { contentEtag, shortEtag, resolveExpectation, FileConflictError, type FileExpectation } from "../../../contracts/fileEtag.js";
 import { NATIVE_LAYOUT, parseLayout } from "../../../contracts/projectLayout.js";
 import { Project as ProjectEntity } from "./domain/Project.js";
 import type { Author, IProjectFileRepository } from "./ports/repositories.js";
@@ -79,12 +81,13 @@ export function createProjectsModule(dependencies: ProjectsModuleDependencies) {
     publishedFiles: (projectId: string) => application.publishedFiles(projectId),
     isSlugTaken: (slug: string, projectId: string) => application.isSlugTaken(slug, projectId),
     unpublish: (projectId: string) => application.unpublish(projectId),
-    writeFile: (projectId: string, path: string, content: string, author?: Author, actor?: string) =>
-      writeFileUseCase.execute(projectId, path, content, author, actor),
-    deleteFile: (projectId: string, path: string, author?: Author) =>
-      deleteFileUseCase.execute(projectId, path, author),
-    renameFile: (projectId: string, oldPath: string, newPath: string, author?: Author) =>
-      renameFileUseCase.execute(projectId, oldPath, newPath, author),
+    /** `expected`: sha of the content the caller read (null = must not exist); omit for last-writer-wins. */
+    writeFile: (projectId: string, path: string, content: string, author?: Author, actor?: string, expected?: FileExpectation) =>
+      writeFileUseCase.execute(projectId, path, content, author, actor, expected),
+    deleteFile: (projectId: string, path: string, author?: Author, expected?: string) =>
+      deleteFileUseCase.execute(projectId, path, author, expected),
+    renameFile: (projectId: string, oldPath: string, newPath: string, author?: Author, expected?: string) =>
+      renameFileUseCase.execute(projectId, oldPath, newPath, author, expected),
     async start() {},
     async stop() {},
   };

@@ -1,6 +1,10 @@
 import { platformDb, type PlatformDb } from "../../../shared/database/index.js";
 import type { IProjectFileRepository, LogChangeInput } from "../ports/repositories.js";
 import type { ProjectEventPort } from "../ports/projects.js";
+import type { FileExpectation } from "../../../../contracts/fileEtag.js";
+
+/** Same value as contentEtag() in the domain. */
+const SHA = `encode(sha256(convert_to(content, 'UTF8')), 'hex')`;
 
 export class PostgresProjectFileRepository implements IProjectFileRepository {
   constructor(
@@ -47,6 +51,38 @@ export class PostgresProjectFileRepository implements IProjectFileRepository {
   async renameFile(projectId: string, from: string, to: string): Promise<void> {
     await this.q(`delete from project_files where project_id = $1 and path = $2`, [projectId, to]);
     await this.q(`update project_files set path = $3, updated_at = now() where project_id = $1 and path = $2`, [projectId, from, to]);
+  }
+
+  // Each compare-and-set is ONE statement, so the check and the write cannot be split by another writer.
+  async writeFileIf(projectId: string, path: string, content: string, expected: FileExpectation): Promise<boolean> {
+    const rows = expected === null
+      ? await this.q(
+          `insert into project_files (project_id, path, content) values ($1, $2, $3)
+           on conflict (project_id, path) do nothing returning 1 as ok`,
+          [projectId, path, content],
+        )
+      : await this.q(
+          `update project_files set content = $3, updated_at = now()
+           where project_id = $1 and path = $2 and ${SHA} = $4 returning 1 as ok`,
+          [projectId, path, content, expected],
+        );
+    return rows.length > 0;
+  }
+
+  async deleteFileIf(projectId: string, path: string, expected: string): Promise<boolean> {
+    return (await this.q(`delete from project_files where project_id = $1 and path = $2 and ${SHA} = $3 returning 1 as ok`, [projectId, path, expected])).length > 0;
+  }
+
+  async renameFileIf(projectId: string, from: string, to: string, expected: string): Promise<boolean> {
+    return (
+      await this.q(
+        `update project_files set path = $3, updated_at = now()
+         where project_id = $1 and path = $2 and ${SHA} = $4
+           and not exists (select 1 from project_files t where t.project_id = $1 and t.path = $3)
+         returning 1 as ok`,
+        [projectId, from, to, expected],
+      )
+    ).length > 0;
   }
 
   async logChange(projectId: string, change: LogChangeInput): Promise<number> {

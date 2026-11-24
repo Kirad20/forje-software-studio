@@ -1,8 +1,8 @@
 import type { FileMap } from "../../projects/index.js";
 import { endpointRoutes, jobFiles, readProjectServices, SERVICES_MANIFEST } from "../../app-runtime/index.js";
-import { COMPONENTS_MANIFEST, componentOf, isPathPattern, layoutOf, matchesPathPattern, parseLayout, type ProjectLayout } from "../../../../contracts/projectLayout.js";
+import { COMPONENTS_MANIFEST, componentOf, isPathPattern, layoutOf, layoutProblems, matchesPathPattern, parseLayout, type ProjectLayout } from "../../../../contracts/projectLayout.js";
 import { buildIndex } from "./projectIndex.js";
-import { rewriteImports } from "./rename.js";
+import { rewriteImports, rewriteImportsBulk } from "./rename.js";
 
 /**
  * Migrating a legacy (native) project to forja.json components, one bounded context at a
@@ -265,6 +265,106 @@ export function extractComponent(files: FileMap, options: ExtractOptions): Extra
   for (const { to } of renames) if (map[to] !== files[renames.find((r) => r.to === to)!.from]) writes[to] = map[to]!;
   if (migration) writes[migration] = map[migration]!;
   return { plan, files: map, renames, writes, deletes, migration };
+}
+
+export interface StandardMigration {
+  moves: { from: string; to: string }[];
+  /** Final project files after the migration. */
+  files: FileMap;
+  /** Files whose final content differs from what the move carries (forja.json, rewritten imports). */
+  writes: FileMap;
+  counts: { web: number; api: number; shared: number; stays: number };
+  routes: string[];
+  jobs: string[];
+  warnings: string[];
+}
+
+/**
+ * The whole legacy monolith to the standard forja.json structure in one step:
+ *
+ *   pages/, components/, static/, base.css      → apps/web/        (web, mount "/")
+ *   endpoints/, jobs/, server helpers/          → services/api/    (api, route "": every /_api URL is kept)
+ *   helpers/ that pages or components import    → packages/shared/ (library, imported as ~/packages/shared/…)
+ *
+ * Public URLs, job names and the database do not change: the api has route "" and no `database`, so its
+ * ctx.db keeps seeing the tables in public and root migrations/ keep running. Moving to /_api/v1/ or to a
+ * schema of its own are separate, later steps. Pure: nothing is written here.
+ */
+export function migrateToStandard(files: FileMap): StandardMigration {
+  if (files[SERVICES_MANIFEST]) throw new Error("El proyecto tiene forja.services.json: esa topología se migra contexto a contexto con extract_component. migrate_to_standard es para un monolito sin servicios declarados.");
+  if (Object.keys(files).some((f) => /^src\/(main|test)\//.test(f) || f === "pom.xml" || /^(build|settings)\.gradle/.test(f))) throw new Error("El proyecto tiene un backend Spring Boot: su estructura no se mueve con migrate_to_standard.");
+  const layout = layoutOf(files);
+  const manifest = files[COMPONENTS_MANIFEST] ? JSON.parse(files[COMPONENTS_MANIFEST]!) : { version: 1, components: {} };
+  const client = clientReachable(files);
+  const dest = new Map<string, string>();
+  for (const f of Object.keys(files)) {
+    if (componentOf(f, layout)?.component.kind !== "app") continue;
+    let to: string | null = null;
+    if (/^(pages|components|static)\//.test(f) || f === "base.css") to = `apps/web/${f}`;
+    else if (/^(endpoints|jobs)\//.test(f)) to = `services/api/${f}`;
+    else if (f.startsWith("helpers/")) {
+      const rel = f.slice("helpers/".length);
+      const shared = client.has(f) || (/\.spec\.tsx?$/.test(f) && client.has(f.replace(/\.spec(\.tsx?)$/, "$1")));
+      to = shared ? `packages/shared/${rel}` : `services/api/${/^(endpoints|jobs|migrations|static)\//.test(rel) ? f : rel}`;
+    }
+    if (to) dest.set(f, to);
+  }
+  if (!dest.size) throw new Error("No hay archivos nativos (pages/, components/, endpoints/, jobs/, helpers/) que migrar: el proyecto ya está en componentes.");
+  const targets = new Set(dest.values());
+  if (targets.size !== dest.size) throw new Error("Dos archivos acabarían en la misma ruta; renombra uno antes de migrar.");
+  const clash = [...targets].find((t) => t in files);
+  if (clash) throw new Error(`Ya existe ${clash}: mueve o borra esa carpeta antes de migrar.`);
+
+  const under = (prefix: string) => [...targets].filter((t) => t.startsWith(prefix));
+  const web = under("apps/web/"), api = under("services/api/"), shared = under("packages/shared/");
+  const jobs = api.filter((t) => /^services\/api\/jobs\/[A-Za-z0-9_-]+\.ts$/.test(t)).map((t) => t.slice("services/api/jobs/".length, -3));
+  const declared = manifest.components ?? {};
+  for (const [name, used] of [["web", web], ["api", api], ["shared", shared]] as const) {
+    if (used.length && declared[name]) throw new Error(`Ya existe un componente "${name}" en forja.json: renómbralo o muévelo antes de migrar.`);
+  }
+  manifest.components = {
+    ...declared,
+    ...(web.length ? { web: { kind: "web", root: "apps/web", mount: "/", description: "Frontend de la app (migrado desde pages/ y components/)" } } : {}),
+    ...(api.length ? { api: { kind: "api", root: "services/api", route: "", ...(jobs.length ? { legacyJobNames: true } : {}), description: "API y tareas de la app (migrado desde endpoints/, jobs/ y helpers/)" } } : {}),
+    ...(shared.length ? { shared: { kind: "library", root: "packages/shared", description: "Tipos y reglas compartidas entre web y api (migrado desde helpers/)" } } : {}),
+  };
+  const source = JSON.stringify(manifest, null, 2) + "\n";
+  const next = parseLayout(source);
+
+  const rewrites = rewriteImportsBulk(files, dest, (p) => componentOf(p, next)?.component.name ?? "app");
+  const map: FileMap = {};
+  for (const [p, c] of Object.entries(files)) if (!dest.has(p)) map[p] = c;
+  for (const [from, to] of dest) map[to] = files[from]!;
+  for (const [p, c] of Object.entries(rewrites)) map[p] = c;
+  map[COMPONENTS_MANIFEST] = source;
+  const problems = layoutProblems(map, next);
+  if (problems.length) throw new Error(`El resultado tendría problemas: ${problems.slice(0, 5).map((p) => `${p.file}: ${p.text}`).join("; ")}`);
+
+  const idx = buildIndex(files);
+  const warnings: string[] = [];
+  for (const [from, to] of dest) {
+    if (to.startsWith("apps/web/")) continue;
+    for (const imported of idx.facts.get(from)?.imports ?? []) {
+      const target = dest.get(imported);
+      if (target?.startsWith("apps/web/")) warnings.push(`${to} importa ${target}: el código del servidor no debería depender del frontend; mueve lo compartido a packages/shared.`);
+    }
+    if (to.startsWith("packages/shared/") && /\badapters?\b/.test(to)) warnings.push(`${to} es un adaptador de servidor que importa el navegador: irá a packages/shared; sácalo del código de las páginas.`);
+  }
+  const hasMigrations = Object.keys(files).some((f) => f.startsWith("migrations/"));
+  if (hasMigrations) warnings.push("migrations/ se queda en la raíz y api no declara database: sus tablas siguen en el esquema public y nada cambia en los datos. Darle un esquema propio es un paso aparte.");
+  const routes = Object.keys(files).filter((f) => dest.get(f)?.startsWith("services/api/endpoints/") && /_(GET|POST)\.ts$/.test(f)).map((f) => { const m = /^endpoints\/(.+)_(GET|POST)\.ts$/.exec(f)!; return `${m[2]} ${m[1]}`; }).sort();
+
+  const writes: FileMap = { [COMPONENTS_MANIFEST]: source };
+  for (const [p, c] of Object.entries(rewrites)) writes[p] = c;
+  return {
+    moves: [...dest].map(([from, to]) => ({ from, to })),
+    files: map,
+    writes,
+    counts: { web: web.length, api: api.length, shared: shared.length, stays: Object.keys(files).length - dest.size },
+    routes,
+    jobs,
+    warnings: [...new Set(warnings)],
+  };
 }
 
 /** One line per context, for the agent. */

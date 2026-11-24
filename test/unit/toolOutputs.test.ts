@@ -79,7 +79,7 @@ describe("typed tools", async () => {
     const q = await tool("query_database").call!({ sql: "select name from items order by id" }, ctx);
     expect(q.data).toEqual({ rowCount: 2, rows: [{ name: "a" }, { name: "b" }] });
     const r = await tool("read_files").call!({ paths: ["pages/_index.tsx:2-2"] }, ctx);
-    expect(r.data).toEqual({ files: [{ path: "pages/_index.tsx", exists: true, content: "  return <h1>Hola</h1>;", range: { from: 2, to: 2, total: 4 } }] });
+    expect(r.data).toEqual({ files: [{ path: "pages/_index.tsx", exists: true, sha: expect.stringMatching(/^[0-9a-f]{64}$/), content: "  return <h1>Hola</h1>;", range: { from: 2, to: 2, total: 4 } }] });
     const s = await tool("search_code").call!({ pattern: "sum" }, ctx);
     expect((s.data as { matches: unknown[] }).matches).toEqual([{ path: "helpers/sum.ts", line: 1, text: "export const sum = (a: number, b: number) => a + b;" }]);
   });

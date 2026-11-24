@@ -93,12 +93,13 @@ function nginxConf(units: ServiceUnit[], webMounts: string[]): string {
     "  }",
     "  location /_forja/ { try_files $uri =404; }",
   ];
-  for (const unit of api.filter((u) => u.component.kind === "api")) {
+  for (const unit of api.filter((u) => u.component.kind === "api" && u.component.route)) {
     lines.push(`  location /_api/${unit.component.route}/ { proxy_pass http://${unit.name}:3000; proxy_set_header Host $host; proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for; }`);
   }
-  const app = api.find((u) => u.component.kind === "app");
+  // The app, or an api with route "" (a migrated legacy project), answers the rest of /_api/.
+  const app = api.find((u) => u.component.kind === "api" && !u.component.route) ?? api.find((u) => u.component.kind === "app");
   lines.push(app
-    ? "  location /_api/ { proxy_pass http://app:3000; proxy_set_header Host $host; proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for; }"
+    ? `  location /_api/ { proxy_pass http://${app.name}:3000; proxy_set_header Host $host; proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for; }`
     : `  location /_api/ { default_type application/json; return 404 '{"error":"No existe ese endpoint"}'; }`);
   for (const mount of webMounts.filter((m) => m !== "/").sort((a, b) => b.length - a.length)) {
     lines.push(`  location = ${mount} { try_files ${mount}/index.html =404; }`);
@@ -178,7 +179,7 @@ docker compose up --build
 |---|---|
 | \`db\` | Postgres 17. Volumen \`db-data\`. |
 | \`migrate\` | Crea los roles, ${schemas.length ? `los esquemas (${schemas.join(", ")}) y ` : ""}la cola de tareas, y aplica las migraciones una sola vez (\`public._forja_migrations\`). |
-${units.map((u) => `| \`${u.name}\` | ${u.endpoints.length ? `${u.endpoints.length} endpoints${u.component.kind === "api" ? ` en \`/_api/${u.component.route}/…\`` : " en `/_api/…`"}` : "Sin endpoints"}${u.jobs.length ? `, tareas: ${u.jobs.map((j) => `\`${j.name}\``).join(", ")}` : ""}${u.component.database ? `. Base de datos: esquema \`${u.component.database}\`, rol propio` : ""}. |`).join("\n")}
+${units.map((u) => `| \`${u.name}\` | ${u.endpoints.length ? `${u.endpoints.length} endpoints${u.component.kind === "api" && u.component.route ? ` en \`/_api/${u.component.route}/…\`` : " en `/_api/…`"}` : "Sin endpoints"}${u.jobs.length ? `, tareas: ${u.jobs.map((j) => `\`${j.name}\``).join(", ")}` : ""}${u.component.database ? `. Base de datos: esquema \`${u.component.database}\`, rol propio` : ""}. |`).join("\n")}
 | \`gateway\` | nginx: ${webs.length ? webs.map((w) => `\`${w.name}\` en \`${w.mount}\``).join(", ") : "sin frontends"}; reparte \`/_api\` entre los servicios. |
 
 ## Diferencias con Forja
